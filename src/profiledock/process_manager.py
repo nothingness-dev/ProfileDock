@@ -23,6 +23,27 @@ def state_path(data_dir: str) -> Path:
 
 
 def _alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        exit_code = wintypes.DWORD()
+        try:
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == 259
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
@@ -137,7 +158,18 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
                 context.pages[-1].close()
             while len(context.pages) < tabs:
                 context.new_page()
-            path.write_text(json.dumps({"pid": os.getpid(), "port": port, "token": token, "tabs": tabs}), encoding="utf-8")
+            path.write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "port": port,
+                        "token": token,
+                        "tabs": tabs,
+                        "page_count": len(context.pages),
+                    }
+                ),
+                encoding="utf-8",
+            )
             closing = False
             while not closing:
                 try:
