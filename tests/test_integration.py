@@ -14,7 +14,7 @@ def test_persistent_context_preserves_state_and_tab_count(tmp_path):
     data_dir = tmp_path / "browser-data"
     try:
         with playwright.sync_playwright() as pw:
-            context = _launch_context(pw, str(data_dir), True)
+            context, _ = _launch_context(pw, str(data_dir), True)
             while len(context.pages) > 3:
                 context.pages[-1].close()
             while len(context.pages) < 3:
@@ -23,7 +23,7 @@ def test_persistent_context_preserves_state_and_tab_count(tmp_path):
             context.add_cookies([{"name": "profiledock", "value": "persisted", "url": "https://example.com", "expires": time.time() + 3600}])
             context.close()
 
-            context = _launch_context(pw, str(data_dir), True)
+            context, _ = _launch_context(pw, str(data_dir), True)
             assert len(context.pages) == 1
             assert context.cookies("https://example.com")[0]["value"] == "persisted"
             context.close()
