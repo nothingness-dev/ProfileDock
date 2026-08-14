@@ -2,14 +2,31 @@
 
 ProfileDock is a lightweight CLI for managing isolated, persistent Chromium profiles. Each profile has its own cookies, sessions, local storage, cache, login state, and Chromium user-data directory.
 
-Current release: `0.1.0`
+Current release: `0.1.1`
 
-## Install
+## Project setup
+
+Python 3.9 or newer is required. The setup script creates an isolated `.venv`, installs the project and test dependencies from `requirements.txt`, installs Playwright Chromium, and runs the test suite.
 
 ```bash
-pip install -e .
-playwright install chromium
+python scripts/setup_project.py
 ```
+
+If Chromium is already installed or its download is unavailable, skip that step:
+
+```bash
+python scripts/setup_project.py --skip-browser
+```
+
+## Manual installation
+
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m playwright install chromium
+```
+
+On macOS or Linux, use `.venv/bin/python` instead.
 
 ## Usage
 
@@ -28,13 +45,12 @@ Profile metadata is stored in `profiles.json`; browser data is stored under `pro
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use Git tags such as `v0.1.0`.
+ProfileDock follows Semantic Versioning. Stable releases use Git tags such as `v0.1.1`.
 
 ## Development
 
 ```bash
-pip install -e ".[test]"
-pytest
+.venv\Scripts\python -m pytest
 ```
 
 The Chromium integration test is skipped when the Playwright Chromium binary is not installed.
