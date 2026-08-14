@@ -183,6 +183,8 @@ profiledock close <id>
 
 Requests graceful browser shutdown and removes the profile's running-state file.
 
+If the entire browser is closed manually or exits unexpectedly, the controller detects the closure, exits, and removes its running state. The profile can then be launched again normally.
+
 ### Delete
 
 ```bash
