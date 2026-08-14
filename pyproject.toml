@@ -24,3 +24,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "browser: end-to-end tests that launch a real Chromium or Chrome process",
+]

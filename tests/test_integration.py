@@ -4,6 +4,8 @@ import pytest
 
 from profiledock.process_manager import _launch_context
 
+pytestmark = pytest.mark.browser
+
 
 def test_persistent_context_preserves_state_and_tab_count(tmp_path):
     playwright = pytest.importorskip("playwright.sync_api")
