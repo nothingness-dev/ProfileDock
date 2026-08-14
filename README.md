@@ -242,6 +242,18 @@ macOS and Linux:
 
 The integration test launches a real persistent browser context, verifies the requested tab count, closes it, relaunches it, and confirms that a persistent cookie remains. It uses Playwright Chromium or installed Google Chrome and skips only when neither is available.
 
+Run only fast unit tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m "not browser"
+```
+
+Run only browser and controller integration tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m browser
+```
+
 ## Updating the project
 
 If the project was cloned with Git:
