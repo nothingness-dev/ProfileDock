@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,18 @@ from pathlib import Path
 
 def run(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
     subprocess.run(command, cwd=cwd, env=environment, check=True)
+
+
+def system_chrome_available() -> bool:
+    candidates = [
+        shutil.which("google-chrome"),
+        shutil.which("google-chrome-stable"),
+        shutil.which("chrome"),
+        Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
+        Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ]
+    return any(candidate and Path(candidate).exists() for candidate in candidates)
 
 
 def main() -> None:
@@ -21,7 +34,8 @@ def main() -> None:
     environment = os.environ.copy()
     environment["TEMP"] = str(temporary_directory)
     environment["TMP"] = str(temporary_directory)
-    run([sys.executable, "-m", "venv", str(virtual_environment)], root, environment)
+    if not virtual_environment.exists():
+        run([sys.executable, "-m", "venv", str(virtual_environment)], root, environment)
 
     if sys.platform == "win32":
         python = virtual_environment / "Scripts" / "python.exe"
@@ -31,7 +45,10 @@ def main() -> None:
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"], root, environment)
     run([str(python), "-m", "pip", "install", "-r", "requirements.txt"], root, environment)
     if not args.skip_browser:
-        run([str(python), "-m", "playwright", "install", "chromium"], root, environment)
+        if system_chrome_available():
+            print("Using installed Google Chrome.")
+        else:
+            run([str(python), "-m", "playwright", "install", "chromium"], root, environment)
     run([str(python), "-m", "pytest", "-p", "no:cacheprovider"], root, environment)
 
 

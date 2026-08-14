@@ -86,7 +86,7 @@ def start_controller(data_dir: str, tabs: int, headless: bool = False) -> Dict[s
         path.unlink(missing_ok=True)
         raise BrowserLaunchError(str(exc)) from exc
     path.unlink(missing_ok=True)
-    raise BrowserLaunchError("Chromium failed to launch; run 'playwright install chromium'")
+    raise BrowserLaunchError("Chromium or Google Chrome failed to launch")
 
 
 def close_controller(data_dir: str, timeout: float = 15) -> None:
@@ -108,6 +108,18 @@ def close_controller(data_dir: str, timeout: float = 15) -> None:
         raise BrowserLaunchError("profile did not close within the timeout")
 
 
+def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Any:
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        return playwright.chromium.launch_persistent_context(data_dir, headless=headless)
+    except PlaywrightError as bundled_error:
+        try:
+            return playwright.chromium.launch_persistent_context(data_dir, channel="chrome", headless=headless)
+        except PlaywrightError:
+            raise bundled_error
+
+
 def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool) -> int:
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
@@ -120,7 +132,7 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
     port = server.getsockname()[1]
     try:
         with sync_playwright() as playwright:
-            context = playwright.chromium.launch_persistent_context(data_dir, headless=headless)
+            context = _launch_context(playwright, data_dir, headless)
             while len(context.pages) > tabs:
                 context.pages[-1].close()
             while len(context.pages) < tabs:
