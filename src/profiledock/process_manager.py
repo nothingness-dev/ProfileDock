@@ -72,6 +72,8 @@ def _read_error(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _alive(pid: int) -> bool:
+    if pid < 1:
+        return False
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
@@ -102,9 +104,12 @@ def _alive(pid: int) -> bool:
 
 def _read_state(path: Path) -> Optional[Dict[str, Any]]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
     except (OSError, json.JSONDecodeError, TypeError):
-        return None
+        pass
+    return None
 
 
 def is_running(data_dir: str) -> bool:
@@ -245,20 +250,51 @@ def start_controller(
 def close_controller(data_dir: str, timeout: float = 15) -> None:
     path = state_path(data_dir)
     if not is_running(data_dir):
+        path.unlink(missing_ok=True)
         raise ProfileRunningError("profile is not running")
     state = _read_state(path)
-    if not state or not state.get("port"):
+    if not state:
+        raise ProfileRunningError("profile is not running")
+    port = int(state.get("port", 0))
+    if not port:
         raise BrowserLaunchError("profile controller is not ready")
+    token = state.get("token", "")
+    close_sent = False
     try:
-        with socket.create_connection(("127.0.0.1", int(state["port"])), timeout=3) as connection:
-            connection.sendall(("close:" + state["token"]).encode("utf-8"))
-    except OSError as exc:
-        raise BrowserLaunchError(f"could not contact profile controller: {exc}") from exc
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
+            connection.sendall(("close:" + token).encode("utf-8"))
+        close_sent = True
+    except OSError:
+        pass
     deadline = time.monotonic() + timeout
     while path.exists() and time.monotonic() < deadline:
         time.sleep(0.1)
     if path.exists():
+        if not _alive(int(state.get("pid", -1))):
+            path.unlink(missing_ok=True)
+            raise ProfileRunningError("profile is not running")
         raise BrowserLaunchError("profile did not close within the timeout")
+    if not close_sent:
+        raise ProfileRunningError("profile is not running")
+
+
+def _context_alive(context: Any) -> bool:
+    try:
+        return bool(context.pages)
+    except Exception:
+        return False
+
+
+def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
+    while _context_alive(context):
+        try:
+            connection, _ = server.accept()
+        except socket.timeout:
+            continue
+        with connection:
+            command = connection.recv(256).decode("utf-8")
+            if command == "close:" + token:
+                return
 
 
 def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any, str]:
@@ -295,34 +331,30 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
         port = server.getsockname()[1]
         with sync_playwright() as playwright:
             context, channel = _launch_context(playwright, data_dir, headless)
-            while len(context.pages) > tabs:
-                context.pages[-1].close()
-            while len(context.pages) < tabs:
-                context.new_page()
-            path.write_text(
-                json.dumps(
-                    {
-                        "pid": os.getpid(),
-                        "port": port,
-                        "token": token,
-                        "tabs": tabs,
-                        "page_count": len(context.pages),
-                        "channel": channel,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            closing = False
-            while not closing:
+            try:
+                while len(context.pages) > tabs:
+                    context.pages[-1].close()
+                while len(context.pages) < tabs:
+                    context.new_page()
+                path.write_text(
+                    json.dumps(
+                        {
+                            "pid": os.getpid(),
+                            "port": port,
+                            "token": token,
+                            "tabs": tabs,
+                            "page_count": len(context.pages),
+                            "channel": channel,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                _wait_for_close(server, context, token)
+            finally:
                 try:
-                    connection, _ = server.accept()
-                except socket.timeout:
-                    continue
-                with connection:
-                    command = connection.recv(256).decode("utf-8")
-                    if command == "close:" + token:
-                        closing = True
-            context.close()
+                    context.close()
+                except PlaywrightError:
+                    pass
         err.unlink(missing_ok=True)
         return 0
     except PlaywrightError as exc:
