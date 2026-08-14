@@ -1,8 +1,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.tmp/
 *.egg-info/
 .venv/
 profiles.json
 profiles/
-
