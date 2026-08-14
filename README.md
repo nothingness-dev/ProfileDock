@@ -297,6 +297,33 @@ The profile metadata exists but its `browser-data` directory was moved or delete
 
 Restore `profiles.json` from a backup. ProfileDock intentionally refuses to overwrite corrupted metadata automatically.
 
+### Controller launch failure
+
+When `profiledock launch` fails, the CLI now shows a specific error message instead of a generic failure. Common causes and fixes:
+
+**Playwright package not installed:**
+```
+Error: No module named 'playwright'
+```
+Rerun project setup with `python scripts/setup_project.py`, or install Playwright through the active virtual environment.
+
+**No supported browser found:**
+```
+Error: Playwright Chromium: <error>\nGoogle Chrome: <error>
+```
+Either install Playwright Chromium (`playwright install chromium`) or install Google Chrome on your system.
+
+**Browser process failed to launch:**
+The error message will include Playwright's diagnostic details. Check that the profile data directory exists and is accessible.
+
+**Controller startup timed out:**
+The browser took longer than 30 seconds to become ready. Check system resources and close other applications.
+
+**Controller process exited unexpectedly:**
+The controller subprocess crashed. Check for system resource constraints or permission issues.
+
+When a controller fails, ProfileDock preserves a diagnostic file at `profiles/<id>/controller.error`. It contains a stable error category, a bounded diagnostic message, and the browser channel attempted when relevant. Diagnostics are limited to 4 KiB, controller tokens are redacted, and the file is automatically cleaned up on the next successful launch.
+
 ## Removing ProfileDock
 
 Profile data is project-local, so decide whether to keep or delete it before removing the project.
