@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -13,8 +14,10 @@ from profiledock.process_manager import (
     BrowserLaunchError,
     ProfileRunningError,
     _alive,
+    _context_alive,
     _launch_context,
     _read_error,
+    _wait_for_close,
     close_controller,
     error_path,
     is_running,
@@ -43,17 +46,21 @@ def _terminate_owned_tree(pid: int) -> None:
     if not _process_alive(pid):
         return
     if sys.platform == "win32":
-        subprocess.run(
+        result = subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
         )
+        if result.returncode != 0 and _process_alive(pid):
+            raise RuntimeError(f"could not terminate test controller {pid}")
     else:
         try:
             os.kill(pid, 9)
         except (OSError, ProcessLookupError):
             pass
+    if not _wait_until(lambda: not _process_alive(pid), timeout=5):
+        raise RuntimeError(f"test controller {pid} did not exit")
 
 
 @pytest.fixture(scope="session")
@@ -230,3 +237,173 @@ def test_error_file_cleaned_after_successful_launch(controller_env):
     assert not err.exists()
     _close(data_dir, owned_pids, state["pid"])
     assert not err.exists()
+
+
+def test_unexpected_process_exit_cleans_running_state(controller_env):
+    manager, profile, data_dir, owned_pids = controller_env
+    state = _start(data_dir, owned_pids, tabs=1)
+    pid = state["pid"]
+    _terminate_owned_tree(pid)
+    owned_pids.discard(pid)
+    assert _wait_until(lambda: not is_running(str(data_dir)), timeout=5)
+    assert not state_path(str(data_dir)).exists()
+
+
+def test_close_after_manual_closure_reports_not_running(controller_env):
+    manager, profile, data_dir, owned_pids = controller_env
+    state = _start(data_dir, owned_pids, tabs=1)
+    pid = state["pid"]
+    _terminate_owned_tree(pid)
+    owned_pids.discard(pid)
+    with pytest.raises(ProfileRunningError, match="profile is not running"):
+        close_controller(str(data_dir))
+    assert not state_path(str(data_dir)).exists()
+
+
+def test_relaunch_after_unexpected_controller_exit(controller_env):
+    manager, profile, data_dir, owned_pids = controller_env
+    first = _start(data_dir, owned_pids, tabs=2)
+    _terminate_owned_tree(first["pid"])
+    owned_pids.discard(first["pid"])
+    second = _start(data_dir, owned_pids, tabs=1)
+    assert second["page_count"] == 1
+    _close(data_dir, owned_pids, second["pid"])
+
+
+def test_close_racing_with_manual_closure(controller_env):
+    import threading
+
+    manager, profile, data_dir, owned_pids = controller_env
+    state = _start(data_dir, owned_pids, tabs=1)
+    pid = state["pid"]
+    errors = []
+    close_entered = threading.Event()
+
+    original_is_running = is_running
+
+    def spying_is_running(dd):
+        result = original_is_running(dd)
+        if result:
+            close_entered.set()
+        return result
+
+    def kill_process():
+        close_entered.wait(timeout=5)
+        try:
+            _terminate_owned_tree(pid)
+        except Exception as exc:
+            errors.append(exc)
+
+    def call_close():
+        try:
+            with patch("profiledock.process_manager.is_running", side_effect=spying_is_running):
+                close_controller(str(data_dir), timeout=10)
+        except ProfileRunningError:
+            pass
+        except Exception as exc:
+            errors.append(exc)
+
+    t_kill = threading.Thread(target=kill_process)
+    t_close = threading.Thread(target=call_close)
+    t_close.start()
+    t_kill.start()
+    t_kill.join(timeout=10)
+    t_close.join(timeout=10)
+    owned_pids.discard(pid)
+    assert not errors
+    assert not state_path(str(data_dir)).exists()
+    assert not is_running(str(data_dir))
+
+
+def test_missing_state_file_during_close(tmp_path):
+    data_dir = tmp_path / "browser-data"
+    data_dir.mkdir()
+    with pytest.raises(ProfileRunningError, match="profile is not running"):
+        close_controller(str(data_dir))
+
+
+def test_context_alive_returns_true_for_valid_context():
+    class FakeContext:
+        pages = [1, 2]
+
+    assert _context_alive(FakeContext()) is True
+
+
+def test_context_alive_returns_false_on_exception():
+    class DeadContext:
+        @property
+        def pages(self):
+            raise RuntimeError("browser closed")
+
+    assert _context_alive(DeadContext()) is False
+
+
+def test_context_alive_returns_false_without_pages():
+    context = type("EmptyContext", (), {"pages": []})()
+    assert _context_alive(context) is False
+
+
+def test_controller_wait_stops_when_context_closes():
+    class ClosingContext:
+        def __init__(self):
+            self.checks = 0
+
+        @property
+        def pages(self):
+            self.checks += 1
+            return [1] if self.checks == 1 else []
+
+    class TimeoutServer:
+        def accept(self):
+            raise socket.timeout
+
+    context = ClosingContext()
+    _wait_for_close(TimeoutServer(), context, "token")
+    assert context.checks == 2
+
+
+def test_list_shows_stopped_after_manual_closure(controller_env):
+    from typer.testing import CliRunner
+    from profiledock.cli import app
+
+    runner = CliRunner()
+    manager, profile, data_dir, owned_pids = controller_env
+    state = _start(data_dir, owned_pids, tabs=1)
+    pid = state["pid"]
+    _terminate_owned_tree(pid)
+    owned_pids.discard(pid)
+    is_running(str(data_dir))
+    with patch("profiledock.cli.manager") as mock_manager:
+        mock_manager.return_value.list_profiles.return_value = [profile]
+        result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "stopped" in result.output
+
+
+def test_close_timeout_with_dead_pid(controller_env):
+    manager, profile, data_dir, owned_pids = controller_env
+    state = _start(data_dir, owned_pids, tabs=1)
+    pid = state["pid"]
+    path = state_path(str(data_dir))
+    _terminate_owned_tree(pid)
+    owned_pids.discard(pid)
+    _wait_until(lambda: not _alive(pid), timeout=5)
+    with pytest.raises(ProfileRunningError, match="profile is not running"):
+        close_controller(str(data_dir), timeout=0.3)
+    assert not path.exists()
+
+
+def test_read_state_rejects_non_dict(tmp_path):
+    from profiledock.process_manager import _read_state
+
+    path = tmp_path / "running.json"
+    path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    assert _read_state(path) is None
+
+    path.write_text(json.dumps(42), encoding="utf-8")
+    assert _read_state(path) is None
+
+
+def test_alive_rejects_invalid_pid():
+    assert _alive(-1) is False
+    assert _alive(0) is False
