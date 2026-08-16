@@ -4,6 +4,14 @@ from typing import List, Optional
 
 import typer
 
+from .doctor import (
+    DiagnosticCheck,
+    STATUS_FAILED,
+    STATUS_OK,
+    STATUS_WARNING,
+    repair_environment,
+    run_diagnostics,
+)
 from .models import Profile
 from .process_manager import (
     BrowserLaunchError,
@@ -228,6 +236,45 @@ def delete(profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help=
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, OSError) as exc:
         fail(str(exc))
     typer.echo(f"Deleted '{profile.name}'.")
+
+
+@app.command()
+def doctor(
+    repair: bool = typer.Option(False, "--repair", help="Perform safe repairs where possible."),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+) -> None:
+    root = Path.cwd()
+    repairs: List[DiagnosticCheck] = []
+    if repair:
+        repairs = repair_environment(root)
+    checks = run_diagnostics(root)
+    has_failed = any(c.status == STATUS_FAILED for c in checks)
+    if json_output:
+        payload = {
+            "checks": [c.to_dict() for c in checks],
+            "repairs": [r.to_dict() for r in repairs],
+            "healthy": not has_failed,
+        }
+        typer.echo(json.dumps(payload, indent=2))
+        if has_failed:
+            raise typer.Exit(EXIT_USER_ERROR)
+        return
+    if repairs:
+        typer.echo("Repairs performed:")
+        for r in repairs:
+            typer.echo(f"  [repaired] {r.summary}")
+        typer.echo("")
+    table = [["CHECK", "STATUS", "SUMMARY"]]
+    for c in checks:
+        table.append([c.id, c.status.upper(), c.summary])
+    typer.echo(_render_table(table))
+    has_actions = [c for c in checks if c.action]
+    if has_actions:
+        typer.echo("\nSuggested Actions:")
+        for c in has_actions:
+            typer.echo(f"  - {c.id}: {c.action}")
+    if has_failed:
+        raise typer.Exit(EXIT_USER_ERROR)
 
 
 if __name__ == "__main__":
