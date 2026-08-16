@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.3.0`
+Current release: `0.4.0`
 
 ## Features
 
@@ -534,7 +534,7 @@ Deleting the complete project also deletes `profiles.json` and every `profiles/<
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.3.0`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.4.0`.
 
 ## License
 
