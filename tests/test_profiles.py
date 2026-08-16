@@ -1,4 +1,4 @@
-from profiledock.process_manager import is_running, state_path
+from profiledock.process_manager import get_status, is_running, state_path
 
 
 def test_create_list_delete(manager):
@@ -17,4 +17,21 @@ def test_running_state_stale_file_is_cleaned(manager):
     path.write_text('{"pid": 999999, "port": 1}', encoding="utf-8")
     assert not is_running(profile.data_dir)
     assert not path.exists()
+
+
+def test_get_status_states(manager):
+    profile = manager.create("StatusTest")
+    assert get_status(profile.data_dir) == "stopped"
+
+    path = state_path(profile.data_dir)
+    path.write_text('{"pid": 0, "port": 0}', encoding="utf-8")
+    assert get_status(profile.data_dir, clean_stale=False) == "starting"
+
+    path.write_text('{"pid": 999999, "port": 1}', encoding="utf-8")
+    assert get_status(profile.data_dir, clean_stale=False) == "stale"
+
+    err = path.parent / "controller.error"
+    err.write_text('{"error_type": "test_err", "message": "fail"}', encoding="utf-8")
+    path.unlink(missing_ok=True)
+    assert get_status(profile.data_dir) == "error"
 

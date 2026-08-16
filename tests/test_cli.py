@@ -173,3 +173,202 @@ def test_delete_profile_not_found_shown_concisely(tmp_path):
     assert result.exit_code == 1
     assert "Traceback" not in result.output
     assert "Error: profile not found: missing" in result.output
+
+
+def test_list_table_format():
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="stopped"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+            )()
+        ]
+        result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "ID" in result.output
+    assert "NAME" in result.output
+    assert "STATUS" in result.output
+    assert "abc123" in result.output
+    assert "Work" in result.output
+    assert "stopped" in result.output
+
+
+def test_list_json_format():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {
+                    "id": "abc123",
+                    "name": "Work",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "data_dir": "/path/to/work",
+                    "last_launched_at": "2026-01-01T12:00:00+00:00",
+                },
+            )()
+        ]
+        result = runner.invoke(app, ["list", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] == "abc123"
+    assert data[0]["name"] == "Work"
+    assert data[0]["status"] == "running"
+    assert "token" not in result.output
+
+
+def test_show_command():
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="stopped"
+    ):
+        mock_manager.return_value.resolve.return_value = type(
+            "Profile",
+            (),
+            {
+                "id": "abc123",
+                "name": "Work",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "data_dir": "/path/to/work",
+                "last_launched_at": None,
+            },
+        )()
+        result = runner.invoke(app, ["show", "abc123"])
+    assert result.exit_code == 0
+    assert "ID:" in result.output
+    assert "abc123" in result.output
+    assert "Name:" in result.output
+    assert "Work" in result.output
+    assert "Status:" in result.output
+    assert "stopped" in result.output
+    assert "Never" in result.output
+
+
+def test_show_json_command():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ):
+        mock_manager.return_value.resolve.return_value = type(
+            "Profile",
+            (),
+            {
+                "id": "abc123",
+                "name": "Work",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "data_dir": "/path/to/work",
+                "last_launched_at": "2026-01-01T12:00:00+00:00",
+            },
+        )()
+        result = runner.invoke(app, ["show", "abc123", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["id"] == "abc123"
+    assert data["name"] == "Work"
+    assert data["status"] == "running"
+    assert data["created_at"] == "2026-01-01T00:00:00+00:00"
+    assert "token" not in result.output
+
+
+def test_rename_command():
+    with patch("profiledock.cli.manager") as mock_manager:
+        mock_manager.return_value.rename.return_value = type(
+            "Profile",
+            (),
+            {"id": "abc123", "name": "NewName"},
+        )()
+        result = runner.invoke(app, ["rename", "abc123", "NewName"])
+    assert result.exit_code == 0
+    assert "Renamed profile to 'NewName' (abc123)" in result.output
+
+
+def test_rename_empty_name_fails():
+    result = runner.invoke(app, ["rename", "abc123", "   "])
+    assert result.exit_code == 1
+    assert "Error: profile name cannot be empty" in result.output
+
+
+def test_status_all_profiles():
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+            )()
+        ]
+        result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0
+    assert "ID" in result.output
+    assert "NAME" in result.output
+    assert "STATUS" in result.output
+    assert "abc123" in result.output
+    assert "Work" in result.output
+    assert "running" in result.output
+
+
+def test_status_single_profile():
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="stopped"
+    ):
+        mock_manager.return_value.resolve.return_value = type(
+            "Profile",
+            (),
+            {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+        )()
+        result = runner.invoke(app, ["status", "abc123"])
+    assert result.exit_code == 0
+    assert "abc123\tWork\tstopped" in result.output
+
+
+def test_status_all_profiles_json():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+            )()
+        ]
+        result = runner.invoke(app, ["status", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert data[0]["id"] == "abc123"
+    assert data[0]["name"] == "Work"
+    assert data[0]["status"] == "running"
+
+
+def test_status_single_profile_json():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="error"
+    ):
+        mock_manager.return_value.resolve.return_value = type(
+            "Profile",
+            (),
+            {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+        )()
+        result = runner.invoke(app, ["status", "abc123", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, dict)
+    assert data["id"] == "abc123"
+    assert data["name"] == "Work"
+    assert data["status"] == "error"
