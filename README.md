@@ -172,9 +172,38 @@ Creates profile metadata and a dedicated browser data directory.
 
 ```bash
 profiledock list
+profiledock list --json
 ```
 
-Displays each profile's ID, name, and running status.
+Displays each profile's ID, name, and status in a formatted table, or outputs JSON with `--json`.
+
+### Show
+
+```bash
+profiledock show <id-or-name>
+profiledock show <id-or-name> --json
+```
+
+Displays all safe profile metadata (ID, name, status, created at, data directory, and last launched timestamp). Controller authentication tokens are never displayed.
+
+### Rename
+
+```bash
+profiledock rename <id-or-name> "New name"
+```
+
+Validates the new non-empty name and renames the profile atomically.
+
+### Status
+
+```bash
+profiledock status
+profiledock status <id-or-name>
+profiledock status --json
+profiledock status <id-or-name> --json
+```
+
+Reports profile status (`stopped`, `starting`, `running`, `closing`, `stale`, or `error` where detectable). When invoked without an identifier, status reports across all profiles.
 
 ### Launch
 
