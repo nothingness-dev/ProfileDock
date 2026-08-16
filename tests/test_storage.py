@@ -23,3 +23,11 @@ def test_corrupt_json_raises(tmp_path):
         pass
     else:
         raise AssertionError("expected StorageError")
+
+
+def test_metadata_lock_reentrancy(tmp_path):
+    from profiledock.storage import metadata_lock
+
+    path = tmp_path / "profiles.json"
+    with metadata_lock(path):
+        assert (tmp_path / "profiles.lock").exists()
