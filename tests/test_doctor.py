@@ -1,0 +1,309 @@
+import json
+from pathlib import Path
+import sys
+from unittest.mock import MagicMock, patch
+
+from typer.testing import CliRunner
+
+from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.doctor import (
+    DiagnosticCheck,
+    STATUS_FAILED,
+    STATUS_OK,
+    STATUS_WARNING,
+    check_browser_availability,
+    check_data_root_writable,
+    check_metadata_backup_state,
+    check_metadata_schema,
+    check_orphan_directories,
+    check_playwright_chromium,
+    check_playwright_package,
+    check_profile_directories,
+    check_python_version,
+    check_runtime_permissions,
+    check_stale_running_state,
+    check_system_chrome,
+    check_version_consistency,
+    repair_environment,
+    run_diagnostics,
+)
+from profiledock.models import Profile, METADATA_SCHEMA_VERSION, MetadataDocument
+from profiledock.storage import save_metadata
+
+runner = CliRunner()
+
+
+def test_check_python_version():
+    res = check_python_version()
+    assert res.id == "python_version"
+    assert res.status == STATUS_OK
+
+
+def test_check_python_version_unsupported():
+    with patch("sys.version_info", (3, 8, 0)):
+        res = check_python_version()
+        assert res.id == "python_version"
+        assert res.status == STATUS_FAILED
+        assert res.action is not None
+
+
+def test_check_data_root_writable(tmp_path):
+    res = check_data_root_writable(tmp_path)
+    assert res.id == "writable_data_root"
+    assert res.status == STATUS_OK
+
+
+def test_check_data_root_unwritable(tmp_path):
+    with patch.object(Path, "write_text", side_effect=PermissionError("read-only")):
+        res = check_data_root_writable(tmp_path)
+        assert res.id == "writable_data_root"
+        assert res.status == STATUS_FAILED
+
+
+def test_check_metadata_schema_missing(tmp_path):
+    res = check_metadata_schema(tmp_path)
+    assert res.id == "metadata_schema"
+    assert res.status == STATUS_OK
+
+
+def test_check_metadata_schema_valid(tmp_path):
+    profiles_file = tmp_path / "profiles.json"
+    profiles_dir = tmp_path / "profiles"
+    data_dir = profiles_dir / "p1" / "browser-data"
+    doc = MetadataDocument(
+        schema_version=1,
+        profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(data_dir))],
+    )
+    save_metadata(doc, profiles_file, profiles_dir)
+    res = check_metadata_schema(tmp_path)
+    assert res.status == STATUS_OK
+    assert "Valid metadata document" in res.summary
+
+
+def test_check_metadata_schema_legacy_bare_array(tmp_path):
+    profiles_file = tmp_path / "profiles.json"
+    profiles_dir = tmp_path / "profiles"
+    data_dir = profiles_dir / "p1" / "browser-data"
+    profiles_file.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "p1",
+                    "name": "Name",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "data_dir": str(data_dir),
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    res = check_metadata_schema(tmp_path)
+    assert res.status == STATUS_WARNING
+    assert "legacy bare-array format" in res.summary
+
+
+def test_check_metadata_schema_corrupted(tmp_path):
+    profiles_file = tmp_path / "profiles.json"
+    profiles_file.write_text("invalid json", encoding="utf-8")
+    res = check_metadata_schema(tmp_path)
+    assert res.status == STATUS_FAILED
+
+
+def test_check_metadata_backup_state_empty(tmp_path):
+    res = check_metadata_backup_state(tmp_path)
+    assert res.status == STATUS_OK
+
+
+def test_check_metadata_backup_state_valid(tmp_path):
+    bak = tmp_path / "profiles.json.bak"
+    bak.write_text(json.dumps({"schema_version": 1, "profiles": []}), encoding="utf-8")
+    res = check_metadata_backup_state(tmp_path)
+    assert res.status == STATUS_OK
+
+
+def test_check_metadata_backup_state_corrupted(tmp_path):
+    bak = tmp_path / "profiles.json.bak"
+    bak.write_text("invalid json", encoding="utf-8")
+    res = check_metadata_backup_state(tmp_path)
+    assert res.status == STATUS_WARNING
+
+
+def test_check_profile_directories(tmp_path):
+    profiles_file = tmp_path / "profiles.json"
+    profiles_dir = tmp_path / "profiles"
+    data_dir = profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    doc = MetadataDocument(
+        schema_version=1,
+        profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(data_dir))],
+    )
+    save_metadata(doc, profiles_file, profiles_dir)
+
+    exist_chk, path_chk = check_profile_directories(tmp_path)
+    assert exist_chk.status == STATUS_OK
+    assert path_chk.status == STATUS_OK
+
+
+def test_check_profile_directories_missing(tmp_path):
+    profiles_file = tmp_path / "profiles.json"
+    profiles_dir = tmp_path / "profiles"
+    data_dir = profiles_dir / "p1" / "browser-data"
+    doc = MetadataDocument(
+        schema_version=1,
+        profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(data_dir))],
+    )
+    save_metadata(doc, profiles_file, profiles_dir)
+
+    exist_chk, path_chk = check_profile_directories(tmp_path)
+    assert exist_chk.status == STATUS_WARNING
+    assert "Missing data directories" in exist_chk.summary
+
+
+def test_check_browser_availability():
+    pw_ok = DiagnosticCheck("playwright_chromium", STATUS_OK, "ok")
+    sys_warn = DiagnosticCheck("system_chrome", STATUS_WARNING, "warn")
+    avail = check_browser_availability(pw_ok, sys_warn)
+    assert avail.status == STATUS_OK
+
+    pw_warn = DiagnosticCheck("playwright_chromium", STATUS_WARNING, "warn")
+    sys_ok = DiagnosticCheck("system_chrome", STATUS_OK, "ok")
+    avail = check_browser_availability(pw_warn, sys_ok)
+    assert avail.status == STATUS_OK
+
+    avail_failed = check_browser_availability(pw_warn, sys_warn)
+    assert avail_failed.status == STATUS_FAILED
+
+
+def test_check_stale_running_state(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    p1_dir = profiles_dir / "p1"
+    p1_dir.mkdir(parents=True)
+    running_json = p1_dir / "running.json"
+    running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
+
+    with patch("profiledock.doctor._alive", return_value=False):
+        chk, stale_files = check_stale_running_state(tmp_path)
+        assert chk.status == STATUS_WARNING
+        assert len(stale_files) == 1
+        assert stale_files[0] == running_json
+
+
+def test_check_orphan_directories(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    (profiles_dir / "orphan1").mkdir(parents=True)
+    profiles_file = tmp_path / "profiles.json"
+    profiles_file.write_text(json.dumps({"schema_version": 1, "profiles": []}), encoding="utf-8")
+
+    res = check_orphan_directories(tmp_path)
+    assert res.status == STATUS_WARNING
+    assert "orphan1" in res.summary
+
+
+def test_repair_environment_stale_files(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    p1_dir = profiles_dir / "p1"
+    p1_dir.mkdir(parents=True)
+    running_json = p1_dir / "running.json"
+    running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
+
+    with patch("profiledock.doctor._alive", return_value=False):
+        repairs = repair_environment(tmp_path)
+        assert len(repairs) >= 1
+        assert not running_json.exists()
+
+
+def test_repair_environment_metadata_recovery(tmp_path):
+    profiles_file = tmp_path / "profiles.json"
+    backup_file = tmp_path / "profiles.json.bak"
+    profiles_dir = tmp_path / "profiles"
+    data_dir = profiles_dir / "p1" / "browser-data"
+
+    profiles_file.write_text("corrupt json", encoding="utf-8")
+    backup_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": [
+                    {
+                        "id": "p1",
+                        "name": "Name",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "data_dir": str(data_dir),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repairs = repair_environment(tmp_path)
+    assert len(repairs) >= 1
+    assert "Recovered valid metadata" in repairs[0].summary
+    assert "schema_version" in profiles_file.read_text(encoding="utf-8")
+
+
+def test_doctor_cli_healthy():
+    with patch("profiledock.cli.run_diagnostics") as mock_diag:
+        mock_diag.return_value = [
+            DiagnosticCheck("python_version", STATUS_OK, "Python version ok"),
+            DiagnosticCheck("writable_data_root", STATUS_OK, "Data root writable"),
+        ]
+        result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "python_version" in result.output
+    assert "OK" in result.output
+
+
+def test_doctor_cli_warning_exits_zero():
+    with patch("profiledock.cli.run_diagnostics") as mock_diag:
+        mock_diag.return_value = [
+            DiagnosticCheck("orphan_profile_directories", STATUS_WARNING, "Found orphan dir", action="Review manually"),
+        ]
+        result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "WARNING" in result.output
+    assert "Suggested Actions:" in result.output
+
+
+def test_doctor_cli_failed_exits_one():
+    with patch("profiledock.cli.run_diagnostics") as mock_diag:
+        mock_diag.return_value = [
+            DiagnosticCheck("metadata_schema", STATUS_FAILED, "Metadata corrupted", action="Restore backup"),
+        ]
+        result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "FAILED" in result.output
+    assert "Suggested Actions:" in result.output
+
+
+def test_doctor_cli_json():
+    with patch("profiledock.cli.run_diagnostics") as mock_diag:
+        mock_diag.return_value = [
+            DiagnosticCheck("python_version", STATUS_OK, "Python version ok"),
+            DiagnosticCheck("orphan_profile_directories", STATUS_WARNING, "Found orphan dir", action="Review manually"),
+        ]
+        result = runner.invoke(app, ["doctor", "--json"])
+    assert result.exit_code == EXIT_SUCCESS
+    data = json.loads(result.output)
+    assert "checks" in data
+    assert "repairs" in data
+    assert "healthy" in data
+    assert data["healthy"] is True
+    assert len(data["checks"]) == 2
+    assert data["checks"][0]["id"] == "python_version"
+    assert data["checks"][0]["status"] == "ok"
+    assert data["checks"][1]["action"] == "Review manually"
+
+
+def test_doctor_cli_repair():
+    with patch("profiledock.cli.repair_environment") as mock_repair, patch("profiledock.cli.run_diagnostics") as mock_diag:
+        mock_repair.return_value = [
+            DiagnosticCheck("repair_stale_running_state", STATUS_OK, "Cleaned up 1 stale running.json file(s)."),
+        ]
+        mock_diag.return_value = [
+            DiagnosticCheck("stale_running_state", STATUS_OK, "No stale running-state files detected."),
+        ]
+        result = runner.invoke(app, ["doctor", "--repair"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "Repairs performed:" in result.output
+    assert "Cleaned up 1 stale running.json file(s)." in result.output
