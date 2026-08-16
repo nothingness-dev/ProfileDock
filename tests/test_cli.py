@@ -5,8 +5,21 @@ from typer.testing import CliRunner
 from profiledock.cli import app
 from profiledock.process_manager import BrowserLaunchError, ProfileRunningError
 from profiledock.profile_manager import ProfileNotFoundError
+from profiledock.version import __version__
 
 runner = CliRunner()
+
+
+def test_version_flag():
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert __version__ in result.output
+
+
+def test_version_short_flag():
+    result = runner.invoke(app, ["-V"])
+    assert result.exit_code == 0
+    assert __version__ in result.output
 
 
 def test_launch_browser_error_shown_concisely(tmp_path):

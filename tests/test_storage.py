@@ -4,8 +4,11 @@ from profiledock.storage import load_profiles, save_profiles
 
 def test_json_storage_round_trip(tmp_path):
     path = tmp_path / "profiles.json"
-    profiles = [Profile("abc123", "Personal", "2026-01-01T00:00:00+00:00", "/tmp/browser")]
-    save_profiles(profiles, path)
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    data_dir = profiles_dir / "abc123" / "browser-data"
+    profiles = [Profile("abc123", "Personal", "2026-01-01T00:00:00+00:00", str(data_dir))]
+    save_profiles(profiles, path, profiles_dir)
     assert load_profiles(path) == profiles
 
 
@@ -20,4 +23,3 @@ def test_corrupt_json_raises(tmp_path):
         pass
     else:
         raise AssertionError("expected StorageError")
-
