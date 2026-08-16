@@ -150,6 +150,8 @@ profiledock launch <id>
 
 ## Commands
 
+Commands that operate on a single profile accept a profile identifier. The identifier can be a full ID, a unique ID prefix, or an exact profile name. Matching is case-sensitive for both IDs and names. If the input matches more than one profile, ProfileDock prints the matching IDs and names and exits without taking action.
+
 ### Version
 
 ```bash
@@ -177,8 +179,8 @@ Displays each profile's ID, name, and running status.
 ### Launch
 
 ```bash
-profiledock launch <id>
-profiledock launch <id> --tabs 3
+profiledock launch <id-or-name>
+profiledock launch <id-or-name> --tabs 3
 ```
 
 Starts a persistent browser context with exactly the requested number of `about:blank` tabs. A running profile cannot be launched a second time.
@@ -186,7 +188,7 @@ Starts a persistent browser context with exactly the requested number of `about:
 ### Close
 
 ```bash
-profiledock close <id>
+profiledock close <id-or-name>
 ```
 
 Requests graceful browser shutdown and removes the profile's running-state file.
@@ -196,7 +198,7 @@ If the entire browser is closed manually or exits unexpectedly, the controller d
 ### Delete
 
 ```bash
-profiledock delete <id>
+profiledock delete <id-or-name>
 ```
 
 Asks for confirmation, then permanently removes the profile metadata and browser data. A running profile must be closed before deletion.
@@ -204,7 +206,7 @@ Asks for confirmation, then permanently removes the profile metadata and browser
 For non-interactive use:
 
 ```bash
-profiledock delete <id> --yes
+profiledock delete <id-or-name> --yes
 ```
 
 ## Data storage and persistence
