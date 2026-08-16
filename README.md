@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.1.6`
+Current release: `0.2.0`
 
 ## Features
 
@@ -150,6 +150,14 @@ profiledock launch <id>
 
 ## Commands
 
+### Version
+
+```bash
+profiledock --version
+```
+
+Displays the current version of ProfileDock.
+
 ### Create
 
 ```bash
@@ -206,11 +214,62 @@ ProfileDock stores data relative to the directory where commands are run:
 ```text
 profiledock/
 ├── profiles.json
+├── profiles.json.bak
+├── profiles.json.lock
 └── profiles/
     └── <profile-id>/
         ├── browser-data/
         └── running.json
 ```
+
+### Metadata document format
+
+`profiles.json` contains a versioned metadata document:
+
+```json
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "abc123",
+      "name": "Personal",
+      "created_at": "2024-01-15T10:30:00+00:00",
+      "data_dir": "/path/to/profiles/abc123/browser-data",
+      "last_launched_at": null
+    }
+  ]
+}
+```
+
+The metadata document includes:
+
+- `schema_version`: Version of the metadata format (currently 1)
+- `profiles`: Array of profile objects with required fields: `id`, `name`, `created_at`, `data_dir`
+- Optional field: `last_launched_at` (ISO-8601 timestamp)
+
+### Metadata migration
+
+ProfileDock automatically migrates older bare-array format to the versioned document format:
+
+- The old `profiles.json` is backed up to `profiles.json.bak` before migration
+- Migration validates all profile data before accepting the new format
+- Invalid data is rejected before any changes are written
+
+### Metadata safety
+
+ProfileDock implements several safety mechanisms to protect metadata integrity:
+
+**Atomic writes**: All metadata writes are atomic. A temporary file is written, synced to disk, then moved into place. This ensures interrupted writes never leave a corrupted file.
+
+**Cross-process locking**: A lock file (`profiles.json.lock`) prevents concurrent processes from modifying metadata simultaneously.
+
+**Backup recovery**: Before each metadata update, the current file is backed up to `profiles.json.bak`. If the primary file becomes corrupted, ProfileDock can recover from the backup.
+
+**Duplicate prevention**: Profile IDs and data directories must be unique. Duplicate values are rejected before any changes are written.
+
+**Path safety**: Data directories must be under the configured profile root. Symlinks and path traversal attempts are rejected.
+
+**Corruption handling**: ProfileDock never overwrites corrupted metadata automatically. If both the primary and backup files are corrupted, manual intervention is required.
 
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
 
@@ -297,7 +356,11 @@ The profile metadata exists but its `browser-data` directory was moved or delete
 
 ### `profiles.json` is corrupted
 
-Restore `profiles.json` from a backup. ProfileDock intentionally refuses to overwrite corrupted metadata automatically.
+ProfileDock attempts to recover from `profiles.json.bak` automatically. If both files are corrupted, restore from a manual backup. ProfileDock intentionally refuses to overwrite corrupted metadata automatically.
+
+### `profiles.json.lock` exists but no process is running
+
+If ProfileDock was interrupted, a stale lock file may prevent operations. Delete `profiles.json.lock` manually to resume normal operation.
 
 ### Controller launch failure
 
@@ -341,10 +404,11 @@ profiledock close <id>
 
 ### 2. Back up profiles if needed
 
-To preserve login state and browser data, copy both of these items to a secure location:
+To preserve login state and browser data, copy these items to a secure location:
 
 ```text
 profiles.json
+profiles.json.bak
 profiles/
 ```
 
