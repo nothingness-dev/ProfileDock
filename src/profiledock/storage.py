@@ -1,7 +1,7 @@
-import fcntl
 import json
 import os
 import shutil
+import sys
 import time as _time
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,6 +23,34 @@ class MetadataLockedError(StorageError):
     pass
 
 
+def _lock_file(fd: Any) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_file(fd: Any) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        try:
+            msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    else:
+        import fcntl
+
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+
+
 @contextmanager
 def metadata_lock(
     metadata_path: Union[str, Path], timeout: float = 5.0
@@ -30,13 +58,13 @@ def metadata_lock(
     lock_path = Path(metadata_path).with_suffix(".lock")
     lock_fd = None
     try:
-        lock_fd = open(lock_path, "w")
+        lock_fd = open(lock_path, "a+b")
         deadline = _time.monotonic() + timeout
         while True:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _lock_file(lock_fd)
                 break
-            except OSError:
+            except (OSError, IOError):
                 if _time.monotonic() >= deadline:
                     raise MetadataLockedError(
                         f"could not acquire metadata lock within {timeout}s"
@@ -46,7 +74,7 @@ def metadata_lock(
     finally:
         if lock_fd is not None:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                _unlock_file(lock_fd)
                 lock_fd.close()
             except OSError:
                 pass
