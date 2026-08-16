@@ -4,7 +4,14 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from .models import Profile, utc_now
-from .storage import load_profiles, save_profiles
+from .storage import (
+    add_profile_atomic,
+    load_metadata,
+    mark_launched_atomic,
+    migrate_metadata,
+    remove_profile_atomic,
+    rename_profile_atomic,
+)
 
 
 class ProfileNotFoundError(Exception):
@@ -17,8 +24,12 @@ class ProfileManager:
         self.profiles_file = self.root / "profiles.json"
         self.profiles_dir = self.root / "profiles"
 
+    def ensure_migrated(self) -> None:
+        migrate_metadata(self.profiles_file, self.profiles_dir)
+
     def list_profiles(self) -> List[Profile]:
-        return load_profiles(self.profiles_file)
+        doc = load_metadata(self.profiles_file)
+        return doc.profiles
 
     def get(self, profile_id: str) -> Profile:
         for profile in self.list_profiles():
@@ -34,22 +45,22 @@ class ProfileManager:
         data_dir = self.profiles_dir / profile_id / "browser-data"
         data_dir.mkdir(parents=True, exist_ok=False)
         profile = Profile(profile_id, name, utc_now(), str(data_dir))
-        profiles = self.list_profiles()
-        profiles.append(profile)
-        save_profiles(profiles, self.profiles_file)
+        add_profile_atomic(profile, self.profiles_file, self.profiles_dir)
         return profile
 
     def delete(self, profile_id: str) -> Profile:
         profile = self.get(profile_id)
         shutil.rmtree(Path(profile.data_dir).parent, ignore_errors=False)
-        save_profiles([p for p in self.list_profiles() if p.id != profile_id], self.profiles_file)
+        remove_profile_atomic(profile_id, self.profiles_file, self.profiles_dir)
         return profile
 
-    def mark_launched(self, profile_id: str) -> None:
-        profiles = self.list_profiles()
-        profile = next((p for p in profiles if p.id == profile_id), None)
-        if profile is None:
-            raise ProfileNotFoundError(f"profile not found: {profile_id}")
-        profile.last_launched_at = utc_now()
-        save_profiles(profiles, self.profiles_file)
+    def rename(self, profile_id: str, new_name: str) -> Profile:
+        new_name = new_name.strip()
+        if not new_name:
+            raise ValueError("profile name cannot be empty")
+        rename_profile_atomic(profile_id, new_name, self.profiles_file, self.profiles_dir)
+        return self.get(profile_id)
 
+    def mark_launched(self, profile_id: str) -> None:
+        self.get(profile_id)
+        mark_launched_atomic(profile_id, utc_now(), self.profiles_file, self.profiles_dir)

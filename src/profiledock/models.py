@@ -1,6 +1,9 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+METADATA_SCHEMA_VERSION = 1
+_SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1})
 
 
 def utc_now() -> str:
@@ -30,4 +33,31 @@ class Profile:
             data_dir=str(value["data_dir"]),
             last_launched_at=value.get("last_launched_at"),
         )
+
+
+@dataclass
+class MetadataDocument:
+    schema_version: int
+    profiles: List[Profile] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "profiles": [p.to_dict() for p in self.profiles],
+        }
+
+    @classmethod
+    def from_dict(cls, value: Dict[str, Any]) -> "MetadataDocument":
+        if not isinstance(value, dict):
+            raise ValueError("metadata must be a JSON object")
+        schema_version = value.get("schema_version")
+        if schema_version not in _SUPPORTED_METADATA_SCHEMA_VERSIONS:
+            raise ValueError(f"unsupported metadata schema version: {schema_version}")
+        if "profiles" not in value:
+            raise ValueError("metadata is missing required field: profiles")
+        profiles_list = value["profiles"]
+        if not isinstance(profiles_list, list):
+            raise ValueError("profiles must be a list")
+        profiles = [Profile.from_dict(item) for item in profiles_list]
+        return cls(schema_version=int(schema_version), profiles=profiles)
 

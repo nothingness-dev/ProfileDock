@@ -1,12 +1,34 @@
 from pathlib import Path
+from typing import Optional
 
 import typer
 
 from .process_manager import BrowserLaunchError, ProfileRunningError, close_controller, is_running, start_controller
 from .profile_manager import ProfileManager, ProfileNotFoundError
 from .storage import StorageError
+from .version import __version__
 
 app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
+
+
+def version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"profiledock {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        "-V",
+        help="Show version and exit.",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    pass
 
 
 def manager() -> ProfileManager:
