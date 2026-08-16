@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "profiledock"
-version = "0.1.6"
+dynamic = ["version"]
 description = "A lightweight CLI for isolated persistent Chromium profiles"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,6 +12,9 @@ dependencies = [
     "playwright>=1.40",
     "typer>=0.9",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "profiledock.version.__version__"}
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
