@@ -23,6 +23,10 @@ from .version import __version__
 
 app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
 
+EXIT_SUCCESS = 0
+EXIT_USER_ERROR = 1
+EXIT_SYSTEM_ERROR = 2
+
 
 def version_callback(value: bool) -> None:
     if value:
@@ -48,9 +52,9 @@ def manager() -> ProfileManager:
     return ProfileManager(Path.cwd())
 
 
-def fail(message: str) -> None:
+def fail(message: str, code: int = EXIT_USER_ERROR) -> None:
     typer.echo(f"Error: {message}", err=True)
-    raise typer.Exit(1)
+    raise typer.Exit(code)
 
 
 def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
@@ -164,16 +168,11 @@ def status(
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
         fail(str(exc))
     if json_output:
-        if single:
-            prof = profiles[0]
+        items = []
+        for prof in profiles:
             st = get_status(prof.data_dir)
-            typer.echo(json.dumps({"id": prof.id, "name": prof.name, "status": st}, indent=2))
-        else:
-            items = []
-            for prof in profiles:
-                st = get_status(prof.data_dir)
-                items.append({"id": prof.id, "name": prof.name, "status": st})
-            typer.echo(json.dumps(items, indent=2))
+            items.append({"id": prof.id, "name": prof.name, "status": st})
+        typer.echo(json.dumps(items, indent=2))
         return
     if not profiles:
         typer.echo("No profiles found.")
