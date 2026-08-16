@@ -1,9 +1,22 @@
+import json
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
-from .process_manager import BrowserLaunchError, ProfileRunningError, close_controller, is_running, start_controller
+from .models import Profile
+from .process_manager import (
+    BrowserLaunchError,
+    ProfileRunningError,
+    close_controller,
+    error_path,
+    get_status,
+    is_running,
+    start_controller,
+    state_path,
+    _read_error,
+    _read_state,
+)
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from .storage import StorageError
 from .version import __version__
@@ -40,6 +53,30 @@ def fail(message: str) -> None:
     raise typer.Exit(1)
 
 
+def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
+    data = {
+        "id": profile.id,
+        "name": profile.name,
+        "created_at": profile.created_at,
+        "data_dir": profile.data_dir,
+        "last_launched_at": profile.last_launched_at,
+    }
+    if status is not None:
+        data["status"] = status
+    return data
+
+
+def _render_table(rows: List[List[str]]) -> str:
+    if not rows:
+        return ""
+    col_widths = [max(len(row[col]) for row in rows) for col in range(len(rows[0]))]
+    lines = []
+    for row in rows:
+        line = "  ".join(val.ljust(col_widths[col]) for col, val in enumerate(row))
+        lines.append(line.rstrip())
+    return "\n".join(lines)
+
+
 @app.command()
 def create(name: str) -> None:
     try:
@@ -50,17 +87,107 @@ def create(name: str) -> None:
 
 
 @app.command("list")
-def list_profiles() -> None:
+def list_profiles(
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+) -> None:
     try:
         profiles = manager().list_profiles()
     except StorageError as exc:
         fail(str(exc))
+    if json_output:
+        items = []
+        for profile in profiles:
+            status = get_status(profile.data_dir)
+            items.append(_safe_profile_dict(profile, status=status))
+        typer.echo(json.dumps(items, indent=2))
+        return
     if not profiles:
         typer.echo("No profiles found.")
         return
+    table = [["ID", "NAME", "STATUS"]]
     for profile in profiles:
-        status = "running" if is_running(profile.data_dir) else "stopped"
-        typer.echo(f"{profile.id}\t{profile.name}\t{status}")
+        status = get_status(profile.data_dir)
+        table.append([profile.id, profile.name, status])
+    typer.echo(_render_table(table))
+
+
+@app.command()
+def show(
+    profile_id: str,
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+) -> None:
+    try:
+        profile = manager().resolve(profile_id)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
+        fail(str(exc))
+    status = get_status(profile.data_dir)
+    data = _safe_profile_dict(profile, status=status)
+    if json_output:
+        typer.echo(json.dumps(data, indent=2))
+        return
+    rows = [
+        ["ID:", profile.id],
+        ["Name:", profile.name],
+        ["Status:", status],
+        ["Created at:", profile.created_at],
+        ["Data directory:", profile.data_dir],
+        ["Last launched at:", profile.last_launched_at or "Never"],
+    ]
+    typer.echo(_render_table(rows))
+
+
+@app.command()
+def rename(profile_id: str, new_name: str) -> None:
+    clean_name = new_name.strip()
+    if not clean_name:
+        fail("profile name cannot be empty")
+    try:
+        profile = manager().rename(profile_id, clean_name)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        fail(str(exc))
+    typer.echo(f"Renamed profile to '{profile.name}' ({profile.id})")
+
+
+@app.command()
+def status(
+    profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name."),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+) -> None:
+    try:
+        if profile_id is not None:
+            profile = manager().resolve(profile_id)
+            profiles = [profile]
+            single = True
+        else:
+            profiles = manager().list_profiles()
+            single = False
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
+        fail(str(exc))
+    if json_output:
+        if single:
+            prof = profiles[0]
+            st = get_status(prof.data_dir)
+            typer.echo(json.dumps({"id": prof.id, "name": prof.name, "status": st}, indent=2))
+        else:
+            items = []
+            for prof in profiles:
+                st = get_status(prof.data_dir)
+                items.append({"id": prof.id, "name": prof.name, "status": st})
+            typer.echo(json.dumps(items, indent=2))
+        return
+    if not profiles:
+        typer.echo("No profiles found.")
+        return
+    if single:
+        prof = profiles[0]
+        st = get_status(prof.data_dir)
+        typer.echo(f"{prof.id}\t{prof.name}\t{st}")
+    else:
+        table = [["ID", "NAME", "STATUS"]]
+        for prof in profiles:
+            st = get_status(prof.data_dir)
+            table.append([prof.id, prof.name, st])
+        typer.echo(_render_table(table))
 
 
 @app.command()

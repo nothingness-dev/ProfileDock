@@ -112,17 +112,42 @@ def _read_state(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
-def is_running(data_dir: str) -> bool:
+def get_status(data_dir: str, clean_stale: bool = True) -> str:
     path = state_path(data_dir)
-    state = _read_state(path)
-    if not state:
-        if path.exists():
-            path.unlink(missing_ok=True)
-        return False
-    if _alive(int(state.get("pid", -1))):
-        return True
-    path.unlink(missing_ok=True)
-    return False
+    err = error_path(data_dir)
+    if path.exists():
+        state = _read_state(path)
+        if not state or not isinstance(state, dict):
+            if clean_stale:
+                path.unlink(missing_ok=True)
+            return "stale"
+        if state.get("closing"):
+            pid = int(state.get("pid", -1))
+            if pid > 0 and _alive(pid):
+                return "closing"
+            if clean_stale:
+                path.unlink(missing_ok=True)
+            return "stale"
+        pid = int(state.get("pid", -1))
+        if pid <= 0:
+            return "starting"
+        if not _alive(pid):
+            if clean_stale:
+                path.unlink(missing_ok=True)
+            return "stale"
+        port = int(state.get("port", 0))
+        if not port:
+            return "starting"
+        return "running"
+    if err.exists():
+        err_data = _read_error(err)
+        if err_data:
+            return "error"
+    return "stopped"
+
+
+def is_running(data_dir: str) -> bool:
+    return get_status(data_dir, clean_stale=True) in ("starting", "running", "closing")
 
 
 def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
@@ -259,6 +284,11 @@ def close_controller(data_dir: str, timeout: float = 15) -> None:
     if not port:
         raise BrowserLaunchError("profile controller is not ready")
     token = state.get("token", "")
+    state["closing"] = True
+    try:
+        path.write_text(json.dumps(state), encoding="utf-8")
+    except OSError:
+        pass
     close_sent = False
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
