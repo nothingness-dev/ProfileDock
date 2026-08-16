@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from profiledock.cli import app
+from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
 from profiledock.process_manager import BrowserLaunchError, ProfileRunningError
 from profiledock.profile_manager import AmbiguousProfileError, ProfileNotFoundError
 from profiledock.version import __version__
@@ -368,7 +368,181 @@ def test_status_single_profile_json():
         result = runner.invoke(app, ["status", "abc123", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] == "abc123"
+    assert data[0]["name"] == "Work"
+    assert data[0]["status"] == "error"
+
+
+def test_exit_code_success():
+    with patch("profiledock.cli.manager") as mock_manager:
+        mock_manager.return_value.list_profiles.return_value = []
+        result = runner.invoke(app, ["list"])
+    assert result.exit_code == EXIT_SUCCESS
+
+
+def test_exit_code_user_error():
+    with patch("profiledock.cli.manager") as mock_manager:
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
+            "profile not found: missing"
+        )
+        result = runner.invoke(app, ["show", "missing"])
+    assert result.exit_code == EXIT_USER_ERROR
+
+
+def test_exit_code_empty_name():
+    result = runner.invoke(app, ["rename", "abc123", "   "])
+    assert result.exit_code == EXIT_USER_ERROR
+
+
+def test_json_list_schema():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="stopped"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {
+                    "id": "abc123",
+                    "name": "Work",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "data_dir": "/path/to/work",
+                    "last_launched_at": None,
+                },
+            )()
+        ]
+        result = runner.invoke(app, ["list", "--json"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert len(data) == 1
+
+    profile = data[0]
+    assert "id" in profile
+    assert "name" in profile
+    assert "status" in profile
+    assert "created_at" in profile
+    assert "data_dir" in profile
+    assert "last_launched_at" in profile
+
+    assert isinstance(profile["id"], str)
+    assert isinstance(profile["name"], str)
+    assert isinstance(profile["status"], str)
+    assert isinstance(profile["created_at"], str)
+    assert isinstance(profile["data_dir"], str)
+
+    valid_statuses = {"stopped", "starting", "running", "closing", "stale", "error"}
+    assert profile["status"] in valid_statuses
+
+    assert "token" not in profile
+    assert "password" not in profile
+    assert "secret" not in profile
+
+
+def test_json_show_schema():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ):
+        mock_manager.return_value.resolve.return_value = type(
+            "Profile",
+            (),
+            {
+                "id": "abc123",
+                "name": "Work",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "data_dir": "/path/to/work",
+                "last_launched_at": "2026-01-01T12:00:00+00:00",
+            },
+        )()
+        result = runner.invoke(app, ["show", "abc123", "--json"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    data = json.loads(result.output)
     assert isinstance(data, dict)
-    assert data["id"] == "abc123"
-    assert data["name"] == "Work"
-    assert data["status"] == "error"
+
+    required_fields = ["id", "name", "status", "created_at", "data_dir", "last_launched_at"]
+    for field in required_fields:
+        assert field in data, f"Missing required field: {field}"
+
+    assert isinstance(data["id"], str)
+    assert isinstance(data["name"], str)
+    assert isinstance(data["status"], str)
+    assert isinstance(data["created_at"], str)
+    assert isinstance(data["data_dir"], str)
+    assert data["last_launched_at"] is None or isinstance(data["last_launched_at"], str)
+
+    assert "token" not in data
+    assert "password" not in data
+    assert "secret" not in data
+
+
+def test_json_status_schema():
+    import json
+
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+            )()
+        ]
+        result = runner.invoke(app, ["status", "--json"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    data = json.loads(result.output)
+
+    assert isinstance(data, list)
+    assert len(data) == 1
+
+    profile = data[0]
+    assert "id" in profile
+    assert "name" in profile
+    assert "status" in profile
+
+    assert isinstance(profile["id"], str)
+    assert isinstance(profile["name"], str)
+    assert isinstance(profile["status"], str)
+
+    valid_statuses = {"stopped", "starting", "running", "closing", "stale", "error"}
+    assert profile["status"] in valid_statuses
+
+    assert "token" not in profile
+
+
+def test_human_output_goes_to_stdout():
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="stopped"
+    ):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+            )()
+        ]
+        result = runner.invoke(app, ["list"])
+
+    assert result.exit_code == EXIT_SUCCESS
+    assert "abc123" in result.output
+    assert "Work" in result.output
+
+
+def test_errors_go_to_stderr():
+    with patch("profiledock.cli.manager") as mock_manager:
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
+            "profile not found: missing"
+        )
+        result = runner.invoke(app, ["show", "missing"])
+
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "Error:" in result.stderr
