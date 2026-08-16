@@ -4,7 +4,7 @@ from typer.testing import CliRunner
 
 from profiledock.cli import app
 from profiledock.process_manager import BrowserLaunchError, ProfileRunningError
-from profiledock.profile_manager import ProfileNotFoundError
+from profiledock.profile_manager import AmbiguousProfileError, ProfileNotFoundError
 from profiledock.version import __version__
 
 runner = CliRunner()
@@ -54,7 +54,7 @@ def test_launch_browser_error_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager, patch(
         "profiledock.cli.start_controller", side_effect=fake_start_controller
     ):
-        mock_manager.return_value.get.return_value = type(
+        mock_manager.return_value.resolve.return_value = type(
             "Profile",
             (),
             {"id": "abc123", "name": "Test", "data_dir": str(data_dir)},
@@ -69,7 +69,7 @@ def test_launch_browser_error_shown_concisely(tmp_path):
 
 def test_launch_profile_not_found_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager:
-        mock_manager.return_value.get.side_effect = ProfileNotFoundError(
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
             "profile not found: missing"
         )
         result = runner.invoke(app, ["launch", "missing", "--tabs", "1"])
@@ -109,7 +109,7 @@ def test_launch_running_error_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager, patch(
         "profiledock.cli.start_controller", side_effect=fake_start_controller
     ):
-        mock_manager.return_value.get.return_value = type(
+        mock_manager.return_value.resolve.return_value = type(
             "Profile",
             (),
             {"id": "abc123", "name": "Test", "data_dir": str(data_dir)},
@@ -151,7 +151,7 @@ def test_close_browser_error_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager, patch(
         "profiledock.cli.close_controller", side_effect=fake_close_controller
     ):
-        mock_manager.return_value.get.return_value = type(
+        mock_manager.return_value.resolve.return_value = type(
             "Profile",
             (),
             {"id": "abc123", "name": "Test", "data_dir": str(data_dir)},
@@ -165,7 +165,7 @@ def test_close_browser_error_shown_concisely(tmp_path):
 
 def test_delete_profile_not_found_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager:
-        mock_manager.return_value.get.side_effect = ProfileNotFoundError(
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
             "profile not found: missing"
         )
         result = runner.invoke(app, ["delete", "missing", "--yes"])
