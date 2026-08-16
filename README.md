@@ -248,6 +248,45 @@ For non-interactive use:
 profiledock delete <id-or-name> --yes
 ```
 
+### Doctor
+
+```bash
+profiledock doctor
+profiledock doctor --json
+profiledock doctor --repair
+```
+
+Performs comprehensive diagnostic checks across the environment and profile storage.
+
+**Diagnostic checks:**
+
+- **`python_version`**: Verifies Python is >= 3.9.
+- **`writable_data_root`**: Checks that the working/data directory is writable.
+- **`metadata_schema`**: Validates the `profiles.json` schema (version 1) and contents.
+- **`metadata_backup_state`**: Inspects the backup file (`profiles.json.bak`) for validity.
+- **`profile_directories_exist`**: Ensures every configured profile has a corresponding `browser-data` directory.
+- **`profile_paths_under_data_root`**: Validates that all profile data paths reside safely within the profile root boundary.
+- **`playwright_package`**: Checks if the `playwright` Python package is installed.
+- **`playwright_chromium`**: Verifies if Playwright Chromium browser executable is installed.
+- **`system_chrome`**: Verifies if system Google Chrome or Chromium is available as fallback.
+- **`browser_availability`**: Aggregate check verifying that at least one usable browser engine is present.
+- **`runtime_permissions`**: Checks read/write permissions on the runtime `profiles/` directory.
+- **`stale_running_state`**: Detects leftover `running.json` state files from terminated processes.
+- **`orphan_profile_directories`**: Identifies folders in `profiles/` that are not listed in metadata.
+- **`version_consistency`**: Verifies that the runtime version matches installed package metadata.
+
+**Repair capabilities (`--repair`):**
+
+- Cleans up stale runtime `running.json` files automatically.
+- Recovers valid metadata from `profiles.json.bak` if `profiles.json` is missing or corrupted.
+- Automatically migrates legacy bare-array format metadata to versioned schema.
+- Never deletes browser data directories automatically.
+- Never reattaches orphan profile directories without manual user confirmation.
+
+**Exit codes:**
+
+Exits with `0` when all critical checks pass (including with warnings). Exits with `1` if any check fails (`FAILED` status).
+
 ## Data storage and persistence
 
 ProfileDock stores data relative to the directory where commands are run:
@@ -389,6 +428,36 @@ Returns a single profile object with all metadata:
   "created_at": "2026-01-01T00:00:00+00:00",
   "data_dir": "/path/to/profiles/abc123/browser-data",
   "last_launched_at": "2026-01-15T12:30:00+00:00"
+}
+```
+
+**`doctor --json`:**
+
+Returns diagnostic checks, repairs performed, and overall health status:
+
+```json
+{
+  "checks": [
+    {
+      "id": "python_version",
+      "status": "ok",
+      "summary": "Python version is 3.11.0 (>= 3.9 required)."
+    },
+    {
+      "id": "stale_running_state",
+      "status": "warning",
+      "summary": "Found 1 stale running.json file(s).",
+      "action": "Run 'profiledock doctor --repair' to clean stale running-state files."
+    }
+  ],
+  "repairs": [
+    {
+      "id": "repair_stale_running_state",
+      "status": "ok",
+      "summary": "Cleaned up 1 stale running.json file(s)."
+    }
+  ],
+  "healthy": true
 }
 ```
 
