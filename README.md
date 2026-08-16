@@ -205,6 +205,16 @@ profiledock status <id-or-name> --json
 
 Reports profile status (`stopped`, `starting`, `running`, `closing`, `stale`, or `error` where detectable). When invoked without an identifier, status reports across all profiles.
 
+**Exit codes:**
+
+ProfileDock uses stable exit codes for scripting compatibility:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | User error (profile not found, validation error, profile already running, etc.) |
+| `2` | Reserved for system errors (optional, not currently used) |
+
 ### Launch
 
 ```bash
@@ -345,6 +355,51 @@ Run only browser and controller integration tests:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -m browser
 ```
+
+## JSON output format
+
+All JSON output from `--json` flags is stable and safe for scripting:
+
+**`list --json` and `status --json`:**
+
+Always returns an array of profile objects:
+
+```json
+[
+  {
+    "id": "abc123",
+    "name": "Work",
+    "status": "stopped",
+    "created_at": "2026-01-01T00:00:00+00:00",
+    "data_dir": "/path/to/profiles/abc123/browser-data",
+    "last_launched_at": null
+  }
+]
+```
+
+**`show <profile> --json`:**
+
+Returns a single profile object with all metadata:
+
+```json
+{
+  "id": "abc123",
+  "name": "Work",
+  "status": "running",
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "data_dir": "/path/to/profiles/abc123/browser-data",
+  "last_launched_at": "2026-01-15T12:30:00+00:00"
+}
+```
+
+**Guarantees:**
+
+- JSON output is always valid and parseable
+- No human prose mixed with JSON
+- No sensitive data exposed (tokens, secrets, passwords)
+- Field names and types are stable across versions
+- `status` and `list` always return arrays for consistent scripting
+- Timestamps use ISO-8601 format when present
 
 ## Updating the project
 
