@@ -5,4 +5,6 @@ __pycache__/
 *.egg-info/
 .venv/
 profiles.json
+profiles.json.bak
+profiles.lock
 profiles/

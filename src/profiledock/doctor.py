@@ -511,50 +511,25 @@ def check_version_consistency() -> DiagnosticCheck:
 def run_diagnostics(root: Path) -> List[DiagnosticCheck]:
     checks: List[DiagnosticCheck] = []
 
-    # 1. Supported Python version
     checks.append(check_python_version())
-
-    # 2. Writable data root
     checks.append(check_data_root_writable(root))
-
-    # 3. Valid metadata schema
     checks.append(check_metadata_schema(root))
-
-    # 4. Metadata backup state
     checks.append(check_metadata_backup_state(root))
-
-    # 5 & 6. Profile directory existence & Profile paths under data root
     chk_exist, chk_paths = check_profile_directories(root)
     checks.append(chk_exist)
     checks.append(chk_paths)
-
-    # 8. Playwright package availability
     pw_pkg_chk = check_playwright_package()
     checks.append(pw_pkg_chk)
-
-    # 9. Playwright Chromium availability
     pw_chrom_chk = check_playwright_chromium()
     checks.append(pw_chrom_chk)
-
-    # 10. System Chrome availability
     sys_chrome_chk = check_system_chrome()
     checks.append(sys_chrome_chk)
-
-    # 7. Browser availability (aggregate)
     browser_chk = check_browser_availability(pw_chrom_chk, sys_chrome_chk)
     checks.append(browser_chk)
-
-    # 11. Runtime directory permissions
     checks.append(check_runtime_permissions(root))
-
-    # 12. Stale running-state files
     stale_chk, _ = check_stale_running_state(root)
     checks.append(stale_chk)
-
-    # 13. Orphan profile directories
     checks.append(check_orphan_directories(root))
-
-    # 14. Package/runtime version consistency
     checks.append(check_version_consistency())
 
     return checks
@@ -563,7 +538,6 @@ def run_diagnostics(root: Path) -> List[DiagnosticCheck]:
 def repair_environment(root: Path) -> List[DiagnosticCheck]:
     repairs: List[DiagnosticCheck] = []
 
-    # Safe repair 1: Cleanup stale running-state files
     profiles_dir = root / "profiles"
     if profiles_dir.exists():
         _, stale_files = check_stale_running_state(root)
@@ -583,7 +557,6 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
                 )
             )
 
-    # Safe repair 2: Recover from validated metadata backup if primary is corrupted or missing/legacy
     profiles_file = root / "profiles.json"
     backup_file = root / "profiles.json.bak"
     primary_bad = False
@@ -591,7 +564,6 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
         try:
             data = _read_json_file(profiles_file)
             if _is_bare_array(data):
-                # Legacy format -> migrate safely
                 profiles = _load_profiles_from_bare_array(data)
                 validate_metadata_document(profiles, profiles_dir)
                 with metadata_lock(profiles_file):
