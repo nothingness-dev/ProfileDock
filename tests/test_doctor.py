@@ -181,11 +181,10 @@ def test_check_stale_running_state(tmp_path):
     running_json = p1_dir / "running.json"
     running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
 
-    with patch("profiledock.doctor._alive", return_value=False):
-        chk, stale_files = check_stale_running_state(tmp_path)
-        assert chk.status == STATUS_WARNING
-        assert len(stale_files) == 1
-        assert stale_files[0] == running_json
+    chk, stale_files = check_stale_running_state(tmp_path)
+    assert chk.status == STATUS_WARNING
+    assert len(stale_files) == 1
+    assert stale_files[0] == running_json
 
 
 def test_check_orphan_directories(tmp_path):
@@ -206,10 +205,9 @@ def test_repair_environment_stale_files(tmp_path):
     running_json = p1_dir / "running.json"
     running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
 
-    with patch("profiledock.doctor._alive", return_value=False):
-        repairs = repair_environment(tmp_path)
-        assert len(repairs) >= 1
-        assert not running_json.exists()
+    repairs = repair_environment(tmp_path)
+    assert len(repairs) >= 1
+    assert not running_json.exists()
 
 
 def test_repair_environment_metadata_recovery(tmp_path):

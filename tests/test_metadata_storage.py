@@ -11,7 +11,6 @@ import pytest
 
 from profiledock.models import MetadataDocument, METADATA_SCHEMA_VERSION, Profile
 from profiledock.storage import (
-    ConcurrencyError,
     MetadataCorruptedError,
     add_profile_atomic,
     load_metadata,
@@ -146,6 +145,11 @@ class TestCorruptedPrimaryWithValidBackup:
     def test_recover_from_backup(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         profile = _create_profile("abc123", "Test", str(profiles_dir / "abc123" / "browser-data"))
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[]),
+            metadata_path,
+            profiles_dir,
+        )
         doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
         save_metadata(doc, metadata_path, profiles_dir)
         metadata_path.write_text("corrupted data {{{", encoding="utf-8")
@@ -228,7 +232,10 @@ class TestUnsafePaths:
         real_dir = profiles_dir / "real"
         real_dir.mkdir()
         symlink_dir = profiles_dir / "link"
-        symlink_dir.symlink_to(real_dir)
+        try:
+            symlink_dir.symlink_to(real_dir, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks are unavailable: {exc}")
         profile = _create_profile("abc123", "Test", str(symlink_dir / "browser-data"))
         doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
         with pytest.raises(ValidationError, match="symlink"):
