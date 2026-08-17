@@ -23,15 +23,23 @@ class Profile:
 
     @classmethod
     def from_dict(cls, value: Dict[str, Any]) -> "Profile":
+        if not isinstance(value, dict):
+            raise ValueError("profile metadata must be a JSON object")
         required = ("id", "name", "created_at", "data_dir")
         if any(key not in value for key in required):
             raise ValueError("profile metadata is missing a required field")
+        for key in required:
+            if not isinstance(value[key], str):
+                raise ValueError(f"profile field {key} must be a string")
+        last_launched_at = value.get("last_launched_at")
+        if last_launched_at is not None and not isinstance(last_launched_at, str):
+            raise ValueError("profile field last_launched_at must be a string or null")
         return cls(
-            id=str(value["id"]),
-            name=str(value["name"]),
-            created_at=str(value["created_at"]),
-            data_dir=str(value["data_dir"]),
-            last_launched_at=value.get("last_launched_at"),
+            id=value["id"],
+            name=value["name"],
+            created_at=value["created_at"],
+            data_dir=value["data_dir"],
+            last_launched_at=last_launched_at,
         )
 
 
@@ -60,4 +68,3 @@ class MetadataDocument:
             raise ValueError("profiles must be a list")
         profiles = [Profile.from_dict(item) for item in profiles_list]
         return cls(schema_version=int(schema_version), profiles=profiles)
-

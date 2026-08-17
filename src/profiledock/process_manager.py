@@ -1,4 +1,5 @@
 import argparse
+import hmac
 import json
 import os
 import socket
@@ -8,8 +9,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 from uuid import uuid4
+from datetime import datetime, timezone
 
 _MAX_ERROR_BYTES = 4096
+RUNNING_STATE_PROTOCOL_VERSION = 1
+_MAX_COMMAND_BYTES = 512
 
 
 class ProfileRunningError(Exception):
@@ -28,6 +32,75 @@ def state_path(data_dir: str) -> Path:
 
 def error_path(data_dir: str) -> Path:
     return Path(data_dir).parent / "controller.error"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    payload = json.dumps(value).encode("utf-8")
+    fd = os.open(str(temporary), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(temporary, 0o600)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> bool:
+    if value.get("protocol_version") != RUNNING_STATE_PROTOCOL_VERSION:
+        return False
+    if profile_id is not None and value.get("profile_id") != profile_id:
+        return False
+    if not isinstance(value.get("token"), str) or len(value["token"]) < 32:
+        return False
+    if not isinstance(value.get("controller_started_at"), str):
+        return False
+    try:
+        datetime.fromisoformat(value["controller_started_at"])
+        int(value.get("controller_pid", 0))
+        int(value.get("port", 0))
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _upgrade_legacy_state(path: Path, value: Dict[str, Any], profile_id: str) -> Dict[str, Any]:
+    if "protocol_version" in value:
+        return value
+    try:
+        pid = int(value.get("pid", 0))
+        port = int(value.get("port", 0))
+    except (TypeError, ValueError):
+        return value
+    token = value.get("token")
+    if pid < 1 or port < 1 or not isinstance(token, str) or len(token) < 32:
+        return value
+    upgraded = dict(value)
+    upgraded.update(
+        {
+            "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+            "profile_id": profile_id,
+            "controller_pid": pid,
+            "controller_started_at": datetime.fromtimestamp(
+                path.stat().st_mtime, timezone.utc
+            ).isoformat(),
+            "status": "running",
+            "legacy_controller": True,
+        }
+    )
+    try:
+        _atomic_private_json(path, upgraded)
+    except OSError:
+        pass
+    return upgraded
 
 
 def _write_error(
@@ -117,20 +190,27 @@ def get_status(data_dir: str, clean_stale: bool = True) -> str:
     err = error_path(data_dir)
     if path.exists():
         state = _read_state(path)
-        if not state or not isinstance(state, dict):
+        if state:
+            state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
+        if not state or not _valid_state(state, Path(data_dir).parent.name):
             if clean_stale:
                 path.unlink(missing_ok=True)
             return "stale"
         if state.get("closing"):
-            pid = int(state.get("pid", -1))
+            pid = int(state.get("controller_pid", -1))
             if pid > 0 and _alive(pid):
                 return "closing"
             if clean_stale:
                 path.unlink(missing_ok=True)
             return "stale"
-        pid = int(state.get("pid", -1))
+        pid = int(state.get("controller_pid", -1))
         if pid <= 0:
-            return "starting"
+            launcher_pid = int(state.get("launcher_pid", -1))
+            if launcher_pid > 0 and _alive(launcher_pid):
+                return "starting"
+            if clean_stale:
+                path.unlink(missing_ok=True)
+            return "stale"
         if not _alive(pid):
             if clean_stale:
                 path.unlink(missing_ok=True)
@@ -207,12 +287,24 @@ def start_controller(
     if is_running(data_dir):
         raise ProfileRunningError("profile is already running")
     token = uuid4().hex
-    initial = {"pid": 0, "port": 0, "token": token, "tabs": tabs}
+    initial = {
+        "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+        "profile_id": Path(data_dir).parent.name,
+        "controller_pid": 0,
+        "controller_started_at": _utc_now(),
+        "launcher_pid": os.getpid(),
+        "port": 0,
+        "token": token,
+        "tabs": tabs,
+        "status": "starting",
+    }
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     try:
-        fd = os.open(str(path), flags)
+        fd = os.open(str(path), flags, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(initial, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
     except FileExistsError as exc:
         raise ProfileRunningError("profile is already running") from exc
 
@@ -226,13 +318,10 @@ def start_controller(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
-        state = _read_state(path) or initial
-        state["pid"] = process.pid
-        path.write_text(json.dumps(state), encoding="utf-8")
         deadline = time.monotonic() + startup_timeout
         while time.monotonic() < deadline:
             state = _read_state(path)
-            if state and state.get("port"):
+            if state and _valid_state(state, initial["profile_id"]) and state.get("port"):
                 err.unlink(missing_ok=True)
                 _close_stderr(process)
                 return state
@@ -280,27 +369,37 @@ def close_controller(data_dir: str, timeout: float = 15) -> None:
     state = _read_state(path)
     if not state:
         raise ProfileRunningError("profile is not running")
+    state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
     port = int(state.get("port", 0))
     if not port:
         raise BrowserLaunchError("profile controller is not ready")
     token = state.get("token", "")
+    if not _valid_state(state, Path(data_dir).parent.name):
+        path.unlink(missing_ok=True)
+        raise ProfileRunningError("profile is not running")
     state["closing"] = True
+    state["status"] = "closing"
     try:
-        path.write_text(json.dumps(state), encoding="utf-8")
+        _atomic_private_json(path, state)
     except OSError:
         pass
     close_sent = False
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
-            connection.sendall(("close:" + token).encode("utf-8"))
-        close_sent = True
+            if state.get("legacy_controller"):
+                connection.sendall(("close:" + token).encode("utf-8"))
+                close_sent = True
+            else:
+                connection.sendall(("close:" + token + "\n").encode("utf-8"))
+                response = connection.recv(16)
+                close_sent = response == b"ok\n"
     except OSError:
         pass
     deadline = time.monotonic() + timeout
     while path.exists() and time.monotonic() < deadline:
         time.sleep(0.1)
     if path.exists():
-        if not _alive(int(state.get("pid", -1))):
+        if not _alive(int(state.get("controller_pid", -1))):
             path.unlink(missing_ok=True)
             raise ProfileRunningError("profile is not running")
         raise BrowserLaunchError("profile did not close within the timeout")
@@ -322,9 +421,16 @@ def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
         except socket.timeout:
             continue
         with connection:
-            command = connection.recv(256).decode("utf-8")
-            if command == "close:" + token:
+            command = connection.recv(_MAX_COMMAND_BYTES + 1)
+            if len(command) > _MAX_COMMAND_BYTES:
+                connection.sendall(b"error\n")
+                continue
+            supplied = command.decode("utf-8", errors="replace").rstrip("\r\n")
+            expected = "close:" + token
+            if hmac.compare_digest(supplied, expected):
+                connection.sendall(b"ok\n")
                 return
+            connection.sendall(b"error\n")
 
 
 def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any, str]:
@@ -366,18 +472,21 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
                     context.pages[-1].close()
                 while len(context.pages) < tabs:
                     context.new_page()
-                path.write_text(
-                    json.dumps(
-                        {
-                            "pid": os.getpid(),
-                            "port": port,
-                            "token": token,
-                            "tabs": tabs,
-                            "page_count": len(context.pages),
-                            "channel": channel,
-                        }
-                    ),
-                    encoding="utf-8",
+                _atomic_private_json(
+                    path,
+                    {
+                        "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+                        "profile_id": Path(data_dir).parent.name,
+                        "controller_pid": os.getpid(),
+                        "pid": os.getpid(),
+                        "controller_started_at": _utc_now(),
+                        "port": port,
+                        "token": token,
+                        "tabs": tabs,
+                        "page_count": len(context.pages),
+                        "channel": channel,
+                        "status": "running",
+                    },
                 )
                 _wait_for_close(server, context, token)
             finally:

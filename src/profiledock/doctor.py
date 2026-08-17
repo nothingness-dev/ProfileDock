@@ -8,7 +8,7 @@ import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
-from .process_manager import _alive, _read_state, error_path, state_path
+from .process_manager import get_status, error_path, state_path
 from .storage import (
     MetadataCorruptedError,
     MetadataLockedError,
@@ -51,7 +51,7 @@ class DiagnosticCheck:
 def check_python_version() -> DiagnosticCheck:
     check_id = "python_version"
     ver = sys.version_info
-    current_str = f"{ver.major}.{ver.minor}.{ver.micro}"
+    current_str = f"{ver[0]}.{ver[1]}.{ver[2]}"
     if ver >= (3, 9):
         return DiagnosticCheck(
             id=check_id,
@@ -413,15 +413,9 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
 
     stale_files: List[Path] = []
     for running_json in profiles_dir.glob("*/running.json"):
-        state = _read_state(running_json)
-        if not state or not isinstance(state, dict):
+        data_dir = running_json.parent / "browser-data"
+        if get_status(str(data_dir), clean_stale=False) == "stale":
             stale_files.append(running_json)
-            continue
-        pid = int(state.get("pid", -1))
-        if pid > 0 and not _alive(pid):
-            stale_files.append(running_json)
-        elif pid <= 0:
-            pass
 
     if not stale_files:
         return (

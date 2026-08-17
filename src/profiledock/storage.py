@@ -27,6 +27,7 @@ def _lock_file(fd: Any) -> None:
     if sys.platform == "win32":
         import msvcrt
 
+        fd.seek(0)
         msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
     else:
         import fcntl
@@ -39,6 +40,7 @@ def _unlock_file(fd: Any) -> None:
         import msvcrt
 
         try:
+            fd.seek(0)
             msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
@@ -108,6 +110,12 @@ def _atomic_write(path: Path, content: str) -> None:
         os.close(fd)
         fd = None
         tmp_path.replace(path)
+        if sys.platform != "win32":
+            directory_fd = os.open(str(dir_path), os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except OSError as exc:
         if fd is not None:
             os.close(fd)
@@ -150,16 +158,19 @@ def load_metadata(path: Union[str, Path] = "profiles.json") -> MetadataDocument:
     data = _read_json_file(path)
     if _is_versioned_document(data):
         try:
-            return MetadataDocument.from_dict(data)
+            doc = MetadataDocument.from_dict(data)
+            validate_metadata_document(doc.profiles, path.parent / "profiles")
+            return doc
         except (ValidationError, ValueError) as exc:
             raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
     if _is_bare_array(data):
         profiles = _load_profiles_from_bare_array(data)
+        validate_metadata_document(profiles, path.parent / "profiles")
         return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
     raise MetadataCorruptedError(f"unrecognized metadata format in {path}")
 
 
-def migrate_metadata(
+def _migrate_metadata_unlocked(
     path: Union[str, Path],
     profile_root: Union[str, Path],
     backup: bool = True,
@@ -171,7 +182,9 @@ def migrate_metadata(
     data = _read_json_file(path)
     if _is_versioned_document(data):
         try:
-            return MetadataDocument.from_dict(data)
+            doc = MetadataDocument.from_dict(data)
+            validate_metadata_document(doc.profiles, profile_root)
+            return doc
         except (ValidationError, ValueError) as exc:
             raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
     if not _is_bare_array(data):
@@ -183,6 +196,16 @@ def migrate_metadata(
     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
     _atomic_write(path, json.dumps(doc.to_dict(), indent=2) + "\n")
     return doc
+
+
+def migrate_metadata(
+    path: Union[str, Path],
+    profile_root: Union[str, Path],
+    backup: bool = True,
+) -> MetadataDocument:
+    path = Path(path)
+    with metadata_lock(path):
+        return _migrate_metadata_unlocked(path, profile_root, backup)
 
 
 def load_metadata_with_recovery(path: Union[str, Path]) -> MetadataDocument:

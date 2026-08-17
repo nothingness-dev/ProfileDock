@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+import os
 from typing import List, Set
 
 from .models import Profile
@@ -41,7 +42,7 @@ def validate_duplicate_ids(profiles: List[Profile]) -> None:
 def validate_duplicate_directories(profiles: List[Profile]) -> None:
     seen_dirs: Set[str] = set()
     for profile in profiles:
-        normalized = str(Path(profile.data_dir).resolve())
+        normalized = os.path.normcase(str(Path(profile.data_dir).resolve()))
         if normalized in seen_dirs:
             raise ValidationError(f"duplicate data directory: {profile.data_dir}")
         seen_dirs.add(normalized)
@@ -59,20 +60,19 @@ def validate_path_safety(data_dir: str, profile_root: Path) -> None:
         raise ValidationError(
             f"data directory must be under profile root ({profile_root}): {data_dir}"
         )
+    root_absolute = profile_root.absolute()
+    path_absolute = data_path.absolute()
     try:
-        relative = data_path.relative_to(profile_root)
-        parts = relative.parts
-        current = profile_root.resolve()
-        for part in parts:
-            current = current / part
-            if current.is_symlink():
-                raise ValidationError(
-                    f"path contains symlink at {current}: {data_dir}"
-                )
-    except ValidationError:
-        raise
-    except (OSError, ValueError):
-        pass
+        relative = path_absolute.relative_to(root_absolute)
+    except ValueError as exc:
+        raise ValidationError(
+            f"data directory must be under profile root ({profile_root}): {data_dir}"
+        ) from exc
+    current = root_absolute
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValidationError(f"path contains symlink at {current}: {data_dir}")
 
 
 def validate_metadata_document(profiles: List[Profile], profile_root: Path) -> None:

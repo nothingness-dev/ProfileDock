@@ -32,6 +32,7 @@ class ProfileManager:
         migrate_metadata(self.profiles_file, self.profiles_dir)
 
     def list_profiles(self) -> List[Profile]:
+        self.ensure_migrated()
         doc = load_metadata(self.profiles_file)
         return doc.profiles
 
@@ -72,13 +73,17 @@ class ProfileManager:
         data_dir = self.profiles_dir / profile_id / "browser-data"
         data_dir.mkdir(parents=True, exist_ok=False)
         profile = Profile(profile_id, name, utc_now(), str(data_dir))
-        add_profile_atomic(profile, self.profiles_file, self.profiles_dir)
+        try:
+            add_profile_atomic(profile, self.profiles_file, self.profiles_dir)
+        except Exception:
+            shutil.rmtree(data_dir.parent, ignore_errors=True)
+            raise
         return profile
 
     def delete(self, identifier: str) -> Profile:
         profile = self.resolve(identifier)
-        shutil.rmtree(Path(profile.data_dir).parent, ignore_errors=False)
         remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir)
+        shutil.rmtree(Path(profile.data_dir).parent, ignore_errors=False)
         return profile
 
     def rename(self, identifier: str, new_name: str) -> Profile:
