@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.5.0`
+Current release: `0.6.0`
 
 ## Features
 
@@ -295,7 +295,7 @@ ProfileDock stores data relative to the directory where commands are run:
 profiledock/
 ├── profiles.json
 ├── profiles.json.bak
-├── profiles.json.lock
+├── profiles.lock
 └── profiles/
     └── <profile-id>/
         ├── browser-data/
@@ -341,9 +341,9 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 **Atomic writes**: All metadata writes are atomic. A temporary file is written, synced to disk, then moved into place. This ensures interrupted writes never leave a corrupted file.
 
-**Cross-process locking**: A lock file (`profiles.json.lock`) prevents concurrent processes from modifying metadata simultaneously.
+**Cross-process locking**: A lock file (`profiles.lock`) coordinates concurrent metadata modifications through an operating-system file lock. Its presence alone does not mean ProfileDock is locked.
 
-**Backup recovery**: Before each metadata update, the current file is backed up to `profiles.json.bak`. If the primary file becomes corrupted, ProfileDock can recover from the backup.
+**Backup recovery**: Before each metadata update, the current file is backed up to `profiles.json.bak`. The `profiledock doctor --repair` command can restore a valid backup after primary-file corruption.
 
 **Duplicate prevention**: Profile IDs and data directories must be unique. Duplicate values are rejected before any changes are written.
 
@@ -353,7 +353,7 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
 
-`running.json` exists only while a profile controller is active. It contains local process and controller connection information. Stale running-state files are cleaned automatically when detected.
+`running.json` exists only while a profile controller is active. New state files use a versioned local protocol and contain the profile ID, controller PID, start time, loopback port, status, and a random authentication token. State writes are atomic, and the controller accepts a close request only when its token matches. Stale state files are cleaned automatically. Active state files from ProfileDock 0.5 and earlier are recognized and upgraded so an existing browser remains detectable and closable.
 
 Run ProfileDock commands from the same project directory so they use the same `profiles.json` and `profiles` directory.
 
@@ -511,11 +511,11 @@ The profile metadata exists but its `browser-data` directory was moved or delete
 
 ### `profiles.json` is corrupted
 
-ProfileDock attempts to recover from `profiles.json.bak` automatically. If both files are corrupted, restore from a manual backup. ProfileDock intentionally refuses to overwrite corrupted metadata automatically.
+Run `profiledock doctor --repair` to validate and restore `profiles.json.bak`. If both files are corrupted, restore from a manual backup. Normal profile commands intentionally refuse to overwrite corrupted metadata automatically.
 
-### `profiles.json.lock` exists but no process is running
+### `profiles.lock` exists but no process is running
 
-If ProfileDock was interrupted, a stale lock file may prevent operations. Delete `profiles.json.lock` manually to resume normal operation.
+This is normal. ProfileDock uses an operating-system lock on this file, so an unlocked file may remain on disk safely. Do not use file existence to decide whether a metadata operation is active.
 
 ### Controller launch failure
 
@@ -603,7 +603,7 @@ Deleting the complete project also deletes `profiles.json` and every `profiles/<
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.4.1`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.6.0`.
 
 ## License
 
