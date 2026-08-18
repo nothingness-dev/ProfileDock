@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.8.1`
+Current release: `0.8.2`
 
 ## Features
 
@@ -114,6 +114,8 @@ After activation, the `profiledock` command is available directly.
 ## First profile walkthrough
 
 By default, ProfileDock uses `%LOCALAPPDATA%\ProfileDock` on Windows, `~/Library/Application Support/ProfileDock` on macOS, and `${XDG_DATA_HOME:-~/.local/share}/profiledock` on Linux.
+
+Commands can be run from any working directory: the default application-data location and an absolute `PROFILEDOCK_DATA_ROOT` remain the same. A relative `--data-root` or environment value is intentionally resolved from the working directory where the command is run.
 
 To use another location for one invocation, place the global option before the command:
 
@@ -674,7 +676,7 @@ The default application-data roots are `%LOCALAPPDATA%\ProfileDock` on Windows, 
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.8.1`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.8.2`.
 
 ## License
 
