@@ -300,6 +300,26 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 
 Exits with `0` when all critical checks pass (including with warnings). Exits with `1` if any check fails (`FAILED` status).
 
+### Migrate
+
+```bash
+profiledock migrate --from-project <path>
+profiledock migrate --from-project <path> --json
+profiledock migrate --from-project <path> --remove-source --yes
+```
+
+Migrates profiles and browser data from a legacy or another project directory into the active ProfileDock data root.
+
+**Migration safety & guarantees:**
+
+- **Pre-migration backup**: It is strongly recommended to create a copy/backup of both the source directory and the destination data root before initiating migration.
+- **Safety checks**: Detects legacy `profiles.json` and `profiles/`, validates metadata schema, and refuses migration if any source profile is currently running.
+- **Conflict detection**: Prevents silent overwrite by detecting ID or name conflicts.
+- **Atomic directory copying**: Copies profile directories into temporary destination folders, verifies file integrity, and moves them into place atomically before updating metadata.
+- **Automatic rollback**: Incomplete changes in the destination are rolled back cleanly if copying or validation fails.
+- **Source preservation**: Leaves source files completely untouched by default. `--remove-source` deletes source data only after successful migration and explicit confirmation.
+- **Idempotent**: Re-running migration safely skips already migrated identical profiles.
+
 ## Data storage and persistence
 
 ProfileDock resolves one data root for each command and uses this structure:
@@ -481,6 +501,28 @@ Returns diagnostic checks, repairs performed, and overall health status:
     }
   ],
   "healthy": true
+}
+```
+
+**`migrate --json`:**
+
+Returns details of migrated, skipped, and failed profiles:
+
+```json
+{
+  "source_root": "/path/to/source",
+  "destination_root": "/path/to/destination",
+  "migrated": [
+    {
+      "id": "abc123",
+      "name": "Work",
+      "status": "migrated",
+      "message": "successfully migrated"
+    }
+  ],
+  "skipped": [],
+  "failed": [],
+  "source_removed": false
 }
 ```
 
