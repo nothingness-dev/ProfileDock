@@ -28,13 +28,21 @@ class BrowserLaunchError(Exception):
 
 def _runtime_dir(data_dir: str, runtime_dir: Optional[Path]) -> Path:
     if runtime_dir is not None:
-        return runtime_dir
+        selected = runtime_dir
+    else:
+        data_path = Path(data_dir)
+        profile_dir = data_path.parent
+        profiles_dir = profile_dir.parent
+        if profiles_dir.name == "profiles":
+            selected = profiles_dir.parent / "runtime" / profile_dir.name
+        else:
+            selected = profile_dir
     data_path = Path(data_dir)
-    profile_dir = data_path.parent
-    profiles_dir = profile_dir.parent
-    if profiles_dir.name == "profiles":
-        return profiles_dir.parent / "runtime" / profile_dir.name
-    return profile_dir
+    try:
+        selected.resolve(strict=False).relative_to(data_path.resolve(strict=False))
+    except ValueError:
+        return selected
+    raise ValueError("runtime directory cannot be inside browser-data")
 
 
 def state_path(data_dir: str, runtime_dir: Optional[Path] = None) -> Path:

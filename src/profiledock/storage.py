@@ -218,15 +218,18 @@ def migrate_metadata(
         return _migrate_metadata_unlocked(path, profile_root, backup, backup_path)
 
 
-def load_metadata_with_recovery(path: Union[str, Path]) -> MetadataDocument:
+def load_metadata_with_recovery(
+    path: Union[str, Path],
+    backup_path: Union[str, Path, None] = None,
+) -> MetadataDocument:
     path = Path(path)
     try:
         return load_metadata(path)
     except MetadataCorruptedError:
-        backup_path = path.with_suffix(".json.bak")
-        if backup_path.exists():
+        recovery_path = Path(backup_path) if backup_path is not None else path.with_suffix(".json.bak")
+        if recovery_path.exists():
             try:
-                data = _read_json_file(backup_path)
+                data = _read_json_file(recovery_path)
                 if _is_versioned_document(data):
                     return MetadataDocument.from_dict(data)
                 if _is_bare_array(data):
@@ -263,9 +266,10 @@ def save_profiles(
     profiles: List[Profile],
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
 ) -> None:
     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
-    save_metadata(doc, path, profile_root)
+    save_metadata(doc, path, profile_root, backup_path)
 
 
 def atomic_update_metadata(

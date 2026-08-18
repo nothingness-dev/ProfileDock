@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 import os
+import re
 from typing import List, Set
 
 from .models import Profile
@@ -20,6 +21,8 @@ def validate_timestamp(timestamp_str: str, field_name: str) -> None:
 def validate_required_fields(profile: Profile) -> None:
     if not profile.id or not profile.id.strip():
         raise ValidationError("profile id must not be empty")
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", profile.id) is None:
+        raise ValidationError("profile id contains unsafe characters")
     if not profile.name or not profile.name.strip():
         raise ValidationError("profile name must not be empty")
     if not profile.created_at or not profile.created_at.strip():

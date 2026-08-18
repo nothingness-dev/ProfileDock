@@ -34,15 +34,27 @@ class DataPaths:
         )
 
     def prepare(self) -> None:
+        if self.root.exists() and (not self.root.is_dir() or self.root.is_symlink()):
+            raise DataRootError("data root must be a real directory")
+        self.root.mkdir(parents=True, exist_ok=True)
+        root = self.root.resolve()
         for path in (
-            self.root,
             self.metadata_dir,
             self.profiles_dir,
             self.runtime_dir,
             self.logs_dir,
             self.backups_dir,
         ):
+            if path.exists() and (not path.is_dir() or path.is_symlink()):
+                raise DataRootError(f"managed data directory is unsafe: {path}")
             path.mkdir(parents=True, exist_ok=True)
+            try:
+                path.resolve().relative_to(root)
+            except ValueError as exc:
+                raise DataRootError(f"managed data directory escapes data root: {path}") from exc
+        for path in (self.profiles_file, self.backup_file, self.profiles_file.with_suffix(".lock")):
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                raise DataRootError(f"managed data file is unsafe: {path}")
 
 
 def platform_data_root(
@@ -75,7 +87,9 @@ def resolve_data_root(
     selected = cli_value
     if selected is None:
         env_value = environ.get("PROFILEDOCK_DATA_ROOT")
-        selected = Path(env_value) if env_value else platform_data_root(platform, environ, home)
+        selected = Path(env_value) if env_value and env_value.strip() else platform_data_root(platform, environ, home)
+    if not str(selected).strip():
+        raise DataRootError("data root cannot be empty")
     expanded = Path(os.path.expandvars(str(selected))).expanduser()
     if not expanded.is_absolute():
         expanded = Path.cwd() / expanded

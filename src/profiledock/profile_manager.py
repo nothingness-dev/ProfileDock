@@ -35,7 +35,12 @@ class ProfileManager:
         self.backup_file = paths.backup_file
 
     def runtime_path(self, profile_id: str) -> Path:
-        return self.runtime_dir / profile_id
+        path = (self.runtime_dir / profile_id).resolve(strict=False)
+        try:
+            path.relative_to(self.runtime_dir.resolve())
+        except ValueError as exc:
+            raise ValueError("unsafe profile id") from exc
+        return path
 
     def ensure_migrated(self) -> None:
         migrate_metadata(self.profiles_file, self.profiles_dir, backup_path=self.backup_file)
@@ -91,10 +96,11 @@ class ProfileManager:
 
     def delete(self, identifier: str) -> Profile:
         profile = self.resolve(identifier)
+        expected_root = (self.profiles_dir / profile.id).resolve()
+        expected_data = expected_root / "browser-data"
         profile_root = Path(profile.data_dir).parent.resolve()
-        if profile_root == self.root or profile_root == self.profiles_dir:
-            raise ValueError("refusing to delete the data root")
-        profile_root.relative_to(self.profiles_dir.resolve())
+        if Path(profile.data_dir).resolve() != expected_data or profile_root != expected_root:
+            raise ValueError("refusing to delete unsafe profile directory")
         remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir, self.backup_file)
         shutil.rmtree(profile_root, ignore_errors=False)
         shutil.rmtree(self.runtime_path(profile.id), ignore_errors=True)
