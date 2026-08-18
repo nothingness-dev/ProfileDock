@@ -1,8 +1,10 @@
 import json
 import os
 from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import patch
 
-from profiledock.process_manager import _read_state, _wait_for_close, get_status, state_path
+from profiledock.process_manager import _atomic_private_json, _read_state, _wait_for_close, get_status, state_path
 
 
 class Connection:
@@ -81,3 +83,21 @@ def test_state_for_another_profile_is_stale(tmp_path):
         encoding="utf-8",
     )
     assert get_status(str(data_dir), clean_stale=False) == "stale"
+
+
+def test_private_state_write_retries_transient_replace_failure(tmp_path):
+    target = tmp_path / "running.json"
+    original_replace = Path.replace
+    attempts = 0
+
+    def replace_with_failures(source, destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("temporarily locked")
+        return original_replace(source, destination)
+
+    with patch.object(Path, "replace", replace_with_failures):
+        _atomic_private_json(target, {"status": "running"})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"status": "running"}
+    assert attempts == 3

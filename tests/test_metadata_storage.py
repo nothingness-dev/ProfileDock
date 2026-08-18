@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 from pathlib import Path
 from typing import Generator
 
@@ -20,6 +21,7 @@ from profiledock.storage import (
     remove_profile_atomic,
     rename_profile_atomic,
     save_metadata,
+    _atomic_write,
 )
 from profiledock.validation import ValidationError
 
@@ -182,6 +184,24 @@ class TestCorruptedPrimaryWithValidBackup:
         recovered = load_metadata_with_recovery(metadata_path, backup_path)
         assert recovered.profiles == []
 
+    def test_recovery_rejects_unsafe_backup(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = temp_dir / "backups" / "profiles.json.bak"
+        backup_path.parent.mkdir(parents=True)
+        profile = _create_profile("unsafe", "Unsafe", str(temp_dir / "outside" / "browser-data"))
+        backup_path.write_text(
+            json.dumps(
+                MetadataDocument(
+                    schema_version=METADATA_SCHEMA_VERSION,
+                    profiles=[profile],
+                ).to_dict()
+            ),
+            encoding="utf-8",
+        )
+        metadata_path.write_text("corrupted", encoding="utf-8")
+        with pytest.raises(MetadataCorruptedError):
+            load_metadata_with_recovery(metadata_path, backup_path)
+
 
 class TestConcurrentMutations:
     def test_concurrent_add_profiles(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
@@ -245,6 +265,24 @@ class TestInterruptedWrites:
         assert loaded.schema_version == METADATA_SCHEMA_VERSION
         assert len(loaded.profiles) == 1
 
+    def test_backup_write_leaves_no_temporary_file(self, metadata_path: Path, profiles_dir: Path) -> None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = metadata_path.parent / "backups" / "profiles.json.bak"
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[]),
+            metadata_path,
+            profiles_dir,
+            backup_path,
+        )
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[]),
+            metadata_path,
+            profiles_dir,
+            backup_path,
+        )
+        assert backup_path.is_file()
+        assert list(backup_path.parent.glob("*.tmp")) == []
+
 
 class TestUnsafePaths:
     def test_reject_symlink_data_dir(self, temp_dir: Path, profiles_dir: Path, metadata_path: Path) -> None:
@@ -293,3 +331,21 @@ def test_rejects_path_like_profile_id(metadata_path: Path, profiles_dir: Path) -
     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
     with pytest.raises(ValidationError, match="unsafe characters"):
         save_metadata(doc, metadata_path, profiles_dir)
+
+
+def test_atomic_write_retries_transient_replace_failure(tmp_path: Path) -> None:
+    target = tmp_path / "profiles.json"
+    original_replace = Path.replace
+    attempts = 0
+
+    def replace_with_failures(source, destination):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("temporarily locked")
+        return original_replace(source, destination)
+
+    with patch.object(Path, "replace", replace_with_failures):
+        _atomic_write(target, "{}")
+    assert target.read_text(encoding="utf-8") == "{}"
+    assert attempts == 3

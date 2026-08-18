@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -117,6 +118,18 @@ def test_runtime_path_rejects_path_like_profile_id(tmp_path):
     manager = ProfileManager(tmp_path / "data")
     with pytest.raises(ValueError, match="unsafe profile id"):
         manager.runtime_path("../logs")
+
+
+def test_manager_rejects_filesystem_root():
+    with pytest.raises(DataRootError):
+        ProfileManager(Path(Path.cwd().anchor))
+
+
+def test_manager_does_not_revalidate_resolved_paths(tmp_path):
+    paths = resolve_data_root(tmp_path / "data")
+    with patch.object(type(paths), "prepare", side_effect=AssertionError("revalidated")):
+        manager = ProfileManager(paths)
+    assert manager.root == paths.root
 
 
 def test_cli_option_controls_command_storage(tmp_path, monkeypatch):

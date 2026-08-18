@@ -137,6 +137,28 @@ def test_check_metadata_backup_state_corrupted(tmp_path):
     assert res.status == STATUS_WARNING
 
 
+def test_check_metadata_backup_state_rejects_unsafe_profile(tmp_path):
+    layout = paths(tmp_path)
+    layout.backup_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": [
+                    {
+                        "id": "unsafe",
+                        "name": "Unsafe",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "data_dir": str(tmp_path / "outside" / "browser-data"),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = check_metadata_backup_state(tmp_path)
+    assert res.status == STATUS_WARNING
+
+
 def test_check_profile_directories(tmp_path):
     layout = paths(tmp_path)
     profiles_file = layout.profiles_file
