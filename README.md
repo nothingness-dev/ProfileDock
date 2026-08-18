@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.8.0`
+Current release: `0.8.1`
 
 ## Features
 
@@ -313,12 +313,14 @@ Migrates profiles and browser data from a legacy or another project directory in
 **Migration safety & guarantees:**
 
 - **Pre-migration backup**: It is strongly recommended to create a copy/backup of both the source directory and the destination data root before initiating migration.
-- **Safety checks**: Detects legacy `profiles.json` and `profiles/`, validates metadata schema, and refuses migration if any source profile is currently running.
-- **Conflict detection**: Prevents silent overwrite by detecting ID or name conflicts.
-- **Atomic directory copying**: Copies profile directories into temporary destination folders, verifies file integrity, and moves them into place atomically before updating metadata.
+- **Safety checks**: Detects both legacy and application-data layouts, validates every source field and timestamp, requires exact `profiles/<id>/browser-data` paths, rejects links and overlapping roots, and refuses migration if a source controller is running.
+- **Conflict detection**: Prevents silent overwrite by detecting ID, name, metadata, content, final-directory, and interrupted temporary-directory conflicts.
+- **Verified copying**: Copies profile directories into private temporary destination folders and compares complete directory and SHA-256 file manifests before finalization.
 - **Automatic rollback**: Incomplete changes in the destination are rolled back cleanly if copying or validation fails.
-- **Source preservation**: Leaves source files completely untouched by default. `--remove-source` deletes source data only after successful migration and explicit confirmation.
-- **Idempotent**: Re-running migration safely skips already migrated identical profiles.
+- **Source preservation**: Leaves source files untouched by default and detects source changes during copying. `--remove-source` deletes tracked source data only after successful migration and explicit confirmation; untracked profile or runtime entries block removal.
+- **Idempotent**: Re-running migration skips profiles only when their metadata and copied browser content are identical, without rewriting destination metadata.
+
+When combining `--remove-source` with `--json`, also pass `--yes`. This keeps standard output valid JSON without an interactive confirmation prompt.
 
 ## Data storage and persistence
 
@@ -526,6 +528,8 @@ Returns details of migrated, skipped, and failed profiles:
 }
 ```
 
+Failures also use this report shape, place the error in `failed`, and exit with code `1`. Human-readable runs print migration, skip, conflict, and failure information directly in the terminal.
+
 **Guarantees:**
 
 - JSON output is always valid and parseable
@@ -670,7 +674,7 @@ The default application-data roots are `%LOCALAPPDATA%\ProfileDock` on Windows, 
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.3`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.8.1`.
 
 ## License
 
