@@ -16,8 +16,8 @@ from .doctor import (
 from .migration import (
     ConflictError,
     MigrationError,
-    MigrationReport,
     SourceRunningError,
+    failure_report,
     migrate_project,
 )
 from .data_root import DataPaths, DataRootError, resolve_data_root
@@ -329,6 +329,14 @@ def migrate(
 ) -> None:
     paths = _paths.get() or resolve_data_root()
     if remove_source and not yes:
+        if json_output:
+            report = failure_report(
+                from_project,
+                paths.root,
+                "--remove-source requires --yes when using --json",
+            )
+            typer.echo(json.dumps(report.to_dict(), indent=2))
+            raise typer.Exit(EXIT_USER_ERROR)
         if not typer.confirm(
             f"Are you sure you want to delete source profile data in '{from_project}' after migration?"
         ):
@@ -341,6 +349,10 @@ def migrate(
             remove_source=remove_source,
         )
     except (MigrationError, ConflictError, SourceRunningError, StorageError, ValueError) as exc:
+        if json_output:
+            report = failure_report(from_project, paths.root, str(exc))
+            typer.echo(json.dumps(report.to_dict(), indent=2))
+            raise typer.Exit(EXIT_USER_ERROR)
         fail(str(exc))
 
     if json_output:
