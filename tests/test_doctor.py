@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.data_root import DataPaths
 from profiledock.doctor import (
     DiagnosticCheck,
     STATUS_FAILED,
@@ -31,6 +32,12 @@ from profiledock.models import Profile, METADATA_SCHEMA_VERSION, MetadataDocumen
 from profiledock.storage import save_metadata
 
 runner = CliRunner()
+
+
+def paths(root):
+    result = DataPaths.from_root(root)
+    result.prepare()
+    return result
 
 
 def test_check_python_version():
@@ -67,8 +74,9 @@ def test_check_metadata_schema_missing(tmp_path):
 
 
 def test_check_metadata_schema_valid(tmp_path):
-    profiles_file = tmp_path / "profiles.json"
-    profiles_dir = tmp_path / "profiles"
+    layout = paths(tmp_path)
+    profiles_file = layout.profiles_file
+    profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
     doc = MetadataDocument(
         schema_version=1,
@@ -81,8 +89,9 @@ def test_check_metadata_schema_valid(tmp_path):
 
 
 def test_check_metadata_schema_legacy_bare_array(tmp_path):
-    profiles_file = tmp_path / "profiles.json"
-    profiles_dir = tmp_path / "profiles"
+    layout = paths(tmp_path)
+    profiles_file = layout.profiles_file
+    profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
     profiles_file.write_text(
         json.dumps(
@@ -103,7 +112,7 @@ def test_check_metadata_schema_legacy_bare_array(tmp_path):
 
 
 def test_check_metadata_schema_corrupted(tmp_path):
-    profiles_file = tmp_path / "profiles.json"
+    profiles_file = paths(tmp_path).profiles_file
     profiles_file.write_text("invalid json", encoding="utf-8")
     res = check_metadata_schema(tmp_path)
     assert res.status == STATUS_FAILED
@@ -115,22 +124,23 @@ def test_check_metadata_backup_state_empty(tmp_path):
 
 
 def test_check_metadata_backup_state_valid(tmp_path):
-    bak = tmp_path / "profiles.json.bak"
+    bak = paths(tmp_path).backup_file
     bak.write_text(json.dumps({"schema_version": 1, "profiles": []}), encoding="utf-8")
     res = check_metadata_backup_state(tmp_path)
     assert res.status == STATUS_OK
 
 
 def test_check_metadata_backup_state_corrupted(tmp_path):
-    bak = tmp_path / "profiles.json.bak"
+    bak = paths(tmp_path).backup_file
     bak.write_text("invalid json", encoding="utf-8")
     res = check_metadata_backup_state(tmp_path)
     assert res.status == STATUS_WARNING
 
 
 def test_check_profile_directories(tmp_path):
-    profiles_file = tmp_path / "profiles.json"
-    profiles_dir = tmp_path / "profiles"
+    layout = paths(tmp_path)
+    profiles_file = layout.profiles_file
+    profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
     data_dir.mkdir(parents=True)
     doc = MetadataDocument(
@@ -145,8 +155,9 @@ def test_check_profile_directories(tmp_path):
 
 
 def test_check_profile_directories_missing(tmp_path):
-    profiles_file = tmp_path / "profiles.json"
-    profiles_dir = tmp_path / "profiles"
+    layout = paths(tmp_path)
+    profiles_file = layout.profiles_file
+    profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
     doc = MetadataDocument(
         schema_version=1,
@@ -175,8 +186,8 @@ def test_check_browser_availability():
 
 
 def test_check_stale_running_state(tmp_path):
-    profiles_dir = tmp_path / "profiles"
-    p1_dir = profiles_dir / "p1"
+    layout = paths(tmp_path)
+    p1_dir = layout.runtime_dir / "p1"
     p1_dir.mkdir(parents=True)
     running_json = p1_dir / "running.json"
     running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
@@ -188,9 +199,10 @@ def test_check_stale_running_state(tmp_path):
 
 
 def test_check_orphan_directories(tmp_path):
-    profiles_dir = tmp_path / "profiles"
+    layout = paths(tmp_path)
+    profiles_dir = layout.profiles_dir
     (profiles_dir / "orphan1").mkdir(parents=True)
-    profiles_file = tmp_path / "profiles.json"
+    profiles_file = layout.profiles_file
     profiles_file.write_text(json.dumps({"schema_version": 1, "profiles": []}), encoding="utf-8")
 
     res = check_orphan_directories(tmp_path)
@@ -199,8 +211,8 @@ def test_check_orphan_directories(tmp_path):
 
 
 def test_repair_environment_stale_files(tmp_path):
-    profiles_dir = tmp_path / "profiles"
-    p1_dir = profiles_dir / "p1"
+    layout = paths(tmp_path)
+    p1_dir = layout.runtime_dir / "p1"
     p1_dir.mkdir(parents=True)
     running_json = p1_dir / "running.json"
     running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
@@ -211,9 +223,10 @@ def test_repair_environment_stale_files(tmp_path):
 
 
 def test_repair_environment_metadata_recovery(tmp_path):
-    profiles_file = tmp_path / "profiles.json"
-    backup_file = tmp_path / "profiles.json.bak"
-    profiles_dir = tmp_path / "profiles"
+    layout = paths(tmp_path)
+    profiles_file = layout.profiles_file
+    backup_file = layout.backup_file
+    profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
 
     profiles_file.write_text("corrupt json", encoding="utf-8")

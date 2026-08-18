@@ -133,6 +133,7 @@ def test_duplicate_launch_is_rejected(controller_env):
 def test_stale_running_state_is_cleaned(controller_env):
     manager, profile, data_dir, owned_pids = controller_env
     path = state_path(str(data_dir))
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"pid": 999999, "port": 12345, "token": "x", "tabs": 1}),
         encoding="utf-8",
@@ -192,6 +193,7 @@ def test_persistent_state_survives_controller_cycles(controller_env):
 def test_error_file_not_created_on_success(controller_env):
     manager, profile, data_dir, owned_pids = controller_env
     err = error_path(str(data_dir))
+    err.parent.mkdir(parents=True, exist_ok=True)
     state = _start(data_dir, owned_pids, tabs=1)
     assert not err.exists()
     _close(data_dir, owned_pids, state["pid"])
@@ -233,6 +235,7 @@ def test_start_controller_preserves_native_exit_diagnostic(controller_env):
 def test_error_file_cleaned_after_successful_launch(controller_env):
     manager, profile, data_dir, owned_pids = controller_env
     err = error_path(str(data_dir))
+    err.parent.mkdir(parents=True, exist_ok=True)
     err.write_text(
         json.dumps({"error_type": "old_error", "message": "old failure"}),
         encoding="utf-8",
@@ -285,8 +288,8 @@ def test_close_racing_with_manual_closure(controller_env):
 
     original_is_running = is_running
 
-    def spying_is_running(dd):
-        result = original_is_running(dd)
+    def spying_is_running(dd, runtime_dir=None):
+        result = original_is_running(dd, runtime_dir)
         if result:
             close_entered.set()
         return result
@@ -377,7 +380,9 @@ def test_list_shows_stopped_after_manual_closure(controller_env):
     _terminate_owned_tree(pid)
     owned_pids.discard(pid)
     is_running(str(data_dir))
-    with patch("profiledock.cli.manager") as mock_manager:
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.runtime_path", return_value=state_path(str(data_dir)).parent
+    ):
         mock_manager.return_value.list_profiles.return_value = [profile]
         result = runner.invoke(app, ["list"])
     assert result.exit_code == 0

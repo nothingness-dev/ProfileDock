@@ -46,7 +46,7 @@ def test_launch_browser_error_shown_concisely(tmp_path):
         encoding="utf-8",
     )
 
-    def fake_start_controller(data_dir, tabs, headless=False):
+    def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None):
         raise BrowserLaunchError(
             "Playwright Chromium: not installed\nGoogle Chrome: not found"
         )
@@ -103,7 +103,7 @@ def test_launch_running_error_shown_concisely(tmp_path):
         encoding="utf-8",
     )
 
-    def fake_start_controller(data_dir, tabs, headless=False):
+    def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None):
         raise ProfileRunningError("profile is already running")
 
     with patch("profiledock.cli.manager") as mock_manager, patch(
@@ -145,7 +145,7 @@ def test_close_browser_error_shown_concisely(tmp_path):
         encoding="utf-8",
     )
 
-    def fake_close_controller(data_dir, timeout=15):
+    def fake_close_controller(data_dir, timeout=15, runtime_dir=None):
         raise BrowserLaunchError("profile is not running")
 
     with patch("profiledock.cli.manager") as mock_manager, patch(

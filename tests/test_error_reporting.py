@@ -22,7 +22,7 @@ from profiledock.process_manager import (
 
 def test_error_path_is_sibling_to_state():
     data_dir = "/some/path/profiles/abc123/browser-data"
-    assert error_path(data_dir) == Path("/some/path/profiles/abc123/controller.error")
+    assert error_path(data_dir) == Path("/some/path/runtime/abc123/controller.error")
 
 
 def test_write_and_read_error_round_trip(tmp_path):

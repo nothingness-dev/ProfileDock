@@ -18,6 +18,7 @@ def test_create_list_delete(manager):
 def test_running_state_stale_file_is_cleaned(manager):
     profile = manager.create("Personal")
     path = state_path(profile.data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"pid": 999999, "port": 1}', encoding="utf-8")
     assert not is_running(profile.data_dir)
     assert not path.exists()
@@ -28,6 +29,7 @@ def test_get_status_states(manager):
     assert get_status(profile.data_dir) == "stopped"
 
     path = state_path(profile.data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
     starting = {
         "protocol_version": 1,
         "profile_id": profile.id,
