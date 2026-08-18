@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.6.0`
+Current release: `0.7.0`
 
 ## Features
 
@@ -12,7 +12,8 @@ Current release: `0.6.0`
 - Prevent the same profile from launching twice.
 - Close browsers gracefully through a local controller process.
 - Use Playwright Chromium or fall back to an installed Google Chrome.
-- Store all ProfileDock data inside the project directory.
+- Store ProfileDock data in the operating system's application-data directory.
+- Override storage with `--data-root` or `PROFILEDOCK_DATA_ROOT`.
 
 ## Requirements
 
@@ -40,6 +41,8 @@ The setup script:
 5. Runs the complete test suite.
 
 The script is safe to run again after pulling updates. It reuses the existing virtual environment.
+
+Setup does not create or remove ProfileDock application data. The data root is resolved when a `profiledock` command runs.
 
 To skip all browser preparation:
 
@@ -109,6 +112,16 @@ source .venv/bin/activate
 After activation, the `profiledock` command is available directly.
 
 ## First profile walkthrough
+
+By default, ProfileDock uses `%LOCALAPPDATA%\ProfileDock` on Windows, `~/Library/Application Support/ProfileDock` on macOS, and `${XDG_DATA_HOME:-~/.local/share}/profiledock` on Linux.
+
+To use another location for one invocation, place the global option before the command:
+
+```bash
+profiledock --data-root /path/to/profiledock-data list
+```
+
+To use another location for every command in the current environment, set `PROFILEDOCK_DATA_ROOT`. The CLI option takes precedence over the environment variable, and the environment variable takes precedence over the platform default.
 
 Create a profile:
 
@@ -289,17 +302,23 @@ Exits with `0` when all critical checks pass (including with warnings). Exits wi
 
 ## Data storage and persistence
 
-ProfileDock stores data relative to the directory where commands are run:
+ProfileDock resolves one data root for each command and uses this structure:
 
 ```text
-profiledock/
-├── profiles.json
-├── profiles.json.bak
-├── profiles.lock
-└── profiles/
-    └── <profile-id>/
-        ├── browser-data/
-        └── running.json
+ProfileDock/
+├── metadata/
+│   ├── profiles.json
+│   └── profiles.lock
+├── backups/
+│   └── profiles.json.bak
+├── profiles/
+│   └── <profile-id>/
+│       └── browser-data/
+├── runtime/
+│   └── <profile-id>/
+│       ├── running.json
+│       └── controller.error
+└── logs/
 ```
 
 ### Metadata document format
@@ -341,7 +360,7 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 **Atomic writes**: All metadata writes are atomic. A temporary file is written, synced to disk, then moved into place. This ensures interrupted writes never leave a corrupted file.
 
-**Cross-process locking**: A lock file (`profiles.lock`) coordinates concurrent metadata modifications through an operating-system file lock. Its presence alone does not mean ProfileDock is locked.
+**Cross-process locking**: A lock file (`metadata/profiles.lock`) coordinates concurrent metadata modifications through an operating-system file lock. Its presence alone does not mean ProfileDock is locked.
 
 **Backup recovery**: Before each metadata update, the current file is backed up to `profiles.json.bak`. The `profiledock doctor --repair` command can restore a valid backup after primary-file corruption.
 
@@ -355,7 +374,7 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 `running.json` exists only while a profile controller is active. New state files use a versioned local protocol and contain the profile ID, controller PID, start time, loopback port, status, and a random authentication token. State writes are atomic, and the controller accepts a close request only when its token matches. Stale state files are cleaned automatically. Active state files from ProfileDock 0.5 and earlier are recognized and upgraded so an existing browser remains detectable and closable.
 
-Run ProfileDock commands from the same project directory so they use the same `profiles.json` and `profiles` directory.
+Runtime state, logs, backups, metadata, and browser data are separated. Runtime files are never written inside `browser-data`.
 
 ## Isolation, security, and privacy
 
@@ -363,7 +382,7 @@ Run ProfileDock commands from the same project directory so they use the same `p
 - ProfileDock does not automate authentication or store passwords itself.
 - Websites and Chromium may store credentials, cookies, tokens, and browsing history inside `browser-data`.
 - Anyone with access to a profile directory may be able to access its browser state.
-- Do not commit `profiles.json`, `profiles`, `.venv`, or `.tmp`; they are excluded by `.gitignore`.
+- Keep the selected data root private and out of source control.
 - Closing a profile does not delete its browsing data.
 - Deleting a profile permanently removes its local browser data.
 
@@ -542,11 +561,11 @@ The browser took longer than 30 seconds to become ready. Check system resources 
 **Controller process exited unexpectedly:**
 The controller subprocess crashed. Check for system resource constraints or permission issues.
 
-When a controller fails, ProfileDock preserves a diagnostic file at `profiles/<id>/controller.error`. It contains a stable error category, a bounded diagnostic message, and the browser channel attempted when relevant. Diagnostics are limited to 4 KiB, controller tokens are redacted, and the file is automatically cleaned up on the next successful launch.
+When a controller fails, ProfileDock preserves a diagnostic file at `runtime/<id>/controller.error` beneath the selected data root. It contains a stable error category, a bounded diagnostic message, and the browser channel attempted when relevant. Diagnostics are limited to 4 KiB, controller tokens are redacted, and the file is automatically cleaned up on the next successful launch.
 
 ## Removing ProfileDock
 
-Profile data is project-local, so decide whether to keep or delete it before removing the project.
+Profile data is separate from the source project, so decide whether to keep or delete both locations.
 
 ### 1. Close running profiles
 
@@ -562,12 +581,12 @@ profiledock close <id>
 To preserve login state and browser data, copy these items to a secure location:
 
 ```text
-profiles.json
-profiles.json.bak
+metadata/
+backups/
 profiles/
 ```
 
-They must be restored together into the same project directory structure.
+They must be restored together beneath the same data root.
 
 ### 3. Remove Playwright-managed browsers if needed
 
@@ -593,17 +612,17 @@ Deactivate it first if active:
 deactivate
 ```
 
-Then delete the `.venv` directory. This removes installed Python dependencies but keeps source code and profiles. The setup script can recreate it later.
+Then delete the `.venv` directory. This removes installed Python dependencies but keeps source code and application data. The setup script can recreate it later.
 
 ### 5. Remove the complete project
 
 Close all profiles, leave the project directory in your terminal, and delete the `profiledock` folder using File Explorer, Finder, or your desktop environment's file manager. Moving it to the Recycle Bin or Trash is recommended because it remains recoverable until emptied.
 
-Deleting the complete project also deletes `profiles.json` and every `profiles/<id>/browser-data` directory unless they were backed up first.
+Deleting the source project does not delete ProfileDock application data. Remove the platform data root separately only after closing profiles and confirming that no browser state must be retained.
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.6.0`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.0`.
 
 ## License
 
