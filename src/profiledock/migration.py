@@ -372,22 +372,20 @@ def migrate_project(
         temporary_directories: List[Tuple[Path, Path]] = []
         finalized_directories: List[Path] = []
         try:
+            stale_temporary = list(destination_profiles.glob(".m-*"))
+            for profile in to_migrate:
+                stale_temporary.extend(
+                    destination_profiles.glob(f".temp_migrating_{profile.id}_*")
+                )
+            if stale_temporary:
+                raise ConflictError("conflict: incomplete destination migration exists")
             for profile in to_migrate:
                 final_profile = destination_profiles / profile.id
                 if final_profile.exists() or _is_link(final_profile):
                     raise ConflictError(
                         f"conflict: destination directory for profile '{profile.id}' already exists"
                     )
-                stale_temporary = list(
-                    destination_profiles.glob(f".temp_migrating_{profile.id}_*")
-                )
-                if stale_temporary:
-                    raise ConflictError(
-                        f"conflict: incomplete destination migration exists for profile '{profile.id}'"
-                    )
-                temporary = destination_profiles / (
-                    f".temp_migrating_{profile.id}_{uuid4().hex}"
-                )
+                temporary = destination_profiles / f".m-{uuid4().hex[:12]}"
                 temporary.mkdir(mode=0o700)
                 temporary_data = temporary / "browser-data"
                 temporary_directories.append((temporary, final_profile))
