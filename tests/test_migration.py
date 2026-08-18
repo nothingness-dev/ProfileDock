@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import time
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,7 @@ from profiledock.migration import (
     migrate_project,
 )
 from profiledock.models import Profile, MetadataDocument
+from profiledock.process_manager import close_controller, is_running, start_controller
 from profiledock.storage import save_metadata
 
 runner = CliRunner()
@@ -612,6 +614,18 @@ def test_migrate_rejects_stale_temporary_destination(tmp_path):
     assert stale.exists()
 
 
+def test_migrate_rejects_current_temporary_destination_layout(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    make_source(source)
+    destination = make_paths(tmp_path / "destination")
+    stale = destination.profiles_dir / ".m-interrupted"
+    stale.mkdir()
+    with pytest.raises(ConflictError, match="incomplete destination migration"):
+        migrate_project(source, destination)
+    assert stale.exists()
+
+
 def test_rollback_does_not_delete_destination_created_by_another_actor(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
@@ -814,3 +828,61 @@ def test_idempotent_profile_still_detects_duplicate_destination_name(tmp_path):
     destination.profiles_file.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ConflictError, match="also used"):
         migrate_project(source, destination)
+
+
+@pytest.mark.browser
+def test_migrated_profile_launches_with_persistent_browser_state(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    from profiledock.process_manager import _launch_context
+
+    source = tmp_path / "source"
+    source.mkdir()
+    _, source_data = make_source(source)
+    try:
+        with playwright.sync_playwright() as instance:
+            source_context, _ = _launch_context(instance, str(source_data), True)
+            source_context.add_cookies(
+                [
+                    {
+                        "name": "migrated-session",
+                        "value": "preserved",
+                        "url": "https://example.com",
+                        "expires": time.time() + 3600,
+                    }
+                ]
+            )
+            source_context.close()
+    except playwright.Error as exc:
+        pytest.skip(f"no supported browser found: {exc}")
+
+    destination = make_paths(tmp_path / "destination")
+    report = migrate_project(source, destination)
+    assert len(report.migrated) == 1
+    destination_data = destination.profiles_dir / "p1" / "browser-data"
+    state = start_controller(
+        str(destination_data),
+        2,
+        headless=True,
+        runtime_dir=destination.runtime_dir / "p1",
+    )
+    try:
+        assert state["page_count"] == 2
+    finally:
+        if is_running(str(destination_data), destination.runtime_dir / "p1"):
+            close_controller(
+                str(destination_data),
+                timeout=10,
+                runtime_dir=destination.runtime_dir / "p1",
+            )
+
+    try:
+        with playwright.sync_playwright() as instance:
+            destination_context, _ = _launch_context(instance, str(destination_data), True)
+            cookies = destination_context.cookies("https://example.com")
+            destination_context.close()
+    except playwright.Error as exc:
+        pytest.skip(f"no supported browser found: {exc}")
+    assert any(
+        cookie["name"] == "migrated-session" and cookie["value"] == "preserved"
+        for cookie in cookies
+    )

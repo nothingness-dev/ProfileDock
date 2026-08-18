@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import os
 import stat
@@ -143,6 +144,34 @@ def test_cli_option_controls_command_storage(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert (cli_root / "metadata" / "profiles.json").is_file()
     assert not (env_root / "metadata" / "profiles.json").exists()
+
+
+def test_cli_uses_environment_data_root_from_another_directory(tmp_path, monkeypatch):
+    data_root = tmp_path / "app-data"
+    other_directory = tmp_path / "other-directory"
+    other_directory.mkdir()
+    monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(data_root))
+    monkeypatch.chdir(other_directory)
+    created = runner.invoke(app, ["create", "Portable"])
+    assert created.exit_code == 0
+    listed = runner.invoke(app, ["list", "--json"])
+    assert listed.exit_code == 0
+    assert json.loads(listed.output)[0]["name"] == "Portable"
+    assert (data_root / "metadata" / "profiles.json").is_file()
+    assert not (other_directory / "metadata").exists()
+
+
+def test_cli_option_precedence_holds_from_another_directory(tmp_path, monkeypatch):
+    environment_root = tmp_path / "environment-root"
+    cli_root = tmp_path / "cli-root"
+    other_directory = tmp_path / "other-directory"
+    other_directory.mkdir()
+    monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(environment_root))
+    monkeypatch.chdir(other_directory)
+    result = runner.invoke(app, ["--data-root", str(cli_root), "create", "Override"])
+    assert result.exit_code == 0
+    assert (cli_root / "metadata" / "profiles.json").is_file()
+    assert not (environment_root / "metadata" / "profiles.json").exists()
 
 
 def test_runtime_path_is_outside_browser_data(tmp_path):
