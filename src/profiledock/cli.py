@@ -13,6 +13,13 @@ from .doctor import (
     repair_environment,
     run_diagnostics,
 )
+from .migration import (
+    ConflictError,
+    MigrationError,
+    MigrationReport,
+    SourceRunningError,
+    migrate_project,
+)
 from .data_root import DataPaths, DataRootError, resolve_data_root
 from .models import Profile
 from .process_manager import (
@@ -294,6 +301,63 @@ def doctor(
             typer.echo(f"  - {c.id}: {c.action}")
     if has_failed:
         raise typer.Exit(EXIT_USER_ERROR)
+
+
+@app.command()
+def migrate(
+    from_project: Path = typer.Option(
+        ...,
+        "--from-project",
+        help="Path to the source ProfileDock project directory.",
+    ),
+    remove_source: bool = typer.Option(
+        False,
+        "--remove-source",
+        help="Remove profile data from source after successful migration.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm deletion of source data without prompt.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output migration report in JSON format.",
+    ),
+) -> None:
+    paths = _paths.get() or resolve_data_root()
+    if remove_source and not yes:
+        if not typer.confirm(
+            f"Are you sure you want to delete source profile data in '{from_project}' after migration?"
+        ):
+            raise typer.Abort()
+
+    try:
+        report = migrate_project(
+            source_root=from_project,
+            destination_paths=paths,
+            remove_source=remove_source,
+        )
+    except (MigrationError, ConflictError, SourceRunningError, StorageError, ValueError) as exc:
+        fail(str(exc))
+
+    if json_output:
+        typer.echo(json.dumps(report.to_dict(), indent=2))
+        return
+
+    typer.echo(f"Migration completed from '{from_project}' to '{paths.root}'.")
+    if report.migrated:
+        typer.echo(f"Migrated ({len(report.migrated)}):")
+        for item in report.migrated:
+            typer.echo(f"  + {item.name} ({item.id})")
+    if report.skipped:
+        typer.echo(f"Skipped ({len(report.skipped)}):")
+        for item in report.skipped:
+            typer.echo(f"  = {item.name} ({item.id}) - {item.message}")
+    if report.source_removed:
+        typer.echo("Source data successfully removed.")
 
 
 if __name__ == "__main__":
