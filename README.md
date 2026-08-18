@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.7.0`
+Current release: `0.7.1`
 
 ## Features
 
@@ -368,11 +368,13 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 **Path safety**: Data directories must be under the configured profile root. Symlinks and path traversal attempts are rejected.
 
+**Managed-directory safety**: ProfileDock rejects unsafe managed directories, path-like profile IDs, runtime paths beneath `browser-data`, and deletion targets that do not exactly match `profiles/<id>/browser-data`.
+
 **Corruption handling**: ProfileDock never overwrites corrupted metadata automatically. If both the primary and backup files are corrupted, manual intervention is required.
 
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
 
-`running.json` exists only while a profile controller is active. New state files use a versioned local protocol and contain the profile ID, controller PID, start time, loopback port, status, and a random authentication token. State writes are atomic, and the controller accepts a close request only when its token matches. Stale state files are cleaned automatically. Active state files from ProfileDock 0.5 and earlier are recognized and upgraded so an existing browser remains detectable and closable.
+`running.json` exists only while a profile controller is active. New state files use a versioned local protocol and contain the profile ID, controller PID, start time, loopback port, status, and a random authentication token. State writes are atomic, and the controller accepts a close request only when its token matches. Stale state files are cleaned automatically.
 
 Runtime state, logs, backups, metadata, and browser data are separated. Runtime files are never written inside `browser-data`.
 
@@ -622,7 +624,7 @@ Deleting the source project does not delete ProfileDock application data. Remove
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.0`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.1`.
 
 ## License
 
