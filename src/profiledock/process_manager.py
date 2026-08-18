@@ -2,14 +2,15 @@ import argparse
 import hmac
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
 from uuid import uuid4
-from datetime import datetime, timezone
 
 _MAX_ERROR_BYTES = 4096
 RUNNING_STATE_PROTOCOL_VERSION = 1
@@ -69,36 +70,62 @@ def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> Non
             time.sleep(0.02)
 
 
-def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
+def _write_all(fd: int, payload: bytes) -> None:
+    offset = 0
+    while offset < len(payload):
+        written = os.write(fd, payload[offset:])
+        if written < 1:
+            raise OSError("write returned no data")
+        offset += written
+
+
+def _atomic_private_bytes(path: Path, payload: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    payload = json.dumps(value).encode("utf-8")
-    fd = os.open(str(temporary), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    fd = None
     try:
-        os.write(fd, payload)
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
+        fd = os.open(str(temporary), flags, 0o600)
+        _write_all(fd, payload)
         os.fsync(fd)
-    finally:
         os.close(fd)
-    try:
+        fd = None
         os.chmod(temporary, 0o600)
         _replace_with_retry(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
+    _atomic_private_bytes(path, json.dumps(value).encode("utf-8"))
 
 
 def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> bool:
-    if value.get("protocol_version") != RUNNING_STATE_PROTOCOL_VERSION:
+    if (
+        type(value.get("protocol_version")) is not int
+        or value["protocol_version"] != RUNNING_STATE_PROTOCOL_VERSION
+    ):
         return False
     if profile_id is not None and value.get("profile_id") != profile_id:
         return False
     if not isinstance(value.get("token"), str) or len(value["token"]) < 32:
         return False
+    if type(value.get("controller_pid")) is not int or type(value.get("port")) is not int:
+        return False
     if not isinstance(value.get("controller_started_at"), str):
         return False
     try:
-        datetime.fromisoformat(value["controller_started_at"])
-        int(value.get("controller_pid", 0))
-        int(value.get("port", 0))
+        started_at = datetime.fromisoformat(value["controller_started_at"])
     except (TypeError, ValueError):
+        return False
+    if started_at.tzinfo is None or started_at.utcoffset() is None:
         return False
     return True
 
@@ -115,13 +142,17 @@ def _upgrade_legacy_state(path: Path, value: Dict[str, Any], profile_id: str) ->
     if pid < 1 or port < 1 or not isinstance(token, str) or len(token) < 32:
         return value
     upgraded = dict(value)
+    try:
+        modified_at = path.stat().st_mtime
+    except OSError:
+        return value
     upgraded.update(
         {
             "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
             "profile_id": profile_id,
             "controller_pid": pid,
             "controller_started_at": datetime.fromtimestamp(
-                path.stat().st_mtime, timezone.utc
+                modified_at, timezone.utc
             ).isoformat(),
             "status": "running",
             "legacy_controller": True,
@@ -160,7 +191,7 @@ def _write_error(
         else:
             high = middle - 1
     try:
-        path.write_bytes(encoded)
+        _atomic_private_bytes(path, encoded)
     except OSError:
         pass
 
@@ -216,6 +247,13 @@ def _read_state(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _unlink_quietly(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Path] = None) -> str:
     path = state_path(data_dir, runtime_dir)
     err = error_path(data_dir, runtime_dir)
@@ -225,14 +263,14 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
             state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
         if not state or not _valid_state(state, Path(data_dir).parent.name):
             if clean_stale:
-                path.unlink(missing_ok=True)
+                _unlink_quietly(path)
             return "stale"
         if state.get("closing"):
             pid = int(state.get("controller_pid", -1))
             if pid > 0 and _alive(pid):
                 return "closing"
             if clean_stale:
-                path.unlink(missing_ok=True)
+                _unlink_quietly(path)
             return "stale"
         pid = int(state.get("controller_pid", -1))
         if pid <= 0:
@@ -240,11 +278,11 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
             if launcher_pid > 0 and _alive(launcher_pid):
                 return "starting"
             if clean_stale:
-                path.unlink(missing_ok=True)
+                _unlink_quietly(path)
             return "stale"
         if not _alive(pid):
             if clean_stale:
-                path.unlink(missing_ok=True)
+                _unlink_quietly(path)
             return "stale"
         port = int(state.get("port", 0))
         if not port:
@@ -315,8 +353,10 @@ def start_controller(
         )
     path = state_path(data_dir, runtime_dir)
     err = error_path(data_dir, runtime_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    err.unlink(missing_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        path.parent.chmod(0o700)
+    _unlink_quietly(err)
     if is_running(data_dir, runtime_dir):
         raise ProfileRunningError("profile is already running")
     token = uuid4().hex
@@ -355,17 +395,17 @@ def start_controller(
         while time.monotonic() < deadline:
             state = _read_state(path)
             if state and _valid_state(state, initial["profile_id"]) and state.get("port"):
-                err.unlink(missing_ok=True)
+                _unlink_quietly(err)
                 _close_stderr(process)
                 return state
             if process.poll() is not None:
                 break
             time.sleep(0.1)
     except OSError as exc:
-        path.unlink(missing_ok=True)
+        _unlink_quietly(path)
         _write_error(err, "controller_spawn_failed", str(exc), redactions=(token,))
         raise BrowserLaunchError(str(exc), "controller_spawn_failed") from exc
-    path.unlink(missing_ok=True)
+    _unlink_quietly(path)
     error_info = _read_error(err)
     if error_info:
         _close_stderr(process)
@@ -397,7 +437,7 @@ def start_controller(
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
     path = state_path(data_dir, runtime_dir)
     if not is_running(data_dir, runtime_dir):
-        path.unlink(missing_ok=True)
+        _unlink_quietly(path)
         raise ProfileRunningError("profile is not running")
     state = _read_state(path)
     if not state:
@@ -408,7 +448,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         raise BrowserLaunchError("profile controller is not ready")
     token = state.get("token", "")
     if not _valid_state(state, Path(data_dir).parent.name):
-        path.unlink(missing_ok=True)
+        _unlink_quietly(path)
         raise ProfileRunningError("profile is not running")
     state["closing"] = True
     state["status"] = "closing"
@@ -433,7 +473,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         time.sleep(0.1)
     if path.exists():
         if not _alive(int(state.get("controller_pid", -1))):
-            path.unlink(missing_ok=True)
+            _unlink_quietly(path)
             raise ProfileRunningError("profile is not running")
         raise BrowserLaunchError("profile did not close within the timeout")
     if not close_sent:
@@ -475,9 +515,62 @@ def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any
         try:
             return playwright.chromium.launch_persistent_context(data_dir, channel="chrome", headless=headless), "chrome"
         except PlaywrightError as chrome_error:
+            executable = _system_browser_executable()
+            if executable is not None:
+                try:
+                    return playwright.chromium.launch_persistent_context(
+                        data_dir,
+                        executable_path=str(executable),
+                        headless=headless,
+                    ), "system"
+                except PlaywrightError as system_error:
+                    raise PlaywrightError(
+                        f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}\nSystem browser: {system_error}"
+                    ) from chromium_error
             raise PlaywrightError(
-                f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}"
+                f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}\nSystem browser: not found"
             ) from chromium_error
+
+
+def _system_browser_executable() -> Optional[Path]:
+    candidates = []
+    if sys.platform == "win32":
+        for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+            base = os.environ.get(variable)
+            if base:
+                candidates.append(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidates.append(Path(local_app_data) / "Chromium" / "Application" / "chrome.exe")
+        candidates.extend(
+            Path(value)
+            for value in filter(
+                None,
+                (
+                    shutil.which("chrome"),
+                    shutil.which("google-chrome"),
+                    shutil.which("chromium"),
+                    shutil.which("chromium-browser"),
+                ),
+            )
+        )
+    elif sys.platform == "darwin":
+        candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+        candidates.append(Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
+    else:
+        candidates.extend(
+            Path(value)
+            for value in filter(
+                None,
+                (
+                    shutil.which("google-chrome"),
+                    shutil.which("google-chrome-stable"),
+                    shutil.which("chromium"),
+                    shutil.which("chromium-browser"),
+                ),
+            )
+        )
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
 
 
 def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool) -> int:
@@ -527,7 +620,7 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
                     context.close()
                 except PlaywrightError:
                     pass
-        err.unlink(missing_ok=True)
+        _unlink_quietly(err)
         return 0
     except PlaywrightError as exc:
         _write_error(
@@ -550,7 +643,7 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
     finally:
         if server is not None:
             server.close()
-        path.unlink(missing_ok=True)
+        _unlink_quietly(path)
 
 
 def main() -> None:

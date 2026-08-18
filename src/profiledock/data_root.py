@@ -1,4 +1,5 @@
 import os
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,16 @@ from typing import Mapping, Optional
 
 class DataRootError(ValueError):
     pass
+
+
+def _is_link(path: Path) -> bool:
+    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        return True
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 @dataclass(frozen=True)
@@ -34,9 +45,11 @@ class DataPaths:
         )
 
     def prepare(self) -> None:
-        if self.root.exists() and (not self.root.is_dir() or self.root.is_symlink()):
+        if self.root.exists() and (not self.root.is_dir() or _is_link(self.root)):
             raise DataRootError("data root must be a real directory")
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name != "nt":
+            self.root.chmod(0o700)
         root = self.root.resolve()
         for path in (
             self.metadata_dir,
@@ -45,15 +58,17 @@ class DataPaths:
             self.logs_dir,
             self.backups_dir,
         ):
-            if path.exists() and (not path.is_dir() or path.is_symlink()):
+            if path.exists() and (not path.is_dir() or _is_link(path)):
                 raise DataRootError(f"managed data directory is unsafe: {path}")
-            path.mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if os.name != "nt":
+                path.chmod(0o700)
             try:
                 path.resolve().relative_to(root)
             except ValueError as exc:
                 raise DataRootError(f"managed data directory escapes data root: {path}") from exc
         for path in (self.profiles_file, self.backup_file, self.profiles_file.with_suffix(".lock")):
-            if path.is_symlink() or (path.exists() and not path.is_file()):
+            if _is_link(path) or (path.exists() and not path.is_file()):
                 raise DataRootError(f"managed data file is unsafe: {path}")
 
 
@@ -98,7 +113,7 @@ def resolve_data_root(
     user_home = (home or Path.home()).resolve(strict=False)
     if root == anchor or root == user_home:
         raise DataRootError("data root cannot be a filesystem root or home directory")
-    if root.exists() and (not root.is_dir() or root.is_symlink()):
+    if root.exists() and (not root.is_dir() or _is_link(root)):
         raise DataRootError("data root must be a real directory")
     paths = DataPaths.from_root(root)
     if prepare:

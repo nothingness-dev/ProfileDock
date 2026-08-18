@@ -59,7 +59,7 @@ class MetadataDocument:
         if not isinstance(value, dict):
             raise ValueError("metadata must be a JSON object")
         schema_version = value.get("schema_version")
-        if schema_version not in _SUPPORTED_METADATA_SCHEMA_VERSIONS:
+        if type(schema_version) is not int or schema_version not in _SUPPORTED_METADATA_SCHEMA_VERSIONS:
             raise ValueError(f"unsupported metadata schema version: {schema_version}")
         if "profiles" not in value:
             raise ValueError("metadata is missing required field: profiles")

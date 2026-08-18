@@ -4,6 +4,7 @@ import os
 import re
 from typing import List, Set
 
+from .data_root import _is_link
 from .models import Profile
 
 
@@ -13,9 +14,11 @@ class ValidationError(Exception):
 
 def validate_timestamp(timestamp_str: str, field_name: str) -> None:
     try:
-        datetime.fromisoformat(timestamp_str)
+        value = datetime.fromisoformat(timestamp_str)
     except (ValueError, TypeError) as exc:
         raise ValidationError(f"{field_name} must be a valid ISO-8601 timestamp: {exc}") from exc
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValidationError(f"{field_name} must include a timezone offset")
 
 
 def validate_required_fields(profile: Profile) -> None:
@@ -74,7 +77,7 @@ def validate_path_safety(data_dir: str, profile_root: Path) -> None:
     current = root_absolute
     for part in relative.parts:
         current = current / part
-        if current.is_symlink():
+        if _is_link(current):
             raise ValidationError(f"path contains symlink at {current}: {data_dir}")
 
 
@@ -85,3 +88,8 @@ def validate_metadata_document(profiles: List[Profile], profile_root: Path) -> N
     validate_duplicate_directories(profiles)
     for profile in profiles:
         validate_path_safety(profile.data_dir, profile_root)
+        expected = (profile_root / profile.id / "browser-data").resolve()
+        if Path(profile.data_dir).resolve() != expected:
+            raise ValidationError(
+                f"profile data directory must match profiles/<id>/browser-data: {profile.data_dir}"
+            )

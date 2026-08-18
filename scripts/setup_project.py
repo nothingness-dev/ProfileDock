@@ -10,15 +10,26 @@ def run(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
     subprocess.run(command, cwd=cwd, env=environment, check=True)
 
 
-def system_chrome_available() -> bool:
+def system_browser_available() -> bool:
     candidates = [
         shutil.which("google-chrome"),
         shutil.which("google-chrome-stable"),
         shutil.which("chrome"),
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
         Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
         Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
         Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
     ]
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.extend(
+            [
+                Path(local_app_data) / "Google/Chrome/Application/chrome.exe",
+                Path(local_app_data) / "Chromium/Application/chrome.exe",
+            ]
+        )
     return any(candidate and Path(candidate).exists() for candidate in candidates)
 
 
@@ -45,8 +56,8 @@ def main() -> None:
     run([str(python), "-m", "pip", "install", "--upgrade", "pip"], root, environment)
     run([str(python), "-m", "pip", "install", "-r", "requirements.txt"], root, environment)
     if not args.skip_browser:
-        if system_chrome_available():
-            print("Using installed Google Chrome.")
+        if system_browser_available():
+            print("Using an installed Chrome or Chromium browser.")
         else:
             run([str(python), "-m", "playwright", "install", "chromium"], root, environment)
     run([str(python), "-m", "pytest", "-p", "no:cacheprovider"], root, environment)

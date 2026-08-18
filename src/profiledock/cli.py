@@ -19,13 +19,9 @@ from .process_manager import (
     BrowserLaunchError,
     ProfileRunningError,
     close_controller,
-    error_path,
     get_status,
     is_running,
     start_controller,
-    state_path,
-    _read_error,
-    _read_state,
 )
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from .storage import StorageError
@@ -35,7 +31,6 @@ app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromiu
 
 EXIT_SUCCESS = 0
 EXIT_USER_ERROR = 1
-EXIT_SYSTEM_ERROR = 2
 _paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
 
 
@@ -219,7 +214,8 @@ def status(
 @app.command()
 def launch(profile_id: str, tabs: int = typer.Option(None, "--tabs", "-t")) -> None:
     try:
-        profile = manager().resolve(profile_id)
+        profile_manager = manager()
+        profile = profile_manager.resolve(profile_id)
         if tabs is None:
             tabs = typer.prompt("How many tabs do you want to open?", type=int)
         if tabs < 1:
@@ -227,9 +223,12 @@ def launch(profile_id: str, tabs: int = typer.Option(None, "--tabs", "-t")) -> N
         if not Path(profile.data_dir).exists():
             fail("profile data directory is missing")
         start_controller(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
-        manager().mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError, ValueError) as exc:
         fail(str(exc))
+    try:
+        profile_manager.mark_launched(profile.id)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        typer.echo(f"Warning: browser launched but launch timestamp was not saved: {exc}", err=True)
     typer.echo(f"Launched '{profile.name}' with {tabs} tab(s).")
 
 

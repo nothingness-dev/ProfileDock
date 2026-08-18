@@ -3,13 +3,12 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from .data_root import DataPaths
-from .process_manager import get_status, error_path, state_path
+from .process_manager import _system_browser_executable, get_status
 from .storage import (
     MetadataCorruptedError,
     MetadataLockedError,
@@ -84,7 +83,7 @@ def check_data_root_writable(root: Path) -> DiagnosticCheck:
             id=check_id,
             status=STATUS_FAILED,
             summary=f"Data root directory is not writable ({root}): {exc}",
-            action="Check folder permissions for the project root directory.",
+            action="Check folder permissions for the ProfileDock data root.",
         )
 
 
@@ -326,24 +325,20 @@ def check_system_chrome() -> DiagnosticCheck:
     except Exception:
         pass
 
-    found = False
-    if sys.platform == "win32":
-        for env_var in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            base = os.environ.get(env_var)
-            if base and (Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe").exists():
-                found = True
-                break
-    elif sys.platform == "darwin":
-        found = Path("/Applications/Google Chrome.app").exists()
-    else:
-        found = shutil.which("google-chrome") is not None or shutil.which("google-chrome-stable") is not None or shutil.which("chromium-browser") is not None or shutil.which("chromium") is not None
-
-    if found:
-        return DiagnosticCheck(
-            id=check_id,
-            status=STATUS_OK,
-            summary="System Google Chrome or Chromium detected on system.",
-        )
+    executable = _system_browser_executable()
+    if executable is not None:
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(executable_path=str(executable), headless=True)
+                browser.close()
+            return DiagnosticCheck(
+                id=check_id,
+                status=STATUS_OK,
+                summary=f"System browser is installed and functional at {executable}.",
+            )
+        except Exception:
+            pass
 
     return DiagnosticCheck(
         id=check_id,
@@ -400,7 +395,7 @@ def check_runtime_permissions(root: Path) -> DiagnosticCheck:
             id=check_id,
             status=STATUS_FAILED,
             summary=f"Runtime directory has permission issues: {exc}",
-            action="Ensure the user has read and write permissions to the profiles/ directory.",
+            action="Ensure the user has read and write permissions to the runtime/ directory.",
         )
 
 
@@ -462,8 +457,13 @@ def check_orphan_directories(root: Path) -> DiagnosticCheck:
         try:
             doc = load_metadata(profiles_file)
             known_ids = {p.id for p in doc.profiles}
-        except Exception:
-            pass
+        except Exception as exc:
+            return DiagnosticCheck(
+                id=check_id,
+                status=STATUS_WARNING,
+                summary=f"Cannot determine orphan directories because metadata is unreadable: {exc}",
+                action="Repair or restore profiles.json before reviewing orphan directories.",
+            )
 
     orphans: List[str] = []
     for item in profiles_dir.iterdir():
@@ -585,7 +585,8 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
                     )
                 )
             elif _is_versioned_document(data):
-                MetadataDocument.from_dict(data)
+                doc = MetadataDocument.from_dict(data)
+                validate_metadata_document(doc.profiles, profiles_dir)
             else:
                 primary_bad = True
         except Exception:

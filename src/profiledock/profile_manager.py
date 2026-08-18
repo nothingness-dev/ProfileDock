@@ -1,7 +1,7 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Union
 
 from .data_root import DataPaths, resolve_data_root
 from .models import Profile, utc_now
@@ -83,8 +83,12 @@ class ProfileManager:
         if not name:
             raise ValueError("profile name cannot be empty")
         profile_id = uuid.uuid4().hex[:8]
-        data_dir = self.profiles_dir / profile_id / "browser-data"
-        data_dir.mkdir(parents=True, exist_ok=False)
+        profile_dir = self.profiles_dir / profile_id
+        profile_dir.mkdir(mode=0o700, exist_ok=False)
+        profile_dir.chmod(0o700)
+        data_dir = profile_dir / "browser-data"
+        data_dir.mkdir(mode=0o700)
+        data_dir.chmod(0o700)
         profile = Profile(profile_id, name, utc_now(), str(data_dir))
         try:
             add_profile_atomic(profile, self.profiles_file, self.profiles_dir, self.backup_file)
@@ -100,8 +104,18 @@ class ProfileManager:
         profile_root = Path(profile.data_dir).parent.resolve()
         if Path(profile.data_dir).resolve() != expected_data or profile_root != expected_root:
             raise ValueError("refusing to delete unsafe profile directory")
-        remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir, self.backup_file)
-        shutil.rmtree(profile_root, ignore_errors=False)
+        quarantine = None
+        if profile_root.exists():
+            quarantine = self.profiles_dir / f".deleting-{profile.id}-{uuid.uuid4().hex}"
+            profile_root.replace(quarantine)
+        try:
+            remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir, self.backup_file)
+        except Exception:
+            if quarantine is not None:
+                quarantine.replace(profile_root)
+            raise
+        if quarantine is not None:
+            shutil.rmtree(quarantine, ignore_errors=False)
         shutil.rmtree(self.runtime_path(profile.id), ignore_errors=True)
         return profile
 

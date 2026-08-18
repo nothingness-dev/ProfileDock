@@ -59,8 +59,12 @@ def metadata_lock(
 ) -> Generator[None, None, None]:
     lock_path = Path(metadata_path).with_suffix(".lock")
     lock_fd = None
+    raw_fd = None
     try:
-        lock_fd = open(lock_path, "a+b")
+        raw_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        lock_fd = os.fdopen(raw_fd, "a+b")
+        raw_fd = None
+        os.chmod(lock_path, 0o600)
         deadline = _time.monotonic() + timeout
         while True:
             try:
@@ -74,6 +78,11 @@ def metadata_lock(
                 _time.sleep(0.01)
         yield
     finally:
+        if raw_fd is not None:
+            try:
+                os.close(raw_fd)
+            except OSError:
+                pass
         if lock_fd is not None:
             try:
                 _unlock_file(lock_fd)
@@ -116,27 +125,41 @@ def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> Non
             _time.sleep(0.02)
 
 
+def _write_all(fd: int, payload: bytes) -> None:
+    offset = 0
+    while offset < len(payload):
+        written = os.write(fd, payload[offset:])
+        if written < 1:
+            raise OSError("write returned no data")
+        offset += written
+
+
 def _atomic_write(path: Path, content: str) -> None:
     dir_path = path.parent
     dir_path.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     fd = None
     try:
-        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        os.write(fd, content.encode("utf-8"))
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        fd = os.open(str(tmp_path), flags, 0o600)
+        _write_all(fd, content.encode("utf-8"))
         os.fsync(fd)
         os.close(fd)
         fd = None
         _replace_with_retry(tmp_path, path)
         if sys.platform != "win32":
-            directory_fd = os.open(str(dir_path), os.O_RDONLY)
             try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+                directory_fd = os.open(str(dir_path), os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
     except OSError as exc:
         if fd is not None:
             os.close(fd)
+            fd = None
         raise StorageError(f"could not write {path}: {exc}") from exc
     finally:
         if fd is not None:
