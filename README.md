@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.7.2`
+Current release: `0.7.3`
 
 ## Features
 
@@ -11,7 +11,7 @@ Current release: `0.7.2`
 - Open an exact number of blank tabs.
 - Prevent the same profile from launching twice.
 - Close browsers gracefully through a local controller process.
-- Use Playwright Chromium or fall back to an installed Google Chrome.
+- Use Playwright Chromium or fall back to an installed Chrome or Chromium executable.
 - Store ProfileDock data in the operating system's application-data directory.
 - Override storage with `--data-root` or `PROFILEDOCK_DATA_ROOT`.
 
@@ -63,7 +63,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-If Playwright's Chromium download is blocked but Google Chrome is installed, omit the final command. ProfileDock automatically falls back to the installed Chrome channel.
+If Playwright's Chromium download is blocked but Chrome or Chromium is installed, omit the final command. ProfileDock tries the installed Chrome channel and then a detected system browser executable.
 
 ### macOS and Linux
 
@@ -253,7 +253,7 @@ If the entire browser is closed manually or exits unexpectedly, the controller d
 profiledock delete <id-or-name>
 ```
 
-Asks for confirmation, then permanently removes the profile metadata and browser data. A running profile must be closed before deletion.
+Asks for confirmation, then permanently removes the profile metadata and browser data. A running profile must be closed before deletion. The profile directory is quarantined during the metadata update and restored if that update fails.
 
 For non-interactive use:
 
@@ -274,7 +274,7 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 **Diagnostic checks:**
 
 - **`python_version`**: Verifies Python is >= 3.9.
-- **`writable_data_root`**: Checks that the working/data directory is writable.
+- **`writable_data_root`**: Checks that the application-data directory is writable.
 - **`metadata_schema`**: Validates the `profiles.json` schema (version 1) and contents.
 - **`metadata_backup_state`**: Inspects the backup file (`profiles.json.bak`) for validity.
 - **`profile_directories_exist`**: Ensures every configured profile has a corresponding `browser-data` directory.
@@ -283,7 +283,7 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 - **`playwright_chromium`**: Verifies if Playwright Chromium browser executable is installed.
 - **`system_chrome`**: Verifies if system Google Chrome or Chromium is available as fallback.
 - **`browser_availability`**: Aggregate check verifying that at least one usable browser engine is present.
-- **`runtime_permissions`**: Checks read/write permissions on the runtime `profiles/` directory.
+- **`runtime_permissions`**: Checks read/write permissions on the `runtime/` directory.
 - **`stale_running_state`**: Detects leftover `running.json` state files from terminated processes.
 - **`orphan_profile_directories`**: Identifies folders in `profiles/` that are not listed in metadata.
 - **`version_consistency`**: Verifies that the runtime version matches installed package metadata.
@@ -366,9 +366,11 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 **Duplicate prevention**: Profile IDs and data directories must be unique. Duplicate values are rejected before any changes are written.
 
-**Path safety**: Data directories must be under the configured profile root. Symlinks and path traversal attempts are rejected.
+**Path safety**: Data directories must exactly match `profiles/<id>/browser-data`. Symlinks, junctions, reparse points, duplicate paths, and path traversal attempts are rejected.
 
 **Managed-directory safety**: ProfileDock rejects unsafe managed directories, path-like profile IDs, runtime paths beneath `browser-data`, and deletion targets that do not exactly match `profiles/<id>/browser-data`.
+
+**Private storage**: On POSIX systems, ProfileDock restricts managed directories to the owner and writes metadata, lock, controller-state, and controller-error files with owner-only permissions. Windows access remains governed by the directory's inherited ACLs.
 
 **Corruption handling**: ProfileDock never overwrites corrupted metadata automatically. If both the primary and backup files are corrupted, manual intervention is required.
 
@@ -489,7 +491,7 @@ Returns diagnostic checks, repairs performed, and overall health status:
 - No sensitive data exposed (tokens, secrets, passwords)
 - Field names and types are stable across versions
 - `status` and `list` always return arrays for consistent scripting
-- Timestamps use ISO-8601 format when present
+- Timestamps use ISO-8601 format with a timezone offset when present
 
 ## Updating the project
 
@@ -506,7 +508,7 @@ Rerunning setup updates the editable installation and executes the tests. Review
 
 ### Chromium download returns HTTP 403
 
-Playwright's CDN may be unavailable in some locations. Install Google Chrome and rerun setup. The script detects Chrome and avoids the blocked download.
+Playwright's CDN may be unavailable in some locations. Install Chrome or Chromium and rerun setup. The script detects supported system browsers and avoids the blocked download.
 
 ### `profiledock` is not recognized
 
@@ -550,9 +552,9 @@ Rerun project setup with `python scripts/setup_project.py`, or install Playwrigh
 
 **No supported browser found:**
 ```
-Error: Playwright Chromium: <error>\nGoogle Chrome: <error>
+Error: Playwright Chromium: <error>\nGoogle Chrome: <error>\nSystem browser: <error or not found>
 ```
-Either install Playwright Chromium (`playwright install chromium`) or install Google Chrome on your system.
+Either install Playwright Chromium (`playwright install chromium`) or install Chrome or Chromium on your system.
 
 **Browser process failed to launch:**
 The error message will include Playwright's diagnostic details. Check that the profile data directory exists and is accessible.
@@ -622,9 +624,11 @@ Close all profiles, leave the project directory in your terminal, and delete the
 
 Deleting the source project does not delete ProfileDock application data. Remove the platform data root separately only after closing profiles and confirming that no browser state must be retained.
 
+The default application-data roots are `%LOCALAPPDATA%\ProfileDock` on Windows, `~/Library/Application Support/ProfileDock` on macOS, and `${XDG_DATA_HOME:-~/.local/share}/profiledock` on Linux. If `PROFILEDOCK_DATA_ROOT` or `--data-root` was used, remove that selected directory instead. Deleting the data root permanently removes every ProfileDock profile, session, cookie, cache, backup, and runtime record stored there.
+
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.2`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.3`.
 
 ## License
 
