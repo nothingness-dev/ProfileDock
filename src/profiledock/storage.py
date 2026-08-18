@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import time as _time
+from uuid import uuid4
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator, List, Union
@@ -98,13 +99,19 @@ def _is_versioned_document(data: Any) -> bool:
     return isinstance(data, dict) and "schema_version" in data and "profiles" in data
 
 
+def _profile_root_for_metadata(path: Path) -> Path:
+    if path.parent.name == "metadata":
+        return path.parent.parent / "profiles"
+    return path.parent / "profiles"
+
+
 def _atomic_write(path: Path, content: str) -> None:
     dir_path = path.parent
     dir_path.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(".tmp")
+    tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     fd = None
     try:
-        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         os.write(fd, content.encode("utf-8"))
         os.fsync(fd)
         os.close(fd)
@@ -133,10 +140,11 @@ def _atomic_write(path: Path, content: str) -> None:
                 pass
 
 
-def _backup_metadata(path: Path) -> None:
-    backup_path = path.with_suffix(".json.bak")
+def _backup_metadata(path: Path, backup_path: Union[str, Path, None] = None) -> None:
+    backup_path = Path(backup_path) if backup_path is not None else path.with_suffix(".json.bak")
     if path.exists():
         try:
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(path), str(backup_path))
         except OSError as exc:
             raise StorageError(f"could not backup {path}: {exc}") from exc
@@ -159,13 +167,13 @@ def load_metadata(path: Union[str, Path] = "profiles.json") -> MetadataDocument:
     if _is_versioned_document(data):
         try:
             doc = MetadataDocument.from_dict(data)
-            validate_metadata_document(doc.profiles, path.parent / "profiles")
+            validate_metadata_document(doc.profiles, _profile_root_for_metadata(path))
             return doc
         except (ValidationError, ValueError) as exc:
             raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
     if _is_bare_array(data):
         profiles = _load_profiles_from_bare_array(data)
-        validate_metadata_document(profiles, path.parent / "profiles")
+        validate_metadata_document(profiles, _profile_root_for_metadata(path))
         return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
     raise MetadataCorruptedError(f"unrecognized metadata format in {path}")
 
@@ -174,6 +182,7 @@ def _migrate_metadata_unlocked(
     path: Union[str, Path],
     profile_root: Union[str, Path],
     backup: bool = True,
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     path = Path(path)
     profile_root = Path(profile_root)
@@ -192,7 +201,7 @@ def _migrate_metadata_unlocked(
     profiles = _load_profiles_from_bare_array(data)
     validate_metadata_document(profiles, profile_root)
     if backup:
-        _backup_metadata(path)
+        _backup_metadata(path, backup_path)
     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
     _atomic_write(path, json.dumps(doc.to_dict(), indent=2) + "\n")
     return doc
@@ -202,10 +211,11 @@ def migrate_metadata(
     path: Union[str, Path],
     profile_root: Union[str, Path],
     backup: bool = True,
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     path = Path(path)
     with metadata_lock(path):
-        return _migrate_metadata_unlocked(path, profile_root, backup)
+        return _migrate_metadata_unlocked(path, profile_root, backup, backup_path)
 
 
 def load_metadata_with_recovery(path: Union[str, Path]) -> MetadataDocument:
@@ -233,12 +243,13 @@ def save_metadata(
     doc: MetadataDocument,
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
 ) -> None:
     path = Path(path)
     profile_root = Path(profile_root)
     with metadata_lock(path):
         validate_metadata_document(doc.profiles, profile_root)
-        _backup_metadata(path)
+        _backup_metadata(path, backup_path)
         content = json.dumps(doc.to_dict(), indent=2) + "\n"
         _atomic_write(path, content)
 
@@ -261,6 +272,7 @@ def atomic_update_metadata(
     path: Union[str, Path],
     profile_root: Union[str, Path],
     updater: Any,
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     path = Path(path)
     profile_root = Path(profile_root)
@@ -272,7 +284,7 @@ def atomic_update_metadata(
         if original_dict == new_dict:
             return new_doc
         validate_metadata_document(new_doc.profiles, profile_root)
-        _backup_metadata(path)
+        _backup_metadata(path, backup_path)
         _atomic_write(path, json.dumps(new_doc.to_dict(), indent=2) + "\n")
         return new_doc
 
@@ -281,6 +293,7 @@ def add_profile_atomic(
     profile: Profile,
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     def _add(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = list(doc.profiles)
@@ -289,13 +302,14 @@ def add_profile_atomic(
             schema_version=doc.schema_version, profiles=new_profiles
         )
 
-    return atomic_update_metadata(path, profile_root, _add)
+    return atomic_update_metadata(path, profile_root, _add, backup_path)
 
 
 def remove_profile_atomic(
     profile_id: str,
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     def _remove(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = [p for p in doc.profiles if p.id != profile_id]
@@ -303,7 +317,7 @@ def remove_profile_atomic(
             schema_version=doc.schema_version, profiles=new_profiles
         )
 
-    return atomic_update_metadata(path, profile_root, _remove)
+    return atomic_update_metadata(path, profile_root, _remove, backup_path)
 
 
 def rename_profile_atomic(
@@ -311,6 +325,7 @@ def rename_profile_atomic(
     new_name: str,
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     def _rename(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = []
@@ -331,7 +346,7 @@ def rename_profile_atomic(
             schema_version=doc.schema_version, profiles=new_profiles
         )
 
-    return atomic_update_metadata(path, profile_root, _rename)
+    return atomic_update_metadata(path, profile_root, _rename, backup_path)
 
 
 def mark_launched_atomic(
@@ -339,6 +354,7 @@ def mark_launched_atomic(
     launched_at: str,
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     def _mark(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = []
@@ -359,4 +375,4 @@ def mark_launched_atomic(
             schema_version=doc.schema_version, profiles=new_profiles
         )
 
-    return atomic_update_metadata(path, profile_root, _mark)
+    return atomic_update_metadata(path, profile_root, _mark, backup_path)

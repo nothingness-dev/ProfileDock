@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Union
 
+from .data_root import DataPaths
 from .models import Profile, utc_now
 from .storage import (
     add_profile_atomic,
@@ -23,13 +24,21 @@ class AmbiguousProfileError(Exception):
 
 
 class ProfileManager:
-    def __init__(self, root: Union[str, Path] = ".") -> None:
-        self.root = Path(root).resolve()
-        self.profiles_file = self.root / "profiles.json"
-        self.profiles_dir = self.root / "profiles"
+    def __init__(self, root: Union[str, Path, DataPaths]) -> None:
+        paths = root if isinstance(root, DataPaths) else DataPaths.from_root(Path(root).resolve())
+        paths.prepare()
+        self.paths = paths
+        self.root = paths.root
+        self.profiles_file = paths.profiles_file
+        self.profiles_dir = paths.profiles_dir
+        self.runtime_dir = paths.runtime_dir
+        self.backup_file = paths.backup_file
+
+    def runtime_path(self, profile_id: str) -> Path:
+        return self.runtime_dir / profile_id
 
     def ensure_migrated(self) -> None:
-        migrate_metadata(self.profiles_file, self.profiles_dir)
+        migrate_metadata(self.profiles_file, self.profiles_dir, backup_path=self.backup_file)
 
     def list_profiles(self) -> List[Profile]:
         self.ensure_migrated()
@@ -74,7 +83,7 @@ class ProfileManager:
         data_dir.mkdir(parents=True, exist_ok=False)
         profile = Profile(profile_id, name, utc_now(), str(data_dir))
         try:
-            add_profile_atomic(profile, self.profiles_file, self.profiles_dir)
+            add_profile_atomic(profile, self.profiles_file, self.profiles_dir, self.backup_file)
         except Exception:
             shutil.rmtree(data_dir.parent, ignore_errors=True)
             raise
@@ -82,8 +91,13 @@ class ProfileManager:
 
     def delete(self, identifier: str) -> Profile:
         profile = self.resolve(identifier)
-        remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir)
-        shutil.rmtree(Path(profile.data_dir).parent, ignore_errors=False)
+        profile_root = Path(profile.data_dir).parent.resolve()
+        if profile_root == self.root or profile_root == self.profiles_dir:
+            raise ValueError("refusing to delete the data root")
+        profile_root.relative_to(self.profiles_dir.resolve())
+        remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir, self.backup_file)
+        shutil.rmtree(profile_root, ignore_errors=False)
+        shutil.rmtree(self.runtime_path(profile.id), ignore_errors=True)
         return profile
 
     def rename(self, identifier: str, new_name: str) -> Profile:
@@ -91,9 +105,9 @@ class ProfileManager:
         if not new_name:
             raise ValueError("profile name cannot be empty")
         profile = self.resolve(identifier)
-        rename_profile_atomic(profile.id, new_name, self.profiles_file, self.profiles_dir)
+        rename_profile_atomic(profile.id, new_name, self.profiles_file, self.profiles_dir, self.backup_file)
         return self.get(profile.id)
 
     def mark_launched(self, identifier: str) -> None:
         profile = self.resolve(identifier)
-        mark_launched_atomic(profile.id, utc_now(), self.profiles_file, self.profiles_dir)
+        mark_launched_atomic(profile.id, utc_now(), self.profiles_file, self.profiles_dir, self.backup_file)

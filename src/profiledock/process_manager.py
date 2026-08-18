@@ -26,12 +26,23 @@ class BrowserLaunchError(Exception):
         self.category = category
 
 
-def state_path(data_dir: str) -> Path:
-    return Path(data_dir).parent / "running.json"
+def _runtime_dir(data_dir: str, runtime_dir: Optional[Path]) -> Path:
+    if runtime_dir is not None:
+        return runtime_dir
+    data_path = Path(data_dir)
+    profile_dir = data_path.parent
+    profiles_dir = profile_dir.parent
+    if profiles_dir.name == "profiles":
+        return profiles_dir.parent / "runtime" / profile_dir.name
+    return profile_dir
 
 
-def error_path(data_dir: str) -> Path:
-    return Path(data_dir).parent / "controller.error"
+def state_path(data_dir: str, runtime_dir: Optional[Path] = None) -> Path:
+    return _runtime_dir(data_dir, runtime_dir) / "running.json"
+
+
+def error_path(data_dir: str, runtime_dir: Optional[Path] = None) -> Path:
+    return _runtime_dir(data_dir, runtime_dir) / "controller.error"
 
 
 def _utc_now() -> str:
@@ -185,9 +196,9 @@ def _read_state(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_status(data_dir: str, clean_stale: bool = True) -> str:
-    path = state_path(data_dir)
-    err = error_path(data_dir)
+def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Path] = None) -> str:
+    path = state_path(data_dir, runtime_dir)
+    err = error_path(data_dir, runtime_dir)
     if path.exists():
         state = _read_state(path)
         if state:
@@ -226,8 +237,8 @@ def get_status(data_dir: str, clean_stale: bool = True) -> str:
     return "stopped"
 
 
-def is_running(data_dir: str) -> bool:
-    return get_status(data_dir, clean_stale=True) in ("starting", "running", "closing")
+def is_running(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
+    return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in ("starting", "running", "closing")
 
 
 def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
@@ -273,6 +284,7 @@ def start_controller(
     tabs: int,
     headless: bool = False,
     startup_timeout: float = 30,
+    runtime_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
@@ -281,10 +293,11 @@ def start_controller(
             "profile data directory is missing or invalid",
             "invalid_data_directory",
         )
-    path = state_path(data_dir)
-    err = error_path(data_dir)
+    path = state_path(data_dir, runtime_dir)
+    err = error_path(data_dir, runtime_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
     err.unlink(missing_ok=True)
-    if is_running(data_dir):
+    if is_running(data_dir, runtime_dir):
         raise ProfileRunningError("profile is already running")
     token = uuid4().hex
     initial = {
@@ -361,9 +374,9 @@ def start_controller(
     )
 
 
-def close_controller(data_dir: str, timeout: float = 15) -> None:
-    path = state_path(data_dir)
-    if not is_running(data_dir):
+def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
+    path = state_path(data_dir, runtime_dir)
+    if not is_running(data_dir, runtime_dir):
         path.unlink(missing_ok=True)
         raise ProfileRunningError("profile is not running")
     state = _read_state(path)
@@ -448,7 +461,7 @@ def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any
 
 
 def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool) -> int:
-    err = error_path(data_dir)
+    err = path.parent / "controller.error"
     try:
         from playwright.sync_api import Error as PlaywrightError, sync_playwright
     except ImportError as exc:

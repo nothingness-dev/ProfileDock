@@ -1,4 +1,5 @@
 import json
+from contextvars import ContextVar
 from pathlib import Path
 from typing import List, Optional
 
@@ -12,6 +13,7 @@ from .doctor import (
     repair_environment,
     run_diagnostics,
 )
+from .data_root import DataPaths, DataRootError, resolve_data_root
 from .models import Profile
 from .process_manager import (
     BrowserLaunchError,
@@ -34,6 +36,7 @@ app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromiu
 EXIT_SUCCESS = 0
 EXIT_USER_ERROR = 1
 EXIT_SYSTEM_ERROR = 2
+_paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
 
 
 def version_callback(value: bool) -> None:
@@ -44,6 +47,11 @@ def version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
+    data_root: Optional[Path] = typer.Option(
+        None,
+        "--data-root",
+        help="Override the ProfileDock application-data directory.",
+    ),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -53,11 +61,22 @@ def main(
         is_eager=True,
     ),
 ) -> None:
-    pass
+    try:
+        _paths.set(resolve_data_root(data_root))
+    except DataRootError as exc:
+        fail(str(exc))
 
 
 def manager() -> ProfileManager:
-    return ProfileManager(Path.cwd())
+    paths = _paths.get()
+    if paths is None:
+        paths = resolve_data_root()
+        _paths.set(paths)
+    return ProfileManager(paths)
+
+
+def runtime_path(profile: Profile) -> Path:
+    return manager().runtime_path(profile.id)
 
 
 def fail(message: str, code: int = EXIT_USER_ERROR) -> None:
@@ -109,7 +128,7 @@ def list_profiles(
     if json_output:
         items = []
         for profile in profiles:
-            status = get_status(profile.data_dir)
+            status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
             items.append(_safe_profile_dict(profile, status=status))
         typer.echo(json.dumps(items, indent=2))
         return
@@ -118,7 +137,7 @@ def list_profiles(
         return
     table = [["ID", "NAME", "STATUS"]]
     for profile in profiles:
-        status = get_status(profile.data_dir)
+        status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
         table.append([profile.id, profile.name, status])
     typer.echo(_render_table(table))
 
@@ -132,7 +151,7 @@ def show(
         profile = manager().resolve(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
         fail(str(exc))
-    status = get_status(profile.data_dir)
+    status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
     data = _safe_profile_dict(profile, status=status)
     if json_output:
         typer.echo(json.dumps(data, indent=2))
@@ -178,7 +197,7 @@ def status(
     if json_output:
         items = []
         for prof in profiles:
-            st = get_status(prof.data_dir)
+            st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
             items.append({"id": prof.id, "name": prof.name, "status": st})
         typer.echo(json.dumps(items, indent=2))
         return
@@ -187,12 +206,12 @@ def status(
         return
     if single:
         prof = profiles[0]
-        st = get_status(prof.data_dir)
+        st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
         typer.echo(f"{prof.id}\t{prof.name}\t{st}")
     else:
         table = [["ID", "NAME", "STATUS"]]
         for prof in profiles:
-            st = get_status(prof.data_dir)
+            st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
             table.append([prof.id, prof.name, st])
         typer.echo(_render_table(table))
 
@@ -207,7 +226,7 @@ def launch(profile_id: str, tabs: int = typer.Option(None, "--tabs", "-t")) -> N
             fail("tab count must be at least 1")
         if not Path(profile.data_dir).exists():
             fail("profile data directory is missing")
-        start_controller(profile.data_dir, tabs)
+        start_controller(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
         manager().mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError, ValueError) as exc:
         fail(str(exc))
@@ -218,7 +237,7 @@ def launch(profile_id: str, tabs: int = typer.Option(None, "--tabs", "-t")) -> N
 def close(profile_id: str) -> None:
     try:
         profile = manager().resolve(profile_id)
-        close_controller(profile.data_dir)
+        close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError) as exc:
         fail(str(exc))
     typer.echo(f"Closed '{profile.name}'.")
@@ -228,12 +247,12 @@ def close(profile_id: str) -> None:
 def delete(profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation.")) -> None:
     try:
         profile = manager().resolve(profile_id)
-        if is_running(profile.data_dir):
+        if is_running(profile.data_dir, runtime_path(profile)):
             fail("profile is running; close it first")
         if not yes and not typer.confirm(f"Delete profile '{profile.name}' and all browser data?"):
             raise typer.Abort()
         manager().delete(profile.id)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, OSError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, OSError, ValueError) as exc:
         fail(str(exc))
     typer.echo(f"Deleted '{profile.name}'.")
 
@@ -243,7 +262,8 @@ def doctor(
     repair: bool = typer.Option(False, "--repair", help="Perform safe repairs where possible."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
-    root = Path.cwd()
+    paths = _paths.get() or resolve_data_root()
+    root = paths.root
     repairs: List[DiagnosticCheck] = []
     if repair:
         repairs = repair_environment(root)

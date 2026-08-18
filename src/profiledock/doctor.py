@@ -8,6 +8,7 @@ import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
+from .data_root import DataPaths
 from .process_manager import get_status, error_path, state_path
 from .storage import (
     MetadataCorruptedError,
@@ -89,7 +90,8 @@ def check_data_root_writable(root: Path) -> DiagnosticCheck:
 
 def check_metadata_schema(root: Path) -> DiagnosticCheck:
     check_id = "metadata_schema"
-    profiles_file = root / "profiles.json"
+    paths = DataPaths.from_root(root)
+    profiles_file = paths.profiles_file
     if not profiles_file.exists():
         return DiagnosticCheck(
             id=check_id,
@@ -100,7 +102,7 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
         data = _read_json_file(profiles_file)
         if _is_versioned_document(data):
             doc = MetadataDocument.from_dict(data)
-            profiles_dir = root / "profiles"
+            profiles_dir = paths.profiles_dir
             validate_metadata_document(doc.profiles, profiles_dir)
             return DiagnosticCheck(
                 id=check_id,
@@ -109,7 +111,7 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
             )
         if _is_bare_array(data):
             profiles = _load_profiles_from_bare_array(data)
-            profiles_dir = root / "profiles"
+            profiles_dir = paths.profiles_dir
             validate_metadata_document(profiles, profiles_dir)
             return DiagnosticCheck(
                 id=check_id,
@@ -134,8 +136,9 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
 
 def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
     check_id = "metadata_backup_state"
-    profiles_file = root / "profiles.json"
-    backup_file = root / "profiles.json.bak"
+    paths = DataPaths.from_root(root)
+    profiles_file = paths.profiles_file
+    backup_file = paths.backup_file
     if not profiles_file.exists() and not backup_file.exists():
         return DiagnosticCheck(
             id=check_id,
@@ -182,7 +185,8 @@ def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
 def check_profile_directories(root: Path) -> Tuple[DiagnosticCheck, DiagnosticCheck]:
     existence_id = "profile_directories_exist"
     paths_id = "profile_paths_under_data_root"
-    profiles_file = root / "profiles.json"
+    paths = DataPaths.from_root(root)
+    profiles_file = paths.profiles_file
     if not profiles_file.exists():
         return (
             DiagnosticCheck(
@@ -214,7 +218,7 @@ def check_profile_directories(root: Path) -> Tuple[DiagnosticCheck, DiagnosticCh
 
     missing_dirs: List[str] = []
     invalid_paths: List[str] = []
-    profiles_root = (root / "profiles").resolve()
+    profiles_root = paths.profiles_dir.resolve()
 
     for p in doc.profiles:
         data_path = Path(p.data_dir)
@@ -373,15 +377,15 @@ def check_browser_availability(
 
 def check_runtime_permissions(root: Path) -> DiagnosticCheck:
     check_id = "runtime_permissions"
-    profiles_dir = root / "profiles"
-    if not profiles_dir.exists():
+    runtime_dir = DataPaths.from_root(root).runtime_dir
+    if not runtime_dir.exists():
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
-            summary="Runtime directory (profiles/) does not exist yet.",
+            summary="Runtime directory does not exist yet.",
         )
     try:
-        test_file = profiles_dir / f".perm_test_{os.getpid()}"
+        test_file = runtime_dir / f".perm_test_{os.getpid()}"
         test_file.write_text("test", encoding="utf-8")
         test_file.unlink()
         return DiagnosticCheck(
@@ -400,8 +404,9 @@ def check_runtime_permissions(root: Path) -> DiagnosticCheck:
 
 def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
     check_id = "stale_running_state"
-    profiles_dir = root / "profiles"
-    if not profiles_dir.exists():
+    paths = DataPaths.from_root(root)
+    runtime_dir = paths.runtime_dir
+    if not runtime_dir.exists():
         return (
             DiagnosticCheck(
                 id=check_id,
@@ -412,9 +417,9 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
         )
 
     stale_files: List[Path] = []
-    for running_json in profiles_dir.glob("*/running.json"):
-        data_dir = running_json.parent / "browser-data"
-        if get_status(str(data_dir), clean_stale=False) == "stale":
+    for running_json in runtime_dir.glob("*/running.json"):
+        data_dir = paths.profiles_dir / running_json.parent.name / "browser-data"
+        if get_status(str(data_dir), clean_stale=False, runtime_dir=running_json.parent) == "stale":
             stale_files.append(running_json)
 
     if not stale_files:
@@ -440,8 +445,9 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
 
 def check_orphan_directories(root: Path) -> DiagnosticCheck:
     check_id = "orphan_profile_directories"
-    profiles_dir = root / "profiles"
-    profiles_file = root / "profiles.json"
+    paths = DataPaths.from_root(root)
+    profiles_dir = paths.profiles_dir
+    profiles_file = paths.profiles_file
     if not profiles_dir.exists():
         return DiagnosticCheck(
             id=check_id,
@@ -532,8 +538,9 @@ def run_diagnostics(root: Path) -> List[DiagnosticCheck]:
 def repair_environment(root: Path) -> List[DiagnosticCheck]:
     repairs: List[DiagnosticCheck] = []
 
-    profiles_dir = root / "profiles"
-    if profiles_dir.exists():
+    paths = DataPaths.from_root(root)
+    profiles_dir = paths.profiles_dir
+    if paths.runtime_dir.exists():
         _, stale_files = check_stale_running_state(root)
         cleaned = 0
         for path in stale_files:
@@ -551,8 +558,8 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
                 )
             )
 
-    profiles_file = root / "profiles.json"
-    backup_file = root / "profiles.json.bak"
+    profiles_file = paths.profiles_file
+    backup_file = paths.backup_file
     primary_bad = False
     if profiles_file.exists():
         try:
@@ -561,7 +568,7 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
                 profiles = _load_profiles_from_bare_array(data)
                 validate_metadata_document(profiles, profiles_dir)
                 with metadata_lock(profiles_file):
-                    _backup_metadata(profiles_file)
+                    _backup_metadata(profiles_file, backup_file)
                     doc = MetadataDocument(
                         schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
                     )
