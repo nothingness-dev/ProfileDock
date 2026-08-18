@@ -162,6 +162,26 @@ class TestCorruptedPrimaryWithValidBackup:
         with pytest.raises(MetadataCorruptedError):
             load_metadata_with_recovery(metadata_path)
 
+    def test_recover_from_separate_backup(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = temp_dir / "backups" / "profiles.json.bak"
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[]),
+            metadata_path,
+            profiles_dir,
+            backup_path,
+        )
+        profile = _create_profile("abc123", "Test", str(profiles_dir / "abc123" / "browser-data"))
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile]),
+            metadata_path,
+            profiles_dir,
+            backup_path,
+        )
+        metadata_path.write_text("corrupted", encoding="utf-8")
+        recovered = load_metadata_with_recovery(metadata_path, backup_path)
+        assert recovered.profiles == []
+
 
 class TestConcurrentMutations:
     def test_concurrent_add_profiles(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
@@ -265,3 +285,11 @@ class TestEmptyMetadata:
         doc = load_metadata(metadata_path)
         assert doc.schema_version == METADATA_SCHEMA_VERSION
         assert len(doc.profiles) == 0
+
+
+def test_rejects_path_like_profile_id(metadata_path: Path, profiles_dir: Path) -> None:
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    profile = _create_profile("../runtime", "Unsafe", str(profiles_dir / "runtime" / "browser-data"))
+    doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
+    with pytest.raises(ValidationError, match="unsafe characters"):
+        save_metadata(doc, metadata_path, profiles_dir)
