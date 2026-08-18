@@ -2,7 +2,7 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
-Current release: `0.7.1`
+Current release: `0.7.2`
 
 ## Features
 
@@ -358,7 +358,7 @@ ProfileDock automatically migrates older bare-array format to the versioned docu
 
 ProfileDock implements several safety mechanisms to protect metadata integrity:
 
-**Atomic writes**: All metadata writes are atomic. A temporary file is written, synced to disk, then moved into place. This ensures interrupted writes never leave a corrupted file.
+**Atomic writes**: Metadata, backups, and controller state use unique temporary files and atomic replacement. Transient Windows sharing violations are retried within a bounded interval.
 
 **Cross-process locking**: A lock file (`metadata/profiles.lock`) coordinates concurrent metadata modifications through an operating-system file lock. Its presence alone does not mean ProfileDock is locked.
 
@@ -624,7 +624,7 @@ Deleting the source project does not delete ProfileDock application data. Remove
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.1`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.7.2`.
 
 ## License
 
