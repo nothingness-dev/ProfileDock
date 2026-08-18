@@ -57,6 +57,18 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            source.replace(target)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+
+
 def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     payload = json.dumps(value).encode("utf-8")
@@ -68,7 +80,7 @@ def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
         os.close(fd)
     try:
         os.chmod(temporary, 0o600)
-        temporary.replace(path)
+        _replace_with_retry(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 

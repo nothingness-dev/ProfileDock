@@ -154,14 +154,16 @@ def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
     try:
         data = _read_json_file(backup_file)
         if _is_versioned_document(data):
-            MetadataDocument.from_dict(data)
+            doc = MetadataDocument.from_dict(data)
+            validate_metadata_document(doc.profiles, paths.profiles_dir)
             return DiagnosticCheck(
                 id=check_id,
                 status=STATUS_OK,
                 summary="Metadata backup is valid and intact.",
             )
         if _is_bare_array(data):
-            _load_profiles_from_bare_array(data)
+            profiles = _load_profiles_from_bare_array(data)
+            validate_metadata_document(profiles, paths.profiles_dir)
             return DiagnosticCheck(
                 id=check_id,
                 status=STATUS_OK,

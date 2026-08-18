@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 import sys
 import time as _time
 from uuid import uuid4
@@ -105,6 +104,18 @@ def _profile_root_for_metadata(path: Path) -> Path:
     return path.parent / "profiles"
 
 
+def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
+    deadline = _time.monotonic() + timeout
+    while True:
+        try:
+            source.replace(target)
+            return
+        except PermissionError:
+            if _time.monotonic() >= deadline:
+                raise
+            _time.sleep(0.02)
+
+
 def _atomic_write(path: Path, content: str) -> None:
     dir_path = path.parent
     dir_path.mkdir(parents=True, exist_ok=True)
@@ -116,7 +127,7 @@ def _atomic_write(path: Path, content: str) -> None:
         os.fsync(fd)
         os.close(fd)
         fd = None
-        tmp_path.replace(path)
+        _replace_with_retry(tmp_path, path)
         if sys.platform != "win32":
             directory_fd = os.open(str(dir_path), os.O_RDONLY)
             try:
@@ -145,8 +156,8 @@ def _backup_metadata(path: Path, backup_path: Union[str, Path, None] = None) -> 
     if path.exists():
         try:
             backup_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(path), str(backup_path))
-        except OSError as exc:
+            _atomic_write(backup_path, path.read_text(encoding="utf-8"))
+        except (OSError, StorageError) as exc:
             raise StorageError(f"could not backup {path}: {exc}") from exc
 
 
@@ -231,9 +242,12 @@ def load_metadata_with_recovery(
             try:
                 data = _read_json_file(recovery_path)
                 if _is_versioned_document(data):
-                    return MetadataDocument.from_dict(data)
+                    doc = MetadataDocument.from_dict(data)
+                    validate_metadata_document(doc.profiles, _profile_root_for_metadata(path))
+                    return doc
                 if _is_bare_array(data):
                     profiles = _load_profiles_from_bare_array(data)
+                    validate_metadata_document(profiles, _profile_root_for_metadata(path))
                     return MetadataDocument(
                         schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
                     )

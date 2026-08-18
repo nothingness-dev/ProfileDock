@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Union
 
-from .data_root import DataPaths
+from .data_root import DataPaths, resolve_data_root
 from .models import Profile, utc_now
 from .storage import (
     add_profile_atomic,
@@ -25,8 +25,7 @@ class AmbiguousProfileError(Exception):
 
 class ProfileManager:
     def __init__(self, root: Union[str, Path, DataPaths]) -> None:
-        paths = root if isinstance(root, DataPaths) else DataPaths.from_root(Path(root).resolve())
-        paths.prepare()
+        paths = root if isinstance(root, DataPaths) else resolve_data_root(Path(root))
         self.paths = paths
         self.root = paths.root
         self.profiles_file = paths.profiles_file
