@@ -232,6 +232,16 @@ def test_check_orphan_directories(tmp_path):
     assert "orphan1" in res.summary
 
 
+def test_check_orphan_directories_does_not_guess_when_metadata_is_corrupt(tmp_path):
+    layout = paths(tmp_path)
+    (layout.profiles_dir / "profile1").mkdir()
+    layout.profiles_file.write_text("corrupted", encoding="utf-8")
+    res = check_orphan_directories(tmp_path)
+    assert res.status == STATUS_WARNING
+    assert "Cannot determine orphan directories" in res.summary
+    assert "profile1" not in res.summary
+
+
 def test_repair_environment_stale_files(tmp_path):
     layout = paths(tmp_path)
     p1_dir = layout.runtime_dir / "p1"
@@ -273,6 +283,33 @@ def test_repair_environment_metadata_recovery(tmp_path):
     assert len(repairs) >= 1
     assert "Recovered valid metadata" in repairs[0].summary
     assert "schema_version" in profiles_file.read_text(encoding="utf-8")
+
+
+def test_repair_environment_recovers_when_versioned_primary_is_unsafe(tmp_path):
+    layout = paths(tmp_path)
+    layout.profiles_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": [
+                    {
+                        "id": "unsafe",
+                        "name": "Unsafe",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "data_dir": str(tmp_path / "outside" / "browser-data"),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    layout.backup_file.write_text(
+        json.dumps({"schema_version": 1, "profiles": []}),
+        encoding="utf-8",
+    )
+    repairs = repair_environment(tmp_path)
+    assert any(repair.id == "repair_metadata_recovery" for repair in repairs)
+    assert json.loads(layout.profiles_file.read_text(encoding="utf-8"))["profiles"] == []
 
 
 def test_doctor_cli_healthy():

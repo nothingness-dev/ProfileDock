@@ -1,5 +1,7 @@
 import json
+import os
 import socket
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -93,7 +95,7 @@ def test_write_error_omits_channel_when_empty(tmp_path):
 
 def test_write_error_survives_readonly_fs(tmp_path):
     err = tmp_path / "controller.error"
-    with patch.object(Path, "write_bytes", side_effect=OSError("read only")):
+    with patch("profiledock.process_manager.os.open", side_effect=OSError("read only")):
         _write_error(err, "test", "new message")
     assert not err.exists()
 
@@ -112,6 +114,13 @@ def test_write_error_special_characters(tmp_path):
     _write_error(err, "test", msg)
     result = _read_error(err)
     assert result["message"] == msg
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions only")
+def test_error_file_is_owner_only(tmp_path):
+    err = tmp_path / "controller.error"
+    _write_error(err, "test", "private")
+    assert stat.S_IMODE(err.stat().st_mode) == 0o600
 
 
 def test_invalid_data_directory_has_stable_category(tmp_path):
@@ -197,3 +206,25 @@ def test_browser_attempt_errors_identify_both_channels():
         _launch_context(instance, "unused", True)
     assert "Playwright Chromium" in str(raised.value)
     assert "Google Chrome" in str(raised.value)
+    assert "System browser" in str(raised.value)
+
+
+def test_system_browser_executable_is_used_as_final_fallback(tmp_path):
+    playwright = pytest.importorskip("playwright.sync_api")
+    executable = tmp_path / "chromium"
+    executable.write_text("browser", encoding="utf-8")
+
+    class Chromium:
+        def launch_persistent_context(self, data_dir, **kwargs):
+            if kwargs.get("executable_path") == str(executable):
+                return "context"
+            raise playwright.Error("unavailable")
+
+    instance = type("Playwright", (), {"chromium": Chromium()})()
+    with patch(
+        "profiledock.process_manager._system_browser_executable",
+        return_value=executable,
+    ):
+        context, channel = _launch_context(instance, "unused", True)
+    assert context == "context"
+    assert channel == "system"

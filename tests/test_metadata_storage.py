@@ -22,6 +22,7 @@ from profiledock.storage import (
     rename_profile_atomic,
     save_metadata,
     _atomic_write,
+    _write_all,
 )
 from profiledock.validation import ValidationError
 
@@ -212,7 +213,7 @@ class TestConcurrentMutations:
 
         def add_profile(i: int) -> None:
             try:
-                data_dir = str(profiles_dir / f"profile{i}" / "browser-data")
+                data_dir = str(profiles_dir / f"id{i}" / "browser-data")
                 profile = _create_profile(f"id{i}", f"Profile{i}", data_dir)
                 add_profile_atomic(profile, metadata_path, profiles_dir)
             except Exception as e:
@@ -231,7 +232,7 @@ class TestConcurrentMutations:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         profiles = []
         for i in range(5):
-            data_dir = str(profiles_dir / f"profile{i}" / "browser-data")
+            data_dir = str(profiles_dir / f"id{i}" / "browser-data")
             profiles.append(_create_profile(f"id{i}", f"Profile{i}", data_dir))
         doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
         save_metadata(doc, metadata_path, profiles_dir)
@@ -349,3 +350,56 @@ def test_atomic_write_retries_transient_replace_failure(tmp_path: Path) -> None:
         _atomic_write(target, "{}")
     assert target.read_text(encoding="utf-8") == "{}"
     assert attempts == 3
+
+
+def test_write_all_handles_partial_writes():
+    payloads = []
+
+    def partial_write(fd, payload):
+        written = min(2, len(payload))
+        payloads.append(payload[:written])
+        return written
+
+    with patch("profiledock.storage.os.write", side_effect=partial_write):
+        _write_all(1, b"abcdef")
+    assert b"".join(payloads) == b"abcdef"
+
+
+def test_rejects_boolean_schema_version(metadata_path: Path):
+    metadata_path.write_text(
+        json.dumps({"schema_version": True, "profiles": []}),
+        encoding="utf-8",
+    )
+    with pytest.raises(MetadataCorruptedError, match="unsupported metadata schema"):
+        load_metadata(metadata_path)
+
+
+def test_rejects_timestamp_without_timezone(metadata_path: Path, profiles_dir: Path):
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    profile = _create_profile(
+        "abc123",
+        "Test",
+        str(profiles_dir / "abc123" / "browser-data"),
+        created_at="2026-01-01T12:00:00",
+    )
+    with pytest.raises(ValidationError, match="timezone offset"):
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile]),
+            metadata_path,
+            profiles_dir,
+        )
+
+
+def test_rejects_profile_directory_for_different_id(metadata_path: Path, profiles_dir: Path):
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    profile = _create_profile(
+        "abc123",
+        "Test",
+        str(profiles_dir / "different" / "browser-data"),
+    )
+    with pytest.raises(ValidationError, match="profiles/<id>/browser-data"):
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile]),
+            metadata_path,
+            profiles_dir,
+        )

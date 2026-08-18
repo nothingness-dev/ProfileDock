@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import stat
 from unittest.mock import patch
 
 import pytest
@@ -9,6 +11,7 @@ from profiledock.data_root import DataRootError, platform_data_root, resolve_dat
 from profiledock.models import Profile
 from profiledock.profile_manager import ProfileManager
 from profiledock.process_manager import state_path
+from profiledock.storage import StorageError
 
 runner = CliRunner()
 
@@ -149,6 +152,44 @@ def test_runtime_path_is_outside_browser_data(tmp_path):
     assert runtime.parent == manager.runtime_dir
     assert runtime not in Path(profile.data_dir).parents
     assert Path(profile.data_dir) not in runtime.parents
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions only")
+def test_managed_directories_are_owner_only(tmp_path):
+    paths = resolve_data_root(tmp_path / "data")
+    for path in (
+        paths.root,
+        paths.metadata_dir,
+        paths.profiles_dir,
+        paths.runtime_dir,
+        paths.logs_dir,
+        paths.backups_dir,
+    ):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions only")
+def test_existing_managed_directories_are_hardened(tmp_path):
+    root = tmp_path / "data"
+    (root / "profiles").mkdir(parents=True, mode=0o755)
+    resolve_data_root(root)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert stat.S_IMODE((root / "profiles").stat().st_mode) == 0o700
+
+
+def test_delete_restores_profile_directory_when_metadata_update_fails(tmp_path):
+    manager = ProfileManager(tmp_path / "data")
+    profile = manager.create("Work")
+    data_dir = Path(profile.data_dir)
+    with patch(
+        "profiledock.profile_manager.remove_profile_atomic",
+        side_effect=StorageError("metadata locked"),
+    ):
+        with pytest.raises(StorageError, match="metadata locked"):
+            manager.delete(profile.id)
+    assert data_dir.is_dir()
+    assert manager.get(profile.id).id == profile.id
+    assert list(manager.profiles_dir.glob(".deleting-*")) == []
 
 
 def test_rejects_managed_directory_replaced_by_file(tmp_path):

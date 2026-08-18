@@ -119,7 +119,7 @@ def test_start_reports_ready_with_actual_page_count(controller_env):
     assert state["controller_started_at"]
     assert state["token"]
     assert state["page_count"] == 3
-    assert state["channel"] in ("chromium", "chrome")
+    assert state["channel"] in ("chromium", "chrome", "system")
     assert is_running(str(data_dir))
 
 
@@ -203,7 +203,7 @@ def test_channel_included_in_controller_state(controller_env):
     manager, profile, data_dir, owned_pids = controller_env
     state = _start(data_dir, owned_pids, tabs=1)
     assert "channel" in state
-    assert state["channel"] in ("chromium", "chrome")
+    assert state["channel"] in ("chromium", "chrome", "system")
     _close(data_dir, owned_pids, state["pid"])
 
 

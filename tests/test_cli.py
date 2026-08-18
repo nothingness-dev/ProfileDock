@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
 from profiledock.process_manager import BrowserLaunchError, ProfileRunningError
 from profiledock.profile_manager import AmbiguousProfileError, ProfileNotFoundError
+from profiledock.storage import StorageError
 from profiledock.version import __version__
 
 runner = CliRunner()
@@ -119,6 +120,26 @@ def test_launch_running_error_shown_concisely(tmp_path):
     assert result.exit_code == 1
     assert "Traceback" not in result.output
     assert "Error: profile is already running" in result.output
+
+
+def test_launch_succeeds_when_timestamp_update_fails(tmp_path):
+    data_dir = tmp_path / "profiles" / "abc123" / "browser-data"
+    data_dir.mkdir(parents=True)
+    profile = type(
+        "Profile",
+        (),
+        {"id": "abc123", "name": "Test", "data_dir": str(data_dir)},
+    )()
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.start_controller"
+    ):
+        mock_manager.return_value.resolve.return_value = profile
+        mock_manager.return_value.runtime_path.return_value = tmp_path / "runtime" / "abc123"
+        mock_manager.return_value.mark_launched.side_effect = StorageError("metadata locked")
+        result = runner.invoke(app, ["launch", "abc123", "--tabs", "1"])
+    assert result.exit_code == 0
+    assert "Launched 'Test'" in result.stdout
+    assert "browser launched but launch timestamp was not saved" in result.stderr
 
 
 def test_close_browser_error_shown_concisely(tmp_path):

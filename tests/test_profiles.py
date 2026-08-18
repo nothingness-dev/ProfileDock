@@ -15,6 +15,13 @@ def test_create_list_delete(manager):
     assert not __import__("pathlib").Path(profile.data_dir).parent.exists()
 
 
+def test_delete_removes_metadata_when_profile_directory_is_missing(manager):
+    profile = manager.create("Missing")
+    __import__("shutil").rmtree(__import__("pathlib").Path(profile.data_dir).parent)
+    manager.delete(profile.id)
+    assert manager.list_profiles() == []
+
+
 def test_running_state_stale_file_is_cleaned(manager):
     profile = manager.create("Personal")
     path = state_path(profile.data_dir)
