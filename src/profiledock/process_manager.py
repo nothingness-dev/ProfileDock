@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -259,8 +260,20 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
     err = error_path(data_dir, runtime_dir)
     if path.exists():
         state = _read_state(path)
-        if state:
-            state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
+        if not state or not isinstance(state, dict):
+            if clean_stale:
+                _unlink_quietly(path)
+            return "stale"
+        if state.get("engine") == "direct":
+            pid = int(state.get("pid", -1))
+            if pid > 0 and _alive(pid):
+                if state.get("closing"):
+                    return "closing"
+                return "running"
+            if clean_stale:
+                _unlink_quietly(path)
+            return "stale"
+        state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
         if not state or not _valid_state(state, Path(data_dir).parent.name):
             if clean_stale:
                 _unlink_quietly(path)
@@ -335,6 +348,75 @@ def _stderr_message(process: subprocess.Popen[Any], token: str) -> str:
 def _close_stderr(process: subprocess.Popen[Any]) -> None:
     if process.stderr is not None:
         process.stderr.close()
+
+
+def start_direct_chrome(
+    data_dir: str,
+    tabs: int,
+    runtime_dir: Optional[Path] = None,
+    executable_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    if tabs < 1:
+        raise ValueError("tab count must be at least 1")
+    if not Path(data_dir).is_dir():
+        raise BrowserLaunchError(
+            "profile data directory is missing or invalid",
+            "invalid_data_directory",
+        )
+    if is_running(data_dir, runtime_dir=runtime_dir):
+        raise ProfileRunningError("profile is already running")
+
+    browser_bin = executable_path if executable_path is not None else _system_browser_executable()
+    if browser_bin is None or not Path(browser_bin).exists():
+        raise BrowserLaunchError(
+            "Google Chrome or Chromium executable not found on system",
+            "browser_not_found",
+        )
+
+    path = state_path(data_dir, runtime_dir)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name != "nt":
+        path.parent.chmod(0o700)
+
+    err = error_path(data_dir, runtime_dir)
+    _unlink_quietly(err)
+
+    args = [
+        str(browser_bin),
+        f"--user-data-dir={data_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        *["about:blank" for _ in range(tabs)],
+    ]
+
+    popen_kwargs: Dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = (
+            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    try:
+        process = subprocess.Popen(args, **popen_kwargs)
+    except OSError as exc:
+        _write_error(err, "browser_launch_failed", str(exc))
+        raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
+
+    state = {
+        "pid": process.pid,
+        "engine": "direct",
+        "tabs": tabs,
+        "channel": "chrome",
+        "started_at": _utc_now(),
+    }
+    _atomic_private_json(path, state)
+    return state
 
 
 def start_controller(
@@ -442,6 +524,49 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
     state = _read_state(path)
     if not state:
         raise ProfileRunningError("profile is not running")
+
+    if state.get("engine") == "direct":
+        state["closing"] = True
+        state["status"] = "closing"
+        try:
+            _atomic_private_json(path, state)
+        except OSError:
+            pass
+        pid = int(state.get("pid", -1))
+        if pid > 0 and _alive(pid):
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except (OSError, ProcessLookupError):
+                    pass
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if not _alive(pid):
+                    break
+                time.sleep(0.1)
+            if _alive(pid):
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                else:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        pass
+        _unlink_quietly(path)
+        return
+
     state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
     port = int(state.get("port", 0))
     if not port:
@@ -539,6 +664,7 @@ def _system_browser_executable() -> Optional[Path]:
             base = os.environ.get(variable)
             if base:
                 candidates.append(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
+                candidates.append(Path(base) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe")
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
             candidates.append(Path(local_app_data) / "Chromium" / "Application" / "chrome.exe")
@@ -551,12 +677,15 @@ def _system_browser_executable() -> Optional[Path]:
                     shutil.which("google-chrome"),
                     shutil.which("chromium"),
                     shutil.which("chromium-browser"),
+                    shutil.which("brave"),
+                    shutil.which("brave-browser"),
                 ),
             )
         )
     elif sys.platform == "darwin":
         candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
         candidates.append(Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
+        candidates.append(Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"))
     else:
         candidates.extend(
             Path(value)
@@ -567,6 +696,8 @@ def _system_browser_executable() -> Optional[Path]:
                     shutil.which("google-chrome-stable"),
                     shutil.which("chromium"),
                     shutil.which("chromium-browser"),
+                    shutil.which("brave-browser"),
+                    shutil.which("brave"),
                 ),
             )
         )
