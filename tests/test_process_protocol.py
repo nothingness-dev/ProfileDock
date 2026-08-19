@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from profiledock.process_manager import (
     _atomic_private_json,
     _read_state,
@@ -155,3 +157,65 @@ def test_state_rejects_timestamp_without_timezone():
         "token": "x" * 32,
     }
     assert not _valid_state(state, "profile-a")
+
+
+def test_start_direct_chrome_validation_and_launch(tmp_path):
+    from profiledock.process_manager import (
+        BrowserLaunchError,
+        ProfileRunningError,
+        close_controller,
+        is_running,
+        start_direct_chrome,
+    )
+
+    data_dir = tmp_path / "profile-direct" / "browser-data"
+
+    with pytest.raises(ValueError, match="tab count must be at least 1"):
+        start_direct_chrome(str(data_dir), tabs=0)
+
+    with pytest.raises(BrowserLaunchError, match="profile data directory is missing or invalid"):
+        start_direct_chrome(str(data_dir), tabs=1)
+
+    data_dir.mkdir(parents=True)
+
+    with patch("profiledock.process_manager._system_browser_executable", return_value=None):
+        with pytest.raises(BrowserLaunchError, match="Google Chrome or Chromium executable not found"):
+            start_direct_chrome(str(data_dir), tabs=1)
+
+    dummy_chrome = tmp_path / "chrome.exe"
+    dummy_chrome.write_text("dummy", encoding="utf-8")
+
+    class DummyProcess:
+        pid = 12345
+
+    with patch("profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()):
+        state = start_direct_chrome(str(data_dir), tabs=2, executable_path=dummy_chrome)
+        assert state["pid"] == 12345
+        assert state["engine"] == "direct"
+        assert state["tabs"] == 2
+        assert state["channel"] == "chrome"
+
+    with patch("profiledock.process_manager._alive", return_value=True):
+        assert get_status(str(data_dir)) == "running"
+        assert is_running(str(data_dir))
+
+        with pytest.raises(ProfileRunningError, match="profile is already running"):
+            start_direct_chrome(str(data_dir), tabs=1, executable_path=dummy_chrome)
+
+        with patch("subprocess.run"):
+            close_controller(str(data_dir), timeout=0.2)
+            assert not (data_dir.parent / "running.json").exists()
+
+
+def test_direct_chrome_stale_detection(tmp_path):
+    data_dir = tmp_path / "profile-direct-stale" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_file = data_dir.parent / "running.json"
+    state_file.write_text(
+        json.dumps({"pid": 99999, "engine": "direct", "tabs": 1, "channel": "chrome"}),
+        encoding="utf-8",
+    )
+
+    with patch("profiledock.process_manager._alive", return_value=False):
+        assert get_status(str(data_dir), clean_stale=True) == "stale"
+        assert not state_file.exists()
