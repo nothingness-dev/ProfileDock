@@ -357,13 +357,45 @@ def delete(profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help=
 @app.command()
 def doctor(
     repair: bool = typer.Option(False, "--repair", help="Perform safe repairs where possible."),
+    reattach_orphans: bool = typer.Option(
+        False,
+        "--reattach-orphans",
+        help="Reattach orphan profile directories to metadata (requires --repair).",
+    ),
+    recreate_missing: bool = typer.Option(
+        False,
+        "--recreate-missing",
+        help="Recreate missing profile browser-data directories (requires --repair).",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Confirm actions without interactive prompt.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
     paths = _paths.get() or resolve_data_root()
     root = paths.root
+
+    if (reattach_orphans or recreate_missing) and not repair:
+        fail("--reattach-orphans and --recreate-missing require --repair flag")
+
+    if recreate_missing and not yes and not json_output:
+        if not typer.confirm("Recreate missing empty profile browser-data directories?"):
+            raise typer.Abort()
+
+    if reattach_orphans and not yes and not json_output:
+        if not typer.confirm("Reattach discovered orphan profile directories to metadata?"):
+            raise typer.Abort()
+
     repairs: List[DiagnosticCheck] = []
     if repair:
-        repairs = repair_environment(root)
+        repairs = repair_environment(
+            root,
+            reattach_orphans=reattach_orphans,
+            recreate_missing_directories=recreate_missing,
+        )
     checks = run_diagnostics(root)
     has_failed = any(c.status == STATUS_FAILED for c in checks)
     if json_output:
@@ -392,6 +424,7 @@ def doctor(
             typer.echo(f"  - {c.id}: {c.action}")
     if has_failed:
         raise typer.Exit(EXIT_USER_ERROR)
+
 
 
 @app.command()

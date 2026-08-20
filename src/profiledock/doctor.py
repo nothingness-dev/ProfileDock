@@ -564,12 +564,18 @@ def run_diagnostics(root: Path) -> List[DiagnosticCheck]:
     return checks
 
 
-def repair_environment(root: Path) -> List[DiagnosticCheck]:
+def repair_environment(
+    root: Path,
+    reattach_orphans: bool = False,
+    recreate_missing_directories: bool = False,
+) -> List[DiagnosticCheck]:
     repairs: List[DiagnosticCheck] = []
 
     paths = DataPaths.from_root(root)
     profiles_dir = paths.profiles_dir
-    if paths.runtime_dir.exists():
+    runtime_dir = paths.runtime_dir
+
+    if runtime_dir.exists():
         _, stale_files = check_stale_running_state(root)
         cleaned = 0
         for path in stale_files:
@@ -584,6 +590,27 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
                     id="repair_stale_running_state",
                     status=STATUS_OK,
                     summary=f"Cleaned up {cleaned} stale running.json file(s).",
+                )
+            )
+
+    if profiles_dir.exists():
+        stale_temp_dirs: List[Path] = []
+        for pattern in (".m-*", ".temp_restore_*", ".temp_migrating_*", ".quarantine_*"):
+            stale_temp_dirs.extend(profiles_dir.glob(pattern))
+        cleaned_temps = 0
+        for temp_path in stale_temp_dirs:
+            if temp_path.is_dir():
+                try:
+                    shutil.rmtree(temp_path, ignore_errors=True)
+                    cleaned_temps += 1
+                except OSError:
+                    pass
+        if cleaned_temps > 0:
+            repairs.append(
+                DiagnosticCheck(
+                    id="repair_incomplete_operations",
+                    status=STATUS_OK,
+                    summary=f"Cleaned up {cleaned_temps} incomplete migration/restore temporary directory(ies).",
                 )
             )
 
@@ -655,6 +682,73 @@ def repair_environment(root: Path) -> List[DiagnosticCheck]:
                         summary="Recovered and migrated valid metadata from profiles.json.bak backup.",
                     )
                 )
+        except Exception:
+            pass
+
+    if profiles_file.exists():
+        try:
+            doc = load_metadata(profiles_file)
+            if recreate_missing_directories:
+                recreated_count = 0
+                for p in doc.profiles:
+                    p_data_path = Path(p.data_dir)
+                    if not p_data_path.exists():
+                        p_data_path.mkdir(parents=True, mode=0o700, exist_ok=True)
+                        recreated_count += 1
+                if recreated_count > 0:
+                    repairs.append(
+                        DiagnosticCheck(
+                            id="repair_recreate_missing_directories",
+                            status=STATUS_OK,
+                            summary=f"Recreated {recreated_count} missing profile browser-data directory(ies).",
+                        )
+                    )
+
+            if reattach_orphans and profiles_dir.exists():
+                known_ids = {p.id for p in doc.profiles}
+                known_names = {p.name for p in doc.profiles}
+                reattached_profiles: List[Profile] = []
+                for entry in sorted(profiles_dir.iterdir()):
+                    if entry.is_dir() and not entry.name.startswith(".") and entry.name not in known_ids:
+                        data_dir_path = entry / "browser-data"
+                        if data_dir_path.is_dir():
+                            base_name = f"Recovered-{entry.name}"
+                            candidate_name = base_name
+                            counter = 1
+                            while candidate_name in known_names:
+                                candidate_name = f"{base_name}-{counter}"
+                                counter += 1
+                            known_names.add(candidate_name)
+
+                            reattached_p = Profile(
+                                id=entry.name,
+                                name=candidate_name,
+                                created_at=doc.profiles[0].created_at if doc.profiles else "2026-01-01T00:00:00+00:00",
+                                data_dir=str(data_dir_path.resolve()),
+                                engine=None,
+                            )
+                            reattached_profiles.append(reattached_p)
+
+                if reattached_profiles:
+                    new_profiles = list(doc.profiles) + reattached_profiles
+                    new_doc = MetadataDocument(
+                        schema_version=METADATA_SCHEMA_VERSION,
+                        profiles=new_profiles,
+                    )
+                    validate_metadata_document(new_doc.profiles, profiles_dir)
+                    with metadata_lock(profiles_file):
+                        _backup_metadata(profiles_file, backup_file)
+                        _atomic_write(
+                            profiles_file,
+                            json.dumps(new_doc.to_dict(), indent=2) + "\n",
+                        )
+                    repairs.append(
+                        DiagnosticCheck(
+                            id="repair_reattach_orphans",
+                            status=STATUS_OK,
+                            summary=f"Reattached {len(reattached_profiles)} orphan profile directory(ies) to metadata.",
+                        )
+                    )
         except Exception:
             pass
 
