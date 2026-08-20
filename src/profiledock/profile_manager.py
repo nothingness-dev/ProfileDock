@@ -1,7 +1,7 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 from .data_root import DataPaths, resolve_data_root
 from .models import Profile, utc_now
@@ -12,6 +12,7 @@ from .storage import (
     migrate_metadata,
     remove_profile_atomic,
     rename_profile_atomic,
+    set_engine_atomic,
 )
 
 
@@ -78,10 +79,12 @@ class ProfileManager:
             )
         raise ProfileNotFoundError(f"profile not found: {identifier}")
 
-    def create(self, name: str) -> Profile:
+    def create(self, name: str, engine: Optional[str] = None) -> Profile:
         name = name.strip()
         if not name:
             raise ValueError("profile name cannot be empty")
+        if engine is not None and engine not in {"direct", "playwright"}:
+            raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
         profile_id = uuid.uuid4().hex[:8]
         profile_dir = self.profiles_dir / profile_id
         profile_dir.mkdir(mode=0o700, exist_ok=False)
@@ -89,7 +92,7 @@ class ProfileManager:
         data_dir = profile_dir / "browser-data"
         data_dir.mkdir(mode=0o700)
         data_dir.chmod(0o700)
-        profile = Profile(profile_id, name, utc_now(), str(data_dir))
+        profile = Profile(profile_id, name, utc_now(), str(data_dir), engine=engine)
         try:
             add_profile_atomic(profile, self.profiles_file, self.profiles_dir, self.backup_file)
         except Exception:
@@ -125,6 +128,13 @@ class ProfileManager:
             raise ValueError("profile name cannot be empty")
         profile = self.resolve(identifier)
         rename_profile_atomic(profile.id, new_name, self.profiles_file, self.profiles_dir, self.backup_file)
+        return self.get(profile.id)
+
+    def set_engine(self, identifier: str, engine: Optional[str]) -> Profile:
+        if engine is not None and engine not in {"direct", "playwright"}:
+            raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
+        profile = self.resolve(identifier)
+        set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
         return self.get(profile.id)
 
     def mark_launched(self, identifier: str) -> None:

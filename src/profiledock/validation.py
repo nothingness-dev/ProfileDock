@@ -35,6 +35,10 @@ def validate_required_fields(profile: Profile) -> None:
     validate_timestamp(profile.created_at, "created_at")
     if profile.last_launched_at:
         validate_timestamp(profile.last_launched_at, "last_launched_at")
+    if profile.engine is not None and profile.engine not in {"direct", "playwright"}:
+        raise ValidationError(
+            f"invalid engine '{profile.engine}', must be 'direct' or 'playwright'"
+        )
 
 
 def validate_duplicate_ids(profiles: List[Profile]) -> None:

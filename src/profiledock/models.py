@@ -17,6 +17,7 @@ class Profile:
     created_at: str
     data_dir: str
     last_launched_at: Optional[str] = None
+    engine: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -34,12 +35,16 @@ class Profile:
         last_launched_at = value.get("last_launched_at")
         if last_launched_at is not None and not isinstance(last_launched_at, str):
             raise ValueError("profile field last_launched_at must be a string or null")
+        engine = value.get("engine")
+        if engine is not None and not isinstance(engine, str):
+            raise ValueError("profile field engine must be a string or null")
         return cls(
             id=value["id"],
             name=value["name"],
             created_at=value["created_at"],
             data_dir=value["data_dir"],
             last_launched_at=last_launched_at,
+            engine=engine,
         )
 
 

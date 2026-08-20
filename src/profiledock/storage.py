@@ -5,7 +5,7 @@ import time as _time
 from uuid import uuid4
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, List, Union
+from typing import Any, Generator, List, Optional, Union
 
 from .models import MetadataDocument, METADATA_SCHEMA_VERSION, Profile
 from .validation import ValidationError, validate_metadata_document
@@ -379,6 +379,7 @@ def rename_profile_atomic(
                         created_at=p.created_at,
                         data_dir=p.data_dir,
                         last_launched_at=p.last_launched_at,
+                        engine=p.engine,
                     )
                 )
             else:
@@ -408,6 +409,7 @@ def mark_launched_atomic(
                         created_at=p.created_at,
                         data_dir=p.data_dir,
                         last_launched_at=launched_at,
+                        engine=p.engine,
                     )
                 )
             else:
@@ -417,3 +419,33 @@ def mark_launched_atomic(
         )
 
     return atomic_update_metadata(path, profile_root, _mark, backup_path)
+
+
+def set_engine_atomic(
+    profile_id: str,
+    engine: Optional[str],
+    path: Union[str, Path] = "profiles.json",
+    profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
+) -> MetadataDocument:
+    def _set(doc: MetadataDocument) -> MetadataDocument:
+        new_profiles = []
+        for p in doc.profiles:
+            if p.id == profile_id:
+                new_profiles.append(
+                    Profile(
+                        id=p.id,
+                        name=p.name,
+                        created_at=p.created_at,
+                        data_dir=p.data_dir,
+                        last_launched_at=p.last_launched_at,
+                        engine=engine,
+                    )
+                )
+            else:
+                new_profiles.append(p)
+        return MetadataDocument(
+            schema_version=doc.schema_version, profiles=new_profiles
+        )
+
+    return atomic_update_metadata(path, profile_root, _set, backup_path)

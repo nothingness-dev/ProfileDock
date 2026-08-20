@@ -1,4 +1,5 @@
 import json
+import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import List, Optional
@@ -29,6 +30,7 @@ from .process_manager import (
     get_status,
     is_running,
     start_controller,
+    start_direct_chrome,
 )
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from .storage import StorageError
@@ -86,6 +88,26 @@ def fail(message: str, code: int = EXIT_USER_ERROR) -> None:
     raise typer.Exit(code)
 
 
+def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
+    if cli_engine:
+        clean = cli_engine.strip().lower()
+        if clean not in ("direct", "playwright"):
+            fail("engine must be 'direct' or 'playwright'")
+        return clean
+    profile_engine = getattr(profile, "engine", None)
+    if profile_engine:
+        if profile_engine not in ("direct", "playwright"):
+            fail("stored profile engine must be 'direct' or 'playwright'")
+        return profile_engine
+    env_value = os.environ.get("PROFILEDOCK_DEFAULT_ENGINE", "").strip()
+    if env_value:
+        env_engine = env_value.lower()
+        if env_engine not in ("direct", "playwright"):
+            fail("PROFILEDOCK_DEFAULT_ENGINE must be 'direct' or 'playwright'")
+        return env_engine
+    return "direct"
+
+
 def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
     data = {
         "id": profile.id,
@@ -93,6 +115,7 @@ def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
         "created_at": profile.created_at,
         "data_dir": profile.data_dir,
         "last_launched_at": profile.last_launched_at,
+        "engine": resolve_engine(None, profile),
     }
     if status is not None:
         data["status"] = status
@@ -111,9 +134,22 @@ def _render_table(rows: List[List[str]]) -> str:
 
 
 @app.command()
-def create(name: str) -> None:
+def create(
+    name: str,
+    engine: Optional[str] = typer.Option(
+        None,
+        "--engine",
+        "-e",
+        help="Default engine for profile: 'direct' (default) or 'playwright'",
+    ),
+) -> None:
+    if engine is not None:
+        clean_engine = engine.strip().lower()
+        if clean_engine not in ("direct", "playwright"):
+            fail("engine must be 'direct' or 'playwright'")
+        engine = clean_engine
     try:
-        profile = manager().create(name)
+        profile = manager().create(name, engine=engine)
     except (StorageError, ValueError) as exc:
         fail(str(exc))
     typer.echo(f"Created profile '{profile.name}' ({profile.id})")
@@ -137,10 +173,11 @@ def list_profiles(
     if not profiles:
         typer.echo("No profiles found.")
         return
-    table = [["ID", "NAME", "STATUS"]]
+    table = [["ID", "NAME", "ENGINE", "STATUS"]]
     for profile in profiles:
         status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
-        table.append([profile.id, profile.name, status])
+        eng = resolve_engine(None, profile)
+        table.append([profile.id, profile.name, eng, status])
     typer.echo(_render_table(table))
 
 
@@ -161,6 +198,7 @@ def show(
     rows = [
         ["ID:", profile.id],
         ["Name:", profile.name],
+        ["Engine:", resolve_engine(None, profile)],
         ["Status:", status],
         ["Created at:", profile.created_at],
         ["Data directory:", profile.data_dir],
@@ -179,6 +217,21 @@ def rename(profile_id: str, new_name: str) -> None:
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         fail(str(exc))
     typer.echo(f"Renamed profile to '{profile.name}' ({profile.id})")
+
+
+@app.command("set-engine")
+def set_engine(
+    profile_id: str,
+    engine: str = typer.Argument(..., help="Engine to use: 'direct' or 'playwright'"),
+) -> None:
+    clean_engine = engine.strip().lower()
+    if clean_engine not in ("direct", "playwright"):
+        fail("engine must be 'direct' or 'playwright'")
+    try:
+        profile = manager().set_engine(profile_id, clean_engine)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        fail(str(exc))
+    typer.echo(f"Set engine to '{clean_engine}' for profile '{profile.name}' ({profile.id})")
 
 
 @app.command()
@@ -200,7 +253,14 @@ def status(
         items = []
         for prof in profiles:
             st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
-            items.append({"id": prof.id, "name": prof.name, "status": st})
+            items.append(
+                {
+                    "id": prof.id,
+                    "name": prof.name,
+                    "engine": resolve_engine(None, prof),
+                    "status": st,
+                }
+            )
         typer.echo(json.dumps(items, indent=2))
         return
     if not profiles:
@@ -209,34 +269,49 @@ def status(
     if single:
         prof = profiles[0]
         st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
-        typer.echo(f"{prof.id}\t{prof.name}\t{st}")
+        eng = resolve_engine(None, prof)
+        typer.echo(f"{prof.id}\t{prof.name}\t{eng}\t{st}")
     else:
-        table = [["ID", "NAME", "STATUS"]]
+        table = [["ID", "NAME", "ENGINE", "STATUS"]]
         for prof in profiles:
             st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
-            table.append([prof.id, prof.name, st])
+            eng = resolve_engine(None, prof)
+            table.append([prof.id, prof.name, eng, st])
         typer.echo(_render_table(table))
 
 
 @app.command()
-def launch(profile_id: str, tabs: int = typer.Option(None, "--tabs", "-t")) -> None:
+def launch(
+    profile_id: str,
+    tabs: int = typer.Option(None, "--tabs", "-t"),
+    engine: Optional[str] = typer.Option(
+        None,
+        "--engine",
+        "-e",
+        help="Override engine: 'direct' or 'playwright'",
+    ),
+) -> None:
     try:
         profile_manager = manager()
         profile = profile_manager.resolve(profile_id)
+        active_engine = resolve_engine(engine, profile)
         if tabs is None:
             tabs = typer.prompt("How many tabs do you want to open?", type=int)
         if tabs < 1:
             fail("tab count must be at least 1")
         if not Path(profile.data_dir).exists():
             fail("profile data directory is missing")
-        start_controller(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
+        if active_engine == "direct":
+            start_direct_chrome(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
+        else:
+            start_controller(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError, ValueError) as exc:
         fail(str(exc))
     try:
         profile_manager.mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         typer.echo(f"Warning: browser launched but launch timestamp was not saved: {exc}", err=True)
-    typer.echo(f"Launched '{profile.name}' with {tabs} tab(s).")
+    typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {tabs} tab(s).")
 
 
 @app.command()

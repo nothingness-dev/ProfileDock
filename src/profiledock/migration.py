@@ -150,6 +150,7 @@ def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> List[P
                 created_at=profile.created_at,
                 data_dir=str(source_path),
                 last_launched_at=profile.last_launched_at,
+                engine=profile.engine,
             )
         )
     try:
@@ -236,6 +237,7 @@ def _identical_profile(source: Profile, destination: Profile) -> bool:
         and source.name == destination.name
         and source.created_at == destination.created_at
         and source.last_launched_at == destination.last_launched_at
+        and source.engine == destination.engine
     )
 
 
@@ -416,6 +418,7 @@ def migrate_project(
                     created_at=profile.created_at,
                     data_dir=str(destination_profiles / profile.id / "browser-data"),
                     last_launched_at=profile.last_launched_at,
+                    engine=profile.engine,
                 )
                 new_profiles.append(new_profile)
                 migrated.append(

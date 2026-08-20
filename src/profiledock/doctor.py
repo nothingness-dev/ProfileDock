@@ -307,6 +307,23 @@ def check_playwright_chromium() -> DiagnosticCheck:
         )
 
 
+def check_direct_chrome() -> DiagnosticCheck:
+    check_id = "system_chrome_executable"
+    executable = _system_browser_executable()
+    if executable is not None:
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_OK,
+            summary=f"Direct browser executable found at {executable}.",
+        )
+    return DiagnosticCheck(
+        id=check_id,
+        status=STATUS_WARNING,
+        summary="No Chrome, Chromium, or Brave executable found for direct mode.",
+        action="Install Google Chrome, Chromium, or Brave for direct engine support.",
+    )
+
+
 def check_system_chrome() -> DiagnosticCheck:
     check_id = "system_chrome"
     try:
@@ -349,9 +366,17 @@ def check_system_chrome() -> DiagnosticCheck:
 
 
 def check_browser_availability(
-    pw_check: DiagnosticCheck, chrome_check: DiagnosticCheck
+    pw_check: DiagnosticCheck,
+    chrome_check: DiagnosticCheck,
+    direct_check: Optional[DiagnosticCheck] = None,
 ) -> DiagnosticCheck:
     check_id = "browser_availability"
+    if direct_check is not None and direct_check.status == STATUS_OK:
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_OK,
+            summary="Direct browser engine detected (Chrome, Chromium, or Brave).",
+        )
     if pw_check.status == STATUS_OK:
         return DiagnosticCheck(
             id=check_id,
@@ -367,10 +392,9 @@ def check_browser_availability(
     return DiagnosticCheck(
         id=check_id,
         status=STATUS_FAILED,
-        summary="No browser engine available (neither Playwright Chromium nor Google Chrome).",
-        action="Install Playwright Chromium with 'playwright install chromium' or install Google Chrome.",
+        summary="No browser engine available.",
+        action="Install Playwright Chromium, Google Chrome, Chromium, or Brave.",
     )
-
 
 def check_runtime_permissions(root: Path) -> DiagnosticCheck:
     check_id = "runtime_permissions"
@@ -526,8 +550,11 @@ def run_diagnostics(root: Path) -> List[DiagnosticCheck]:
     checks.append(pw_chrom_chk)
     sys_chrome_chk = check_system_chrome()
     checks.append(sys_chrome_chk)
-    browser_chk = check_browser_availability(pw_chrom_chk, sys_chrome_chk)
+    direct_chk = check_direct_chrome()
+    checks.append(direct_chk)
+    browser_chk = check_browser_availability(pw_chrom_chk, sys_chrome_chk, direct_chk)
     checks.append(browser_chk)
+
     checks.append(check_runtime_permissions(root))
     stale_chk, _ = check_stale_running_state(root)
     checks.append(stale_chk)
