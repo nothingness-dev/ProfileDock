@@ -430,3 +430,60 @@ def test_doctor_cli_repair():
     assert result.exit_code == EXIT_SUCCESS
     assert "Repairs performed:" in result.output
     assert "Cleaned up 1 stale running.json file(s)." in result.output
+
+
+def test_repair_reattach_orphans(tmp_path):
+    layout = paths(tmp_path)
+    orphan_dir = layout.profiles_dir / "orphan123"
+    orphan_data = orphan_dir / "browser-data"
+    orphan_data.mkdir(parents=True)
+    (orphan_data / "cookies.txt").write_text("data", encoding="utf-8")
+
+    layout.profiles_file.write_text(
+        json.dumps({"schema_version": 1, "profiles": []}),
+        encoding="utf-8",
+    )
+
+    repairs = repair_environment(tmp_path, reattach_orphans=True)
+    assert any(r.id == "repair_reattach_orphans" for r in repairs)
+
+    doc = load_metadata(layout.profiles_file)
+    assert len(doc.profiles) == 1
+    assert doc.profiles[0].id == "orphan123"
+    assert doc.profiles[0].name.startswith("Recovered-orphan123")
+
+
+def test_repair_incomplete_operations_cleanup(tmp_path):
+    layout = paths(tmp_path)
+    stale_temp = layout.profiles_dir / ".temp_restore_abc123"
+    stale_temp.mkdir(parents=True)
+    (stale_temp / "partial.txt").write_text("data", encoding="utf-8")
+
+    repairs = repair_environment(tmp_path)
+    assert any(r.id == "repair_incomplete_operations" for r in repairs)
+    assert not stale_temp.exists()
+
+
+def test_repair_recreate_missing_directories(tmp_path):
+    layout = paths(tmp_path)
+    missing_data_dir = layout.profiles_dir / "p1" / "browser-data"
+    profile = Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(missing_data_dir))
+    layout.profiles_file.write_text(
+        json.dumps({"schema_version": 1, "profiles": [profile.to_dict()]}),
+        encoding="utf-8",
+    )
+
+    repairs = repair_environment(tmp_path, recreate_missing_directories=True)
+    assert any(r.id == "repair_recreate_missing_directories" for r in repairs)
+    assert missing_data_dir.exists()
+
+
+def test_doctor_repair_refuses_future_schema(tmp_path):
+    layout = paths(tmp_path)
+    layout.profiles_file.write_text(
+        json.dumps({"schema_version": 999, "profiles": []}),
+        encoding="utf-8",
+    )
+    repairs = repair_environment(tmp_path)
+    assert not any(r.id == "repair_metadata_recovery" for r in repairs)
+    assert json.loads(layout.profiles_file.read_text(encoding="utf-8"))["schema_version"] == 999
