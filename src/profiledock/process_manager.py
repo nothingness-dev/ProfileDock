@@ -131,6 +131,22 @@ def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> boo
     return True
 
 
+def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
+    if value.get("engine") != "direct" or value.get("profile_id") != profile_id:
+        return False
+    if type(value.get("pid")) is not int or type(value.get("launcher_pid")) is not int:
+        return False
+    if type(value.get("tabs")) is not int or value["tabs"] < 1:
+        return False
+    if not isinstance(value.get("started_at"), str):
+        return False
+    try:
+        started_at = datetime.fromisoformat(value["started_at"])
+    except (TypeError, ValueError):
+        return False
+    return started_at.tzinfo is not None and started_at.utcoffset() is not None
+
+
 def _upgrade_legacy_state(path: Path, value: Dict[str, Any], profile_id: str) -> Dict[str, Any]:
     if "protocol_version" in value:
         return value
@@ -265,11 +281,18 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                 _unlink_quietly(path)
             return "stale"
         if state.get("engine") == "direct":
-            pid = int(state.get("pid", -1))
+            if not _valid_direct_state(state, Path(data_dir).parent.name):
+                if clean_stale:
+                    _unlink_quietly(path)
+                return "stale"
+            pid = state["pid"]
             if pid > 0 and _alive(pid):
                 if state.get("closing"):
                     return "closing"
                 return "running"
+            launcher_pid = state["launcher_pid"]
+            if pid == 0 and launcher_pid > 0 and _alive(launcher_pid):
+                return "starting"
             if clean_stale:
                 _unlink_quietly(path)
             return "stale"
@@ -363,13 +386,10 @@ def start_direct_chrome(
             "profile data directory is missing or invalid",
             "invalid_data_directory",
         )
-    if is_running(data_dir, runtime_dir=runtime_dir):
-        raise ProfileRunningError("profile is already running")
-
     browser_bin = executable_path if executable_path is not None else _system_browser_executable()
     if browser_bin is None or not Path(browser_bin).exists():
         raise BrowserLaunchError(
-            "Google Chrome or Chromium executable not found on system",
+            "Google Chrome, Chromium, or Brave executable not found on system",
             "browser_not_found",
         )
 
@@ -381,11 +401,36 @@ def start_direct_chrome(
     err = error_path(data_dir, runtime_dir)
     _unlink_quietly(err)
 
+    if is_running(data_dir, runtime_dir=runtime_dir):
+        raise ProfileRunningError("profile is already running")
+
+    started_at = _utc_now()
+    initial = {
+        "profile_id": Path(data_dir).parent.name,
+        "pid": 0,
+        "launcher_pid": os.getpid(),
+        "engine": "direct",
+        "tabs": tabs,
+        "channel": Path(browser_bin).stem,
+        "started_at": started_at,
+        "status": "starting",
+    }
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        fd = os.open(str(path), flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(initial, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError as exc:
+        raise ProfileRunningError("profile is already running") from exc
+
     args = [
         str(browser_bin),
         f"--user-data-dir={data_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--new-window",
         *["about:blank" for _ in range(tabs)],
     ]
 
@@ -405,17 +450,29 @@ def start_direct_chrome(
     try:
         process = subprocess.Popen(args, **popen_kwargs)
     except OSError as exc:
+        _unlink_quietly(path)
         _write_error(err, "browser_launch_failed", str(exc))
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
 
     state = {
+        "profile_id": initial["profile_id"],
         "pid": process.pid,
+        "launcher_pid": initial["launcher_pid"],
         "engine": "direct",
         "tabs": tabs,
-        "channel": "chrome",
-        "started_at": _utc_now(),
+        "channel": initial["channel"],
+        "started_at": started_at,
+        "status": "running",
     }
-    _atomic_private_json(path, state)
+    try:
+        _atomic_private_json(path, state)
+    except OSError as exc:
+        try:
+            _stop_process(process)
+        finally:
+            _unlink_quietly(path)
+        _write_error(err, "state_write_failed", str(exc))
+        raise BrowserLaunchError(str(exc), "state_write_failed") from exc
     return state
 
 
@@ -564,6 +621,11 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                         os.kill(pid, signal.SIGKILL)
                     except (OSError, ProcessLookupError):
                         pass
+                force_deadline = time.monotonic() + min(max(timeout, 0.1), 2)
+                while time.monotonic() < force_deadline and _alive(pid):
+                    time.sleep(0.05)
+            if _alive(pid):
+                raise BrowserLaunchError("browser process did not close within the timeout")
         _unlink_quietly(path)
         return
 
