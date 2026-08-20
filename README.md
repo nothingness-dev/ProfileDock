@@ -347,7 +347,29 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 
 Exits with `0` when all critical checks pass (including with warnings). Exits with `1` if any check fails (`FAILED` status).
 
+### Backup
+
+```bash
+profiledock backup <id-or-name> --output /path/to/backup.tar.gz
+profiledock backup --all --output /path/to/all_profiles.tar.gz
+profiledock backup <id-or-name> --output /path/to/backup.tar.gz --force
+profiledock backup <id-or-name> --output /path/to/backup.tar.gz --json
+```
+
+Creates a versioned, self-contained, verified archive of profile metadata and browser data.
+
+**Backup guarantees & requirements:**
+
+- **Stopped state required**: Profiles must be fully stopped (`get_status() == "stopped"`) before backup. Active or starting profiles are refused to avoid partial or inconsistent database states.
+- **Engine metadata preserved**: Retains profile configuration, including whether direct Chrome or Playwright engine is used.
+- **Clean archives**: Automatically excludes transient runtime state (`running.json`, `controller.error`) and logs.
+- **Manifest & checksums**: Every backup includes `backup_manifest.json` with archive schema format version (version 1), creation timestamp, ProfileDock version, and SHA-256 checksums of every file.
+- **Atomic output & validation**: Writes to a temporary archive first, verifies archive readability and manifest integrity, and then replaces the target destination.
+- **No silent overwrites**: Refuses to overwrite an existing archive unless `--force` is provided.
+- **Windows locking resilience**: If browser SQLite databases (`Cookies`, `Web Data`, `History`) are locked by background Chrome processes, fails gracefully with clear troubleshooting instructions to terminate background processes.
+
 ### Migrate
+
 
 ```bash
 profiledock migrate --from-project <path>
@@ -593,7 +615,35 @@ Returns details of migrated, skipped, and failed profiles:
 }
 ```
 
+**`backup --json`:**
+
+Returns backup report, format version, and details for each backed-up profile:
+
+```json
+{
+  "output_path": "/path/to/backup.tar.gz",
+  "format_version": 1,
+  "profiledock_version": "0.8.2",
+  "created_at": "2026-08-20T12:00:00+00:00",
+  "total_profiles": 1,
+  "total_files": 12,
+  "total_bytes": 1048576,
+  "profiles": [
+    {
+      "id": "abc123",
+      "name": "Work",
+      "engine": "direct",
+      "status": "backed_up",
+      "file_count": 12,
+      "total_bytes": 1048576,
+      "message": "successfully backed up"
+    }
+  ]
+}
+```
+
 Failures also use this report shape, place the error in `failed`, and exit with code `1`. Human-readable runs print migration, skip, conflict, and failure information directly in the terminal.
+
 
 **Guarantees:**
 
