@@ -7,11 +7,12 @@ Current release: `0.8.2`
 ## Features
 
 - Create, list, launch, close, and delete browser profiles.
-- Keep browser state between launches with Playwright persistent contexts.
-- Open an exact number of blank tabs.
+- Keep browser state between launches with isolated browser data directories.
+- Choose direct system-browser launches or Playwright persistent contexts.
+- Open an exact number of blank tabs with the Playwright engine.
 - Prevent the same profile from launching twice.
 - Close browsers gracefully through a local controller process.
-- Use Playwright Chromium or fall back to an installed Chrome or Chromium executable.
+- Use an installed Chrome, Chromium, or Brave browser directly, or use Playwright Chromium.
 - Store ProfileDock data in the operating system's application-data directory.
 - Override storage with `--data-root` or `PROFILEDOCK_DATA_ROOT`.
 
@@ -20,7 +21,7 @@ Current release: `0.8.2`
 - Python 3.9 or newer.
 - Windows, macOS, or Linux.
 - Internet access during the initial dependency installation.
-- Google Chrome or access to Playwright's Chromium download service.
+- Google Chrome, Chromium, Brave, or access to Playwright's Chromium download service.
 
 Git is optional for running ProfileDock but required when cloning or updating the repository with Git.
 
@@ -37,7 +38,7 @@ The setup script:
 1. Creates an isolated `.venv` environment if one does not exist.
 2. Upgrades pip inside that environment.
 3. Installs ProfileDock and its test dependencies from `requirements.txt`.
-4. Uses installed Google Chrome or installs Playwright Chromium.
+4. Uses an installed Chrome, Chromium, or Brave browser, or installs Playwright Chromium.
 5. Runs the complete test suite.
 
 The script is safe to run again after pulling updates. It reuses the existing virtual environment.
@@ -63,7 +64,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-If Playwright's Chromium download is blocked but Chrome or Chromium is installed, omit the final command. ProfileDock tries the installed Chrome channel and then a detected system browser executable.
+If Playwright's Chromium download is blocked but Chrome, Chromium, or Brave is installed, omit the final command.
 
 ### macOS and Linux
 
@@ -163,7 +164,36 @@ Launch the same ID again to restore its persistent browser state:
 profiledock launch <id>
 ```
 
+## Dual Browser Engines
+
+ProfileDock offers two distinct browser launch engines:
+
+### Direct browser (`--engine direct`, default)
+
+- Launches an installed Google Chrome, Chromium, or Brave executable with an isolated `--user-data-dir`.
+- Does not use Playwright to control the browser.
+- Requests the selected number of blank tabs, but browser startup and session-restore settings can affect the final tab count.
+- Does not guarantee that any website will accept a login; website policies and browser security checks still apply.
+
+### Playwright Context (`--engine playwright`)
+
+- **Automated context**: Launches Playwright persistent context with local controller management.
+- **Exact tab control**: Opens exactly the requested number of blank pages after launch.
+
+Engine selection precedence is the command-line `--engine` override, the engine stored on the profile, `PROFILEDOCK_DEFAULT_ENGINE`, and finally `direct`. The environment variable must be `direct` or `playwright`.
+
+### Managing Multiple Concurrent Accounts
+
+```bash
+profiledock create "Work" --engine direct
+profiledock create "Personal" --engine direct
+
+profiledock launch Work --tabs 2
+profiledock launch Personal --tabs 2
+```
+
 ## Commands
+
 
 Commands that operate on a single profile accept a profile identifier. The identifier can be a full ID, a unique ID prefix, or an exact profile name. Matching is case-sensitive for both IDs and names. If the input matches more than one profile, ProfileDock prints the matching IDs and names and exits without taking action.
 
@@ -179,9 +209,11 @@ Displays the current version of ProfileDock.
 
 ```bash
 profiledock create "Profile name"
+profiledock create "Profile name" --engine direct
+profiledock create "Profile name" --engine playwright
 ```
 
-Creates profile metadata and a dedicated browser data directory.
+Creates profile metadata and a dedicated browser data directory. You can optionally configure the default launch engine (`direct` or `playwright`).
 
 ### List
 
@@ -190,7 +222,7 @@ profiledock list
 profiledock list --json
 ```
 
-Displays each profile's ID, name, and status in a formatted table, or outputs JSON with `--json`.
+Displays each profile's ID, name, effective engine, and status in a formatted table, or outputs JSON with `--json`.
 
 ### Show
 
@@ -199,7 +231,7 @@ profiledock show <id-or-name>
 profiledock show <id-or-name> --json
 ```
 
-Displays all safe profile metadata (ID, name, status, created at, data directory, and last launched timestamp). Controller authentication tokens are never displayed.
+Displays all safe profile metadata (ID, name, engine, status, created at, data directory, and last launched timestamp). Controller authentication tokens are never displayed.
 
 ### Rename
 
@@ -208,6 +240,15 @@ profiledock rename <id-or-name> "New name"
 ```
 
 Validates the new non-empty name and renames the profile atomically.
+
+### Set Engine
+
+```bash
+profiledock set-engine <id-or-name> direct
+profiledock set-engine <id-or-name> playwright
+```
+
+Updates the default launch engine for an existing profile.
 
 ### Status
 
@@ -235,9 +276,12 @@ ProfileDock uses stable exit codes for scripting compatibility:
 ```bash
 profiledock launch <id-or-name>
 profiledock launch <id-or-name> --tabs 3
+profiledock launch <id-or-name> --engine direct
+profiledock launch <id-or-name> --engine playwright
 ```
 
-Starts a persistent browser context with exactly the requested number of `about:blank` tabs. A running profile cannot be launched a second time.
+Starts the selected persistent browser engine. Playwright opens exactly the requested number of `about:blank` pages; direct mode passes the requested blank tabs to the installed browser, whose startup settings can affect the final count. A running profile cannot be launched a second time. You can override the engine for a single launch with `--engine`.
+
 
 ### Close
 
@@ -245,7 +289,7 @@ Starts a persistent browser context with exactly the requested number of `about:
 profiledock close <id-or-name>
 ```
 
-Requests graceful browser shutdown and removes the profile's running-state file.
+Requests browser shutdown and removes the profile's running-state file only after the tracked process exits. Direct mode escalates to forced process-tree termination if graceful shutdown times out.
 
 If the entire browser is closed manually or exits unexpectedly, the controller detects the closure, exits, and removes its running state. The profile can then be launched again normally.
 
@@ -284,6 +328,7 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 - **`playwright_package`**: Checks if the `playwright` Python package is installed.
 - **`playwright_chromium`**: Verifies if Playwright Chromium browser executable is installed.
 - **`system_chrome`**: Verifies if system Google Chrome or Chromium is available as fallback.
+- **`system_chrome_executable`**: Detects a Chrome, Chromium, or Brave executable for direct mode.
 - **`browser_availability`**: Aggregate check verifying that at least one usable browser engine is present.
 - **`runtime_permissions`**: Checks read/write permissions on the `runtime/` directory.
 - **`stale_running_state`**: Detects leftover `running.json` state files from terminated processes.
@@ -358,7 +403,8 @@ ProfileDock/
       "name": "Personal",
       "created_at": "2024-01-15T10:30:00+00:00",
       "data_dir": "/path/to/profiles/abc123/browser-data",
-      "last_launched_at": null
+      "last_launched_at": null,
+      "engine": "direct"
     }
   ]
 }
@@ -368,7 +414,7 @@ The metadata document includes:
 
 - `schema_version`: Version of the metadata format (currently 1)
 - `profiles`: Array of profile objects with required fields: `id`, `name`, `created_at`, `data_dir`
-- Optional field: `last_launched_at` (ISO-8601 timestamp)
+- Optional fields: `last_launched_at` (ISO-8601 timestamp) and `engine` (`direct` or `playwright`)
 
 ### Metadata migration
 
@@ -400,7 +446,7 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
 
-`running.json` exists only while a profile controller is active. New state files use a versioned local protocol and contain the profile ID, controller PID, start time, loopback port, status, and a random authentication token. State writes are atomic, and the controller accepts a close request only when its token matches. Stale state files are cleaned automatically.
+`running.json` exists while a launch is tracked. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, launch PID, browser channel, start time, and status. State writes are atomic, and stale files are cleaned automatically.
 
 Runtime state, logs, backups, metadata, and browser data are separated. Runtime files are never written inside `browser-data`.
 
@@ -428,7 +474,7 @@ macOS and Linux:
 ./.venv/bin/python -m pytest
 ```
 
-The integration test launches a real persistent browser context, verifies the requested tab count, closes it, relaunches it, and confirms that a persistent cookie remains. It uses Playwright Chromium or installed Google Chrome and skips only when neither is available.
+The integration test launches a real persistent browser context, verifies the requested tab count, closes it, relaunches it, and confirms that a persistent cookie remains. It uses Playwright Chromium or a detected Chrome, Chromium, or Brave executable and skips only when none is available.
 
 Run only fast unit tests:
 
@@ -446,7 +492,7 @@ Run only browser and controller integration tests:
 
 All JSON output from `--json` flags is stable and safe for scripting:
 
-**`list --json` and `status --json`:**
+**`list --json`:**
 
 Always returns an array of profile objects:
 
@@ -458,7 +504,23 @@ Always returns an array of profile objects:
     "status": "stopped",
     "created_at": "2026-01-01T00:00:00+00:00",
     "data_dir": "/path/to/profiles/abc123/browser-data",
-    "last_launched_at": null
+    "last_launched_at": null,
+    "engine": "direct"
+  }
+]
+```
+
+**`status --json`:**
+
+Returns an array containing identity, effective engine, and runtime status:
+
+```json
+[
+  {
+    "id": "abc123",
+    "name": "Work",
+    "engine": "direct",
+    "status": "stopped"
   }
 ]
 ```
@@ -474,7 +536,8 @@ Returns a single profile object with all metadata:
   "status": "running",
   "created_at": "2026-01-01T00:00:00+00:00",
   "data_dir": "/path/to/profiles/abc123/browser-data",
-  "last_launched_at": "2026-01-15T12:30:00+00:00"
+  "last_launched_at": "2026-01-15T12:30:00+00:00",
+  "engine": "playwright"
 }
 ```
 
@@ -556,7 +619,7 @@ Rerunning setup updates the editable installation and executes the tests. Review
 
 ### Chromium download returns HTTP 403
 
-Playwright's CDN may be unavailable in some locations. Install Chrome or Chromium and rerun setup. The script detects supported system browsers and avoids the blocked download.
+Playwright's CDN may be unavailable in some locations. Install Chrome, Chromium, or Brave and rerun setup. The script detects supported system browsers and avoids the blocked download.
 
 ### `profiledock` is not recognized
 
@@ -602,7 +665,7 @@ Rerun project setup with `python scripts/setup_project.py`, or install Playwrigh
 ```
 Error: Playwright Chromium: <error>\nGoogle Chrome: <error>\nSystem browser: <error or not found>
 ```
-Either install Playwright Chromium (`playwright install chromium`) or install Chrome or Chromium on your system.
+Either install Playwright Chromium (`playwright install chromium`) or install Chrome, Chromium, or Brave on your system.
 
 **Browser process failed to launch:**
 The error message will include Playwright's diagnostic details. Check that the profile data directory exists and is accessible.
