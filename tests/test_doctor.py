@@ -14,6 +14,7 @@ from profiledock.doctor import (
     STATUS_WARNING,
     check_browser_availability,
     check_data_root_writable,
+    check_direct_chrome,
     check_metadata_backup_state,
     check_metadata_schema,
     check_orphan_directories,
@@ -192,6 +193,19 @@ def test_check_profile_directories_missing(tmp_path):
     assert "Missing data directories" in exist_chk.summary
 
 
+def test_check_direct_chrome():
+    with patch("profiledock.doctor._system_browser_executable", return_value=Path("/usr/bin/google-chrome")):
+        chk = check_direct_chrome()
+        assert chk.id == "system_chrome_executable"
+        assert chk.status == STATUS_OK
+
+    with patch("profiledock.doctor._system_browser_executable", return_value=None):
+        chk = check_direct_chrome()
+        assert chk.id == "system_chrome_executable"
+        assert chk.status == STATUS_WARNING
+        assert chk.action is not None
+
+
 def test_check_browser_availability():
     pw_ok = DiagnosticCheck("playwright_chromium", STATUS_OK, "ok")
     sys_warn = DiagnosticCheck("system_chrome", STATUS_WARNING, "warn")
@@ -203,8 +217,30 @@ def test_check_browser_availability():
     avail = check_browser_availability(pw_warn, sys_ok)
     assert avail.status == STATUS_OK
 
+    direct_ok = DiagnosticCheck("system_chrome_executable", STATUS_OK, "ok")
+    avail_direct = check_browser_availability(pw_warn, sys_warn, direct_ok)
+    assert avail_direct.status == STATUS_OK
+
     avail_failed = check_browser_availability(pw_warn, sys_warn)
     assert avail_failed.status == STATUS_FAILED
+
+
+def test_check_stale_running_state_direct(tmp_path):
+    layout = paths(tmp_path)
+    p1_dir = layout.runtime_dir / "p1"
+    p1_dir.mkdir(parents=True)
+    running_json = p1_dir / "running.json"
+    running_json.write_text(
+        json.dumps({"pid": 999999, "engine": "direct", "tabs": 1, "channel": "chrome"}),
+        encoding="utf-8",
+    )
+
+    with patch("profiledock.process_manager._alive", return_value=False):
+        chk, stale_files = check_stale_running_state(tmp_path)
+        assert chk.status == STATUS_WARNING
+        assert len(stale_files) == 1
+        assert stale_files[0] == running_json
+
 
 
 def test_check_stale_running_state(tmp_path):
@@ -252,6 +288,23 @@ def test_repair_environment_stale_files(tmp_path):
     repairs = repair_environment(tmp_path)
     assert len(repairs) >= 1
     assert not running_json.exists()
+
+
+def test_repair_environment_stale_direct_files(tmp_path):
+    layout = paths(tmp_path)
+    p1_dir = layout.runtime_dir / "p1"
+    p1_dir.mkdir(parents=True)
+    running_json = p1_dir / "running.json"
+    running_json.write_text(
+        json.dumps({"pid": 999999, "engine": "direct", "tabs": 1, "channel": "chrome"}),
+        encoding="utf-8",
+    )
+
+    with patch("profiledock.process_manager._alive", return_value=False):
+        repairs = repair_environment(tmp_path)
+        assert len(repairs) >= 1
+        assert not running_json.exists()
+
 
 
 def test_repair_environment_metadata_recovery(tmp_path):

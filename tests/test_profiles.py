@@ -58,3 +58,17 @@ def test_get_status_states(manager):
     err.write_text('{"error_type": "test_err", "message": "fail"}', encoding="utf-8")
     path.unlink(missing_ok=True)
     assert get_status(profile.data_dir) == "error"
+
+
+def test_create_with_engine_and_set_engine(manager):
+    profile = manager.create("DirectProfile", engine="direct")
+    assert profile.engine == "direct"
+    assert manager.get(profile.id).engine == "direct"
+
+    updated = manager.set_engine(profile.id, "playwright")
+    assert updated.engine == "playwright"
+    assert manager.get(profile.id).engine == "playwright"
+
+    cleared = manager.set_engine(profile.id, None)
+    assert cleared.engine is None
+    assert manager.get(profile.id).engine is None

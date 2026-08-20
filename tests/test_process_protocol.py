@@ -179,7 +179,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
     data_dir.mkdir(parents=True)
 
     with patch("profiledock.process_manager._system_browser_executable", return_value=None):
-        with pytest.raises(BrowserLaunchError, match="Google Chrome or Chromium executable not found"):
+        with pytest.raises(BrowserLaunchError, match="Google Chrome, Chromium, or Brave executable not found"):
             start_direct_chrome(str(data_dir), tabs=1)
 
     dummy_chrome = tmp_path / "chrome.exe"
@@ -202,9 +202,12 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
         with pytest.raises(ProfileRunningError, match="profile is already running"):
             start_direct_chrome(str(data_dir), tabs=1, executable_path=dummy_chrome)
 
-        with patch("subprocess.run"):
-            close_controller(str(data_dir), timeout=0.2)
-            assert not (data_dir.parent / "running.json").exists()
+    with patch(
+        "profiledock.process_manager._alive",
+        side_effect=[True, True, True, False, False],
+    ), patch("subprocess.run"):
+        close_controller(str(data_dir), timeout=0)
+        assert not (data_dir.parent / "running.json").exists()
 
 
 def test_direct_chrome_stale_detection(tmp_path):
@@ -219,3 +222,74 @@ def test_direct_chrome_stale_detection(tmp_path):
     with patch("profiledock.process_manager._alive", return_value=False):
         assert get_status(str(data_dir), clean_stale=True) == "stale"
         assert not state_file.exists()
+
+
+def test_direct_chrome_close_failure_preserves_state(tmp_path):
+    from profiledock.process_manager import BrowserLaunchError, close_controller
+
+    data_dir = tmp_path / "profile-direct" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_file = data_dir.parent / "running.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "profile_id": "profile-direct",
+                "pid": 12345,
+                "launcher_pid": os.getpid(),
+                "engine": "direct",
+                "tabs": 1,
+                "channel": "chrome",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "status": "running",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("profiledock.process_manager._alive", return_value=True), patch(
+        "profiledock.process_manager.subprocess.run"
+    ):
+        with pytest.raises(BrowserLaunchError, match="did not close"):
+            close_controller(str(data_dir), timeout=0)
+    assert state_file.exists()
+
+
+def test_direct_state_rejects_invalid_pid(tmp_path):
+    data_dir = tmp_path / "profile-direct" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_file = data_dir.parent / "running.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "profile_id": "profile-direct",
+                "pid": "12345",
+                "launcher_pid": os.getpid(),
+                "engine": "direct",
+                "tabs": 1,
+                "channel": "chrome",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert get_status(str(data_dir), clean_stale=False) == "stale"
+
+
+def test_direct_launch_state_failure_stops_browser(tmp_path):
+    from profiledock.process_manager import BrowserLaunchError, start_direct_chrome
+
+    data_dir = tmp_path / "profile-direct" / "browser-data"
+    data_dir.mkdir(parents=True)
+    executable = tmp_path / "chrome.exe"
+    executable.write_text("browser", encoding="utf-8")
+    process = type("Process", (), {"pid": 12345})()
+
+    with patch("profiledock.process_manager.subprocess.Popen", return_value=process), patch(
+        "profiledock.process_manager._atomic_private_json",
+        side_effect=OSError("state unavailable"),
+    ), patch("profiledock.process_manager._stop_process") as stop_process:
+        with pytest.raises(BrowserLaunchError, match="state unavailable"):
+            start_direct_chrome(str(data_dir), 1, executable_path=executable)
+
+    stop_process.assert_called_once_with(process)
+    assert not (data_dir.parent / "running.json").exists()

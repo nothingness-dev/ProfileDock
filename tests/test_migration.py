@@ -73,6 +73,7 @@ def test_migrate_success_legacy_format(tmp_path):
                     "created_at": "2026-01-01T00:00:00+00:00",
                     "data_dir": str(src_p1_data),
                     "last_launched_at": "2026-01-02T00:00:00+00:00",
+                    "engine": "playwright",
                 }
             ]
         ),
@@ -97,6 +98,7 @@ def test_migrate_success_legacy_format(tmp_path):
     assert dst_meta["profiles"][0]["data_dir"] == str(dst_p1_data)
     assert dst_meta["profiles"][0]["created_at"] == "2026-01-01T00:00:00+00:00"
     assert dst_meta["profiles"][0]["last_launched_at"] == "2026-01-02T00:00:00+00:00"
+    assert dst_meta["profiles"][0]["engine"] == "playwright"
     assert src_meta.exists()
     assert src_p1_data.exists()
 

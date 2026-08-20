@@ -21,6 +21,7 @@ from profiledock.storage import (
     remove_profile_atomic,
     rename_profile_atomic,
     save_metadata,
+    set_engine_atomic,
     _atomic_write,
     _write_all,
 )
@@ -403,3 +404,20 @@ def test_rejects_profile_directory_for_different_id(metadata_path: Path, profile
             metadata_path,
             profiles_dir,
         )
+
+
+def test_engine_storage_and_set_engine_atomic(metadata_path: Path, profiles_dir: Path):
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = str(profiles_dir / "abc123" / "browser-data")
+    profile = Profile("abc123", "Test", "2026-01-01T00:00:00+00:00", data_dir, engine="direct")
+    save_metadata(
+        MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile]),
+        metadata_path,
+        profiles_dir,
+    )
+    loaded = load_metadata(metadata_path)
+    assert loaded.profiles[0].engine == "direct"
+
+    set_engine_atomic("abc123", "playwright", metadata_path, profiles_dir)
+    loaded_after = load_metadata(metadata_path)
+    assert loaded_after.profiles[0].engine == "playwright"
