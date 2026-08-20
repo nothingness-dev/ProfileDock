@@ -337,11 +337,16 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 
 **Repair capabilities (`--repair`):**
 
-- Cleans up stale runtime `running.json` files automatically.
+- Cleans up stale runtime `running.json` files automatically for both `direct` and `playwright` engines.
+- Cleans up incomplete temporary migration and restore directories (`.temp_restore_*`, `.temp_migrating_*`, `.m-*`, `.quarantine_*`).
 - Recovers valid metadata from `profiles.json.bak` if `profiles.json` is missing or corrupted.
 - Automatically migrates legacy bare-array format metadata to versioned schema.
+- Safely reattaches discovered orphan profile directories when explicitly requested (`--reattach-orphans`).
+- Recreates missing empty `browser-data` directories when explicitly confirmed (`--recreate-missing`).
 - Never deletes browser data directories automatically.
-- Never reattaches orphan profile directories without manual user confirmation.
+- Never guesses profile ownership or overwrites valid metadata.
+- Never repairs or overwrites unsupported future schema versions.
+
 
 **Exit codes:**
 
