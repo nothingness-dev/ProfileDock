@@ -30,7 +30,7 @@ from profiledock.doctor import (
     run_diagnostics,
 )
 from profiledock.models import Profile, METADATA_SCHEMA_VERSION, MetadataDocument
-from profiledock.storage import save_metadata
+from profiledock.storage import load_metadata, save_metadata
 
 runner = CliRunner()
 

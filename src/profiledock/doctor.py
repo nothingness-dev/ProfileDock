@@ -3,6 +3,7 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
