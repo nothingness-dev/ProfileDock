@@ -14,6 +14,14 @@ from .backup import (
     TargetExistsError,
     create_backup_archive,
 )
+from .restore import (
+    DecompressionSecurityError,
+    InvalidArchiveError,
+    RestoreConflictError,
+    RestoreError,
+    RestoreReport,
+    restore_backup_archive,
+)
 from .doctor import (
     DiagnosticCheck,
     STATUS_FAILED,
@@ -527,6 +535,58 @@ def backup(
     for p in report.profiles:
         eng_label = p.engine or "default (direct)"
         typer.echo(f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)")
+
+
+@app.command()
+def restore(
+    archive: Path = typer.Argument(..., help="Path to backup archive (.tar.gz) to restore."),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite existing profiles with conflicting IDs.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output restore report in JSON format.",
+    ),
+) -> None:
+    paths = _paths.get() or resolve_data_root()
+
+    try:
+        report = restore_backup_archive(
+            archive_path=archive,
+            data_paths=paths,
+            overwrite=force,
+        )
+    except (
+        InvalidArchiveError,
+        DecompressionSecurityError,
+        RestoreConflictError,
+        RestoreError,
+        StorageError,
+        ValueError,
+    ) as exc:
+        fail(str(exc))
+
+    if json_output:
+        typer.echo(json.dumps(report.to_dict(), indent=2))
+        return
+
+    typer.echo(f"Restore completed from archive: {report.archive_path}")
+    typer.echo(f"Format version: {report.format_version} (ProfileDock {report.profiledock_version})")
+    typer.echo(f"Total restored: {report.total_restored} | Files: {report.total_files} | Size: {report.total_bytes} bytes")
+    if report.restored:
+        typer.echo("Restored profiles:")
+        for p in report.restored:
+            eng_label = p.engine or "default (direct)"
+            typer.echo(f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)")
+    if report.skipped:
+        typer.echo("Skipped profiles:")
+        for p in report.skipped:
+            eng_label = p.engine or "default (direct)"
+            typer.echo(f"  = {p.name} ({p.id}) [engine: {eng_label}] - {p.message}")
 
 
 if __name__ == "__main__":
