@@ -17,10 +17,15 @@ def system_browser_available() -> bool:
         shutil.which("chrome"),
         shutil.which("chromium"),
         shutil.which("chromium-browser"),
+        shutil.which("brave"),
+        shutil.which("brave-browser"),
         Path("C:/Program Files/Google/Chrome/Application/chrome.exe"),
         Path("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
+        Path("C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"),
+        Path("C:/Program Files (x86)/BraveSoftware/Brave-Browser/Application/brave.exe"),
         Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
         Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
     ]
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
@@ -28,6 +33,7 @@ def system_browser_available() -> bool:
             [
                 Path(local_app_data) / "Google/Chrome/Application/chrome.exe",
                 Path(local_app_data) / "Chromium/Application/chrome.exe",
+                Path(local_app_data) / "BraveSoftware/Brave-Browser/Application/brave.exe",
             ]
         )
     return any(candidate and Path(candidate).exists() for candidate in candidates)
@@ -57,7 +63,7 @@ def main() -> None:
     run([str(python), "-m", "pip", "install", "-r", "requirements.txt"], root, environment)
     if not args.skip_browser:
         if system_browser_available():
-            print("Using an installed Chrome or Chromium browser.")
+            print("Using an installed Chrome, Chromium, or Brave browser.")
         else:
             run([str(python), "-m", "playwright", "install", "chromium"], root, environment)
     run([str(python), "-m", "pytest", "-p", "no:cacheprovider"], root, environment)
