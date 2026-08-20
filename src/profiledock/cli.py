@@ -6,6 +6,14 @@ from typing import List, Optional
 
 import typer
 
+from .backup import (
+    BackupError,
+    BackupReport,
+    FileLockedError,
+    ProfileNotStoppedError,
+    TargetExistsError,
+    create_backup_archive,
+)
 from .doctor import (
     DiagnosticCheck,
     STATUS_FAILED,
@@ -445,6 +453,80 @@ def migrate(
             typer.echo(f"  = {item.name} ({item.id}) - {item.message}")
     if report.source_removed:
         typer.echo("Source data successfully removed.")
+
+
+@app.command()
+def backup(
+    profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name to backup."),
+    all_profiles: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Backup all configured profiles.",
+    ),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Output destination path for the backup archive (.tar.gz).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite existing output file.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output backup report in JSON format.",
+    ),
+) -> None:
+    paths = _paths.get() or resolve_data_root()
+    profile_manager = manager()
+
+    if not all_profiles and profile_id is None:
+        fail("must specify a profile identifier or use --all to backup all profiles")
+    if all_profiles and profile_id is not None:
+        fail("cannot specify both a profile identifier and --all")
+
+    try:
+        if all_profiles:
+            profiles = profile_manager.list_profiles()
+            if not profiles:
+                fail("no profiles found to backup")
+        else:
+            profile = profile_manager.resolve(profile_id)
+            profiles = [profile]
+
+        report = create_backup_archive(
+            profiles=profiles,
+            data_paths=paths,
+            output_file=output,
+            force=force,
+        )
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileNotStoppedError,
+        FileLockedError,
+        TargetExistsError,
+        BackupError,
+        ValueError,
+    ) as exc:
+        fail(str(exc))
+
+    if json_output:
+        typer.echo(json.dumps(report.to_dict(), indent=2))
+        return
+
+    typer.echo(f"Backup created successfully: {report.output_path}")
+    typer.echo(f"Format version: {report.format_version} (ProfileDock {report.profiledock_version})")
+    typer.echo(f"Total profiles: {report.total_profiles} | Files: {report.total_files} | Size: {report.total_bytes} bytes")
+    for p in report.profiles:
+        eng_label = p.engine or "default (direct)"
+        typer.echo(f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)")
 
 
 if __name__ == "__main__":
