@@ -368,7 +368,27 @@ Creates a versioned, self-contained, verified archive of profile metadata and br
 - **No silent overwrites**: Refuses to overwrite an existing archive unless `--force` is provided.
 - **Windows locking resilience**: If browser SQLite databases (`Cookies`, `Web Data`, `History`) are locked by background Chrome processes, fails gracefully with clear troubleshooting instructions to terminate background processes.
 
+### Restore
+
+```bash
+profiledock restore /path/to/backup.tar.gz
+profiledock restore /path/to/backup.tar.gz --force
+profiledock restore /path/to/backup.tar.gz --json
+```
+
+Restores profiles from a verified ProfileDock backup archive into the active data root.
+
+**Security & validation safeguards:**
+
+- **Manifest & format verification**: Validates `backup_manifest.json` schema version (version 1) and verifies SHA-256 checksums for every restored file.
+- **Path traversal protection**: Rejects absolute paths, parent directory traversal (`..`), and symlinks/hardlinks in archive members.
+- **Decompression bomb prevention**: Restricts single member extraction to 5 GiB and total archive extraction to 20 GiB.
+- **Atomic extraction & quarantine**: Extracts into isolated temporary directories first and quarantines existing conflicting directories during replacement.
+- **Transactional metadata update**: Preserves the stored `engine` preference (`direct` or `playwright`) and rolls back directory changes if metadata validation fails.
+- **Conflict protection**: Prevents silent overwrite when profiles with conflicting IDs or names already exist in the destination (requires `--force` to overwrite).
+
 ### Migrate
+
 
 
 ```bash
@@ -642,7 +662,35 @@ Returns backup report, format version, and details for each backed-up profile:
 }
 ```
 
+**`restore --json`:**
+
+Returns restore report, format version, and profile counts:
+
+```json
+{
+  "archive_path": "/path/to/backup.tar.gz",
+  "format_version": 1,
+  "profiledock_version": "0.8.2",
+  "total_restored": 1,
+  "total_files": 12,
+  "total_bytes": 1048576,
+  "restored": [
+    {
+      "id": "abc123",
+      "name": "Work",
+      "engine": "direct",
+      "status": "restored",
+      "file_count": 12,
+      "total_bytes": 1048576,
+      "message": "successfully restored"
+    }
+  ],
+  "skipped": []
+}
+```
+
 Failures also use this report shape, place the error in `failed`, and exit with code `1`. Human-readable runs print migration, skip, conflict, and failure information directly in the terminal.
+
 
 
 **Guarantees:**
