@@ -543,7 +543,12 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 
 **Corruption handling**: ProfileDock never overwrites corrupted metadata automatically. If both the primary and backup files are corrupted, manual intervention is required.
 
+**Process security & PID reuse protection**: For direct engine profiles, ProfileDock tracks process creation timestamps and verifies process identity before issuing shutdown signals, preventing accidental termination of unrelated processes if the operating system recycles PIDs.
+
+**IPC transport security**: Playwright controller communication uses owner-scoped loopback sockets and named channels with bounded message sizes, connection timeouts, and constant-time token comparison (`hmac.compare_digest`), preventing token leaks, replay, or malformed command attacks.
+
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
+
 
 `running.json` exists while a launch is tracked. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, launch PID, browser channel, start time, and status. State writes are atomic, and stale files are cleaned automatically.
 
