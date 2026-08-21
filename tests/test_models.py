@@ -33,3 +33,43 @@ def test_profile_from_dict_invalid_engine_type():
     }
     with pytest.raises(ValueError, match="profile field engine must be a string or null"):
         Profile.from_dict(d)
+
+
+def test_launch_config_to_dict_and_from_dict():
+    from profiledock.models import LaunchConfig
+
+    cfg = LaunchConfig(
+        default_tabs=3,
+        start_urls=["https://example.com"],
+        engine="direct",
+        browser="chrome",
+        window_width=1920,
+        window_height=1080,
+    )
+    data = cfg.to_dict()
+    assert data["default_tabs"] == 3
+    assert data["start_urls"] == ["https://example.com"]
+    assert data["window_width"] == 1920
+
+    parsed = LaunchConfig.from_dict(data)
+    assert parsed.default_tabs == 3
+    assert parsed.start_urls == ["https://example.com"]
+    assert parsed.engine == "direct"
+    assert parsed.browser == "chrome"
+    assert parsed.window_width == 1920
+    assert parsed.window_height == 1080
+
+
+def test_profile_with_launch_config():
+    from profiledock.models import LaunchConfig
+
+    cfg = LaunchConfig(default_tabs=2, start_urls=["https://test.com"])
+    p = Profile("id1", "Name1", "2026-01-01T00:00:00+00:00", "/path", launch_config=cfg)
+    d = p.to_dict()
+    assert "launch_config" in d
+    assert d["launch_config"]["default_tabs"] == 2
+
+    parsed = Profile.from_dict(d)
+    assert parsed.launch_config is not None
+    assert parsed.launch_config.default_tabs == 2
+    assert parsed.launch_config.start_urls == ["https://test.com"]

@@ -697,6 +697,50 @@ def test_resolve_engine_precedence():
         assert resolve_engine(None, p_none) == "direct"
 
 
+def test_config_cli_commands_and_presets(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "ConfigProfile"])
+
+    res_set_tabs = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "set", "default-tabs", "4"])
+    assert res_set_tabs.exit_code == 0
+    assert "Set default-tabs to 4" in res_set_tabs.output
+
+    res_set_engine = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "set", "engine", "playwright"])
+    assert res_set_engine.exit_code == 0
+    assert "Set engine to 'playwright'" in res_set_engine.output
+
+    res_set_win = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "set", "window-size", "1440x900"])
+    assert res_set_win.exit_code == 0
+    assert "Set window-size to 1440x900" in res_set_win.output
+
+    res_add_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "add-url", "https://news.ycombinator.com"])
+    assert res_add_url.exit_code == 0
+
+    res_show = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "show"])
+    assert res_show.exit_code == 0
+    assert "1440x900" in res_show.output
+    assert "https://news.ycombinator.com" in res_show.output
+
+    res_show_json = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "show", "--json"])
+    assert res_show_json.exit_code == 0
+    cfg_data = json.loads(res_show_json.output)
+    assert cfg_data["default_tabs"] == 4
+    assert cfg_data["engine"] == "playwright"
+    assert cfg_data["window_width"] == 1440
+    assert cfg_data["start_urls"] == ["https://news.ycombinator.com"]
+
+    res_rem_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "remove-url", "https://news.ycombinator.com"])
+    assert res_rem_url.exit_code == 0
+
+    res_reset = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "reset"])
+    assert res_reset.exit_code == 0
+
+    res_show_after = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "show", "--json"])
+    cfg_after = json.loads(res_show_after.output)
+    assert cfg_after["default_tabs"] is None
+    assert cfg_after["start_urls"] == []
+
+
+
 def test_resolve_engine_rejects_invalid_environment_value():
     profile = Profile("id1", "Name", "2026-01-01T00:00:00+00:00", "/path")
     with patch.dict(

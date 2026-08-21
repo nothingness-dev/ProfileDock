@@ -293,3 +293,32 @@ def test_direct_launch_state_failure_stops_browser(tmp_path):
 
     stop_process.assert_called_once_with(process)
     assert not (data_dir.parent / "running.json").exists()
+
+
+def test_direct_launch_maps_urls_and_window_size(tmp_path):
+    from profiledock.process_manager import start_direct_chrome
+
+    data_dir = tmp_path / "profile-direct-config" / "browser-data"
+    data_dir.mkdir(parents=True)
+    executable = tmp_path / "chrome.exe"
+    executable.write_text("browser", encoding="utf-8")
+
+    captured_args = []
+
+    def mock_popen(args, **kwargs):
+        captured_args.extend(args)
+        return type("Process", (), {"pid": 12345})()
+
+    with patch("profiledock.process_manager.subprocess.Popen", side_effect=mock_popen):
+        start_direct_chrome(
+            str(data_dir),
+            tabs=3,
+            executable_path=executable,
+            start_urls=["https://github.com"],
+            window_width=1280,
+            window_height=720,
+        )
+
+    assert "--window-size=1280,720" in captured_args
+    assert "https://github.com" in captured_args
+    assert captured_args.count("about:blank") == 2
