@@ -123,6 +123,21 @@ def test_start_reports_ready_with_actual_page_count(controller_env):
     assert is_running(str(data_dir))
 
 
+def test_controller_applies_launch_preset_options(controller_env):
+    manager, profile, data_dir, owned_pids = controller_env
+    state = start_controller(
+        str(data_dir),
+        2,
+        headless=True,
+        start_urls=["about:blank"],
+        window_width=1280,
+        window_height=720,
+    )
+    owned_pids.add(state["pid"])
+    assert state["page_count"] == 2
+    _close(data_dir, owned_pids, state["pid"])
+
+
 def test_duplicate_launch_is_rejected(controller_env):
     manager, profile, data_dir, owned_pids = controller_env
     _start(data_dir, owned_pids)

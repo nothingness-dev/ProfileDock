@@ -188,3 +188,26 @@ def test_cli_backup_all_command(tmp_path):
     assert "Backup created successfully" in result.output
     assert "Work1" in result.output
     assert "Work2" in result.output
+
+
+def test_backup_rejects_output_inside_browser_data(tmp_path):
+    paths = make_paths(tmp_path)
+    data_dir = paths.profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data_dir))
+
+    with pytest.raises(BackupError, match="cannot be inside"):
+        create_backup_archive([profile], paths, data_dir / "backup.tar.gz")
+
+
+def test_backup_rejects_linked_profile_content(tmp_path):
+    paths = make_paths(tmp_path)
+    data_dir = paths.profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    linked_file = data_dir / "linked"
+    linked_file.write_text("content", encoding="utf-8")
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data_dir))
+
+    with patch("profiledock.backup._is_link", side_effect=lambda path: path == linked_file):
+        with pytest.raises(BackupError, match="unsafe file"):
+            create_backup_archive([profile], paths, tmp_path / "backup.tar.gz")

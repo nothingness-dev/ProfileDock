@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from profiledock.backup import create_backup_archive
 from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
 from profiledock.data_root import DataPaths
-from profiledock.models import Profile, MetadataDocument
+from profiledock.models import LaunchConfig, Profile, MetadataDocument
 from profiledock.restore import (
     DecompressionSecurityError,
     InvalidArchiveError,
@@ -40,7 +40,21 @@ def test_restore_single_and_multiple_profiles(tmp_path):
     p2_data.mkdir(parents=True)
     (p2_data / "History").write_text("history_payload", encoding="utf-8")
 
-    p1 = Profile("p1", "DirectWork", "2026-01-01T00:00:00+00:00", str(p1_data), engine="direct")
+    p1 = Profile(
+        "p1",
+        "DirectWork",
+        "2026-01-01T00:00:00+00:00",
+        str(p1_data),
+        engine="direct",
+        launch_config=LaunchConfig(
+            default_tabs=2,
+            start_urls=["https://example.com"],
+            engine="direct",
+            browser="chrome",
+            window_width=1280,
+            window_height=720,
+        ),
+    )
     p2 = Profile("p2", "PlaywrightWork", "2026-01-02T00:00:00+00:00", str(p2_data), engine="playwright")
 
     archive_file = tmp_path / "backup.tar.gz"
@@ -57,6 +71,9 @@ def test_restore_single_and_multiple_profiles(tmp_path):
     assert len(loaded_doc.profiles) == 2
     assert loaded_doc.profiles[0].engine == "direct"
     assert loaded_doc.profiles[1].engine == "playwright"
+    assert loaded_doc.profiles[0].launch_config is not None
+    assert loaded_doc.profiles[0].launch_config.default_tabs == 2
+    assert loaded_doc.profiles[0].launch_config.start_urls == ["https://example.com"]
 
 
 def test_restore_security_traversal_rejected(tmp_path):
@@ -71,7 +88,7 @@ def test_restore_security_traversal_rejected(tmp_path):
                     "id": "p1",
                     "name": "Malicious",
                     "created_at": "2026-01-01T00:00:00+00:00",
-                    "files": {"evil.txt": {"size": 4, "sha256": "dummy"}},
+                    "files": {"evil.txt": {"size": 4, "sha256": "0" * 64}},
                 }
             ],
         }
@@ -164,7 +181,7 @@ def test_restore_security_checksum_mismatch_fails(tmp_path):
                     "id": "p1",
                     "name": "DirectWork",
                     "created_at": "2026-01-01T00:00:00+00:00",
-                    "files": {"data.txt": {"size": 7, "sha256": "badchecksum"}},
+                    "files": {"data.txt": {"size": 7, "sha256": "0" * 64}},
                 }
             ],
         }
@@ -210,6 +227,99 @@ def test_restore_conflict_handling_and_force(tmp_path):
     loaded = load_metadata(dst_paths.profiles_file)
     assert loaded.profiles[0].name == "SharedName"
     assert loaded.profiles[0].engine == "direct"
+
+
+def test_restore_rejects_unsafe_manifest_profile_id(tmp_path):
+    archive_file = tmp_path / "unsafe-id.tar.gz"
+    manifest = {
+        "format_version": 1,
+        "profiles": [
+            {
+                "id": "../../escape",
+                "name": "Unsafe",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "files": {},
+            }
+        ],
+    }
+    with tarfile.open(archive_file, "w:gz") as tar:
+        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        member = tarfile.TarInfo("backup_manifest.json")
+        member.size = len(manifest_bytes)
+        tar.addfile(member, io.BytesIO(manifest_bytes))
+
+    destination = make_paths(tmp_path / "destination")
+    with pytest.raises(InvalidArchiveError, match="unsafe characters"):
+        restore_backup_archive(archive_file, destination)
+    assert not (tmp_path / "escape").exists()
+
+
+def test_restore_rejects_unsafe_manifest_file_path(tmp_path):
+    archive_file = tmp_path / "unsafe-file.tar.gz"
+    manifest = {
+        "format_version": 1,
+        "profiles": [
+            {
+                "id": "safe-id",
+                "name": "Unsafe File",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "files": {"../../escape.txt": {"size": 1, "sha256": "0" * 64}},
+            }
+        ],
+    }
+    with tarfile.open(archive_file, "w:gz") as tar:
+        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        member = tarfile.TarInfo("backup_manifest.json")
+        member.size = len(manifest_bytes)
+        tar.addfile(member, io.BytesIO(manifest_bytes))
+
+    with pytest.raises(DecompressionSecurityError, match="parent traversal"):
+        restore_backup_archive(archive_file, make_paths(tmp_path / "destination"))
+
+
+def test_restore_is_idempotent_only_for_identical_content(tmp_path):
+    source = make_paths(tmp_path / "source")
+    data_dir = source.profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "state.txt").write_text("original", encoding="utf-8")
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data_dir))
+    archive_file = tmp_path / "idempotent.tar.gz"
+    create_backup_archive([profile], source, archive_file)
+
+    destination = make_paths(tmp_path / "destination")
+    restore_backup_archive(archive_file, destination)
+    repeated = restore_backup_archive(archive_file, destination)
+    assert repeated.total_restored == 0
+    assert len(repeated.skipped) == 1
+
+    restored_file = destination.profiles_dir / "p1" / "browser-data" / "state.txt"
+    restored_file.write_text("changed", encoding="utf-8")
+    with pytest.raises(RestoreConflictError, match="different attributes"):
+        restore_backup_archive(archive_file, destination)
+
+
+def test_force_restore_refuses_running_profile(tmp_path):
+    source = make_paths(tmp_path / "source")
+    data_dir = source.profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data_dir))
+    archive_file = tmp_path / "running.tar.gz"
+    create_backup_archive([profile], source, archive_file)
+
+    destination = make_paths(tmp_path / "destination")
+    destination_data = destination.profiles_dir / "p1" / "browser-data"
+    destination_data.mkdir(parents=True)
+    save_metadata(
+        MetadataDocument(
+            schema_version=1,
+            profiles=[Profile("p1", "Work", profile.created_at, str(destination_data))],
+        ),
+        destination.profiles_file,
+        destination.profiles_dir,
+    )
+    with patch("profiledock.restore.is_running", return_value=True):
+        with pytest.raises(RestoreConflictError, match="cannot overwrite running profile"):
+            restore_backup_archive(archive_file, destination, overwrite=True)
 
 
 def test_cli_restore_command_and_json(tmp_path):

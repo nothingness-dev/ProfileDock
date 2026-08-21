@@ -3,6 +3,7 @@ import pytest
 from profiledock.models import LaunchConfig, Profile
 from profiledock.validation import (
     ValidationError,
+    validate_browser,
     validate_launch_config,
     validate_required_fields,
     validate_url,
@@ -60,5 +61,19 @@ def test_validate_launch_config():
         validate_launch_config(cfg_partial_window)
 
     cfg_invalid_channel_direct = LaunchConfig(engine="direct", browser="chrome-beta")
-    with pytest.raises(ValidationError, match="is not supported on engine 'direct'"):
+    with pytest.raises(ValidationError, match="unsupported direct browser alias"):
         validate_launch_config(cfg_invalid_channel_direct)
+
+
+def test_validate_browser_aliases_and_paths(tmp_path):
+    validate_browser("chrome", "direct")
+    validate_browser("msedge", "playwright")
+
+    executable = tmp_path / "browser.exe"
+    executable.write_text("browser", encoding="utf-8")
+    validate_browser(str(executable.resolve()), "direct", require_executable=True)
+
+    with pytest.raises(ValidationError, match="unsupported direct browser alias"):
+        validate_browser("msedge", "direct")
+    with pytest.raises(ValidationError, match="does not exist"):
+        validate_browser(str((tmp_path / "missing.exe").resolve()), "direct", True)

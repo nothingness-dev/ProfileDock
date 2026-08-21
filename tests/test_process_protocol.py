@@ -322,3 +322,26 @@ def test_direct_launch_maps_urls_and_window_size(tmp_path):
     assert "--window-size=1280,720" in captured_args
     assert "https://github.com" in captured_args
     assert captured_args.count("about:blank") == 2
+
+
+def test_system_browser_preference_selects_requested_family(tmp_path):
+    from profiledock.process_manager import _system_browser_executable
+
+    chrome = tmp_path / "google-chrome"
+    brave = tmp_path / "brave-browser"
+    chrome.write_text("chrome", encoding="utf-8")
+    brave.write_text("brave", encoding="utf-8")
+
+    def find_browser(name):
+        if name == "google-chrome":
+            return str(chrome)
+        if name == "brave-browser":
+            return str(brave)
+        return None
+
+    with patch("profiledock.process_manager.sys.platform", "linux"), patch(
+        "profiledock.process_manager.shutil.which", side_effect=find_browser
+    ):
+        assert _system_browser_executable("chrome") == chrome
+        assert _system_browser_executable("brave") == brave
+        assert _system_browser_executable("unsupported") is None

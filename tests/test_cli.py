@@ -15,6 +15,13 @@ from profiledock.version import __version__
 runner = CliRunner()
 
 
+def test_help_does_not_create_data_root(tmp_path):
+    data_root = tmp_path / "unused-data"
+    result = runner.invoke(app, ["--data-root", str(data_root), "config", "--help"])
+    assert result.exit_code == 0
+    assert not data_root.exists()
+
+
 def test_version_flag():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
@@ -700,27 +707,27 @@ def test_resolve_engine_precedence():
 def test_config_cli_commands_and_presets(tmp_path):
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "ConfigProfile"])
 
-    res_set_tabs = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "set", "default-tabs", "4"])
+    res_set_tabs = runner.invoke(app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "default-tabs", "4"])
     assert res_set_tabs.exit_code == 0
     assert "Set default-tabs to 4" in res_set_tabs.output
 
-    res_set_engine = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "set", "engine", "playwright"])
+    res_set_engine = runner.invoke(app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "engine", "playwright"])
     assert res_set_engine.exit_code == 0
     assert "Set engine to 'playwright'" in res_set_engine.output
 
-    res_set_win = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "set", "window-size", "1440x900"])
+    res_set_win = runner.invoke(app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "window-size", "1440x900"])
     assert res_set_win.exit_code == 0
     assert "Set window-size to 1440x900" in res_set_win.output
 
-    res_add_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "add-url", "https://news.ycombinator.com"])
+    res_add_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "add-url", "ConfigProfile", "https://news.ycombinator.com"])
     assert res_add_url.exit_code == 0
 
-    res_show = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "show"])
+    res_show = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile"])
     assert res_show.exit_code == 0
     assert "1440x900" in res_show.output
     assert "https://news.ycombinator.com" in res_show.output
 
-    res_show_json = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "show", "--json"])
+    res_show_json = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"])
     assert res_show_json.exit_code == 0
     cfg_data = json.loads(res_show_json.output)
     assert cfg_data["default_tabs"] == 4
@@ -728,13 +735,13 @@ def test_config_cli_commands_and_presets(tmp_path):
     assert cfg_data["window_width"] == 1440
     assert cfg_data["start_urls"] == ["https://news.ycombinator.com"]
 
-    res_rem_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "remove-url", "https://news.ycombinator.com"])
+    res_rem_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "remove-url", "ConfigProfile", "https://news.ycombinator.com"])
     assert res_rem_url.exit_code == 0
 
-    res_reset = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "reset"])
+    res_reset = runner.invoke(app, ["--data-root", str(tmp_path), "config", "reset", "ConfigProfile"])
     assert res_reset.exit_code == 0
 
-    res_show_after = runner.invoke(app, ["--data-root", str(tmp_path), "config", "ConfigProfile", "show", "--json"])
+    res_show_after = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"])
     cfg_after = json.loads(res_show_after.output)
     assert cfg_after["default_tabs"] is None
     assert cfg_after["start_urls"] == []
