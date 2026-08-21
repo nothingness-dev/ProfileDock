@@ -253,28 +253,30 @@ Updates the default launch engine for an existing profile.
 ### Config (Launch Presets)
 
 ```bash
-profiledock config <id-or-name> show
-profiledock config <id-or-name> show --json
+profiledock config show <id-or-name>
+profiledock config show <id-or-name> --json
 
-profiledock config <id-or-name> set default-tabs 4
+profiledock config set <id-or-name> default-tabs 4
 
-profiledock config <id-or-name> set engine direct
-profiledock config <id-or-name> set engine playwright
+profiledock config set <id-or-name> engine direct
+profiledock config set <id-or-name> engine playwright
 
-profiledock config <id-or-name> set browser chrome
-profiledock config <id-or-name> set browser /path/to/custom/chrome
+profiledock config set <id-or-name> browser chrome
+profiledock config set <id-or-name> browser /path/to/custom/chrome
 
-profiledock config <id-or-name> set window-size 1440x900
+profiledock config set <id-or-name> window-size 1440x900
 
-profiledock config <id-or-name> add-url https://github.com
-profiledock config <id-or-name> add-url https://news.ycombinator.com
-profiledock config <id-or-name> remove-url https://github.com
+profiledock config add-url <id-or-name> https://github.com
+profiledock config add-url <id-or-name> https://news.ycombinator.com
+profiledock config remove-url <id-or-name> https://github.com
 
 
-profiledock config <id-or-name> reset
+profiledock config reset <id-or-name>
 ```
 
 Configured presets automatically apply when launching the profile. Any explicit options passed to `profiledock launch` (such as `--tabs`, `--engine`, `--browser`, `--url`) override the stored profile presets for that session.
+
+Direct-browser aliases are `chrome`, `chromium`, and `brave`, including their common platform command names. Playwright accepts supported channels such as `chromium`, `chrome`, and `msedge`. Custom executable paths are resolved to absolute paths when saved. Only `http`, `https`, and `about` start URLs are accepted, and the number of start URLs cannot exceed the requested tab count; remaining tabs open `about:blank`.
 
 
 ### Status
@@ -396,7 +398,8 @@ Creates a versioned, self-contained, verified archive of profile metadata and br
 - **Engine metadata preserved**: Retains profile configuration, including whether direct Chrome or Playwright engine is used.
 - **Clean archives**: Automatically excludes transient runtime state (`running.json`, `controller.error`) and logs.
 - **Manifest & checksums**: Every backup includes `backup_manifest.json` with archive schema format version (version 1), creation timestamp, ProfileDock version, and SHA-256 checksums of every file.
-- **Atomic output & validation**: Writes to a temporary archive first, verifies archive readability and manifest integrity, and then replaces the target destination.
+- **Atomic output & validation**: Writes to a temporary archive first, reopens it, verifies every archived file's size and SHA-256 checksum, and then replaces the target destination.
+- **Filesystem boundaries**: Refuses linked or reparse-point content and refuses output paths inside a profile's `browser-data` directory.
 - **No silent overwrites**: Refuses to overwrite an existing archive unless `--force` is provided.
 - **Windows locking resilience**: If browser SQLite databases (`Cookies`, `Web Data`, `History`) are locked by background Chrome processes, fails gracefully with clear troubleshooting instructions to terminate background processes.
 
@@ -415,9 +418,11 @@ Restores profiles from a verified ProfileDock backup archive into the active dat
 - **Manifest & format verification**: Validates `backup_manifest.json` schema version (version 1) and verifies SHA-256 checksums for every restored file.
 - **Path traversal protection**: Rejects absolute paths, parent directory traversal (`..`), and symlinks/hardlinks in archive members.
 - **Decompression bomb prevention**: Restricts single member extraction to 5 GiB and total archive extraction to 20 GiB.
+- **Strict manifest validation**: Rejects unsafe profile IDs, unsafe relative file paths, duplicate archive members, unlisted files, invalid sizes, and malformed checksums before extraction.
 - **Atomic extraction & quarantine**: Extracts into isolated temporary directories first and quarantines existing conflicting directories during replacement.
 - **Transactional metadata update**: Preserves the stored `engine` preference (`direct` or `playwright`) and rolls back directory changes if metadata validation fails.
 - **Conflict protection**: Prevents silent overwrite when profiles with conflicting IDs or names already exist in the destination (requires `--force` to overwrite).
+- **Running-profile protection**: Even with `--force`, ProfileDock refuses to overwrite a profile while it is running.
 
 ### Migrate
 
