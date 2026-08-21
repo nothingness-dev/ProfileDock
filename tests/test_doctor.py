@@ -487,3 +487,10 @@ def test_doctor_repair_refuses_future_schema(tmp_path):
     repairs = repair_environment(tmp_path)
     assert not any(r.id == "repair_metadata_recovery" for r in repairs)
     assert json.loads(layout.profiles_file.read_text(encoding="utf-8"))["schema_version"] == 999
+
+
+def test_doctor_without_playwright_reports_warning(tmp_path):
+    with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
+        chk = check_playwright_package()
+        assert chk.id == "playwright_package"
+        assert chk.status in (STATUS_WARNING, STATUS_FAILED)
