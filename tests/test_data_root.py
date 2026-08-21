@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import os
 import stat
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +12,7 @@ from profiledock.cli import app
 from profiledock.data_root import DataRootError, platform_data_root, resolve_data_root
 from profiledock.models import Profile
 from profiledock.profile_manager import ProfileManager
-from profiledock.process_manager import state_path
+from profiledock.process_manager import ProfileRunningError, state_path
 from profiledock.storage import StorageError
 
 runner = CliRunner()
@@ -122,6 +123,8 @@ def test_runtime_path_rejects_path_like_profile_id(tmp_path):
     manager = ProfileManager(tmp_path / "data")
     with pytest.raises(ValueError, match="unsafe profile id"):
         manager.runtime_path("../logs")
+    with pytest.raises(ValueError, match="unsafe profile id"):
+        manager.runtime_path("profile:stream")
 
 
 def test_manager_rejects_filesystem_root():
@@ -240,6 +243,54 @@ def test_rejects_managed_directory_symlink(tmp_path):
         pytest.skip(f"directory symlinks are unavailable: {exc}")
     with pytest.raises(DataRootError, match="managed data directory is unsafe"):
         resolve_data_root(root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction test")
+def test_rejects_managed_directory_junction(tmp_path):
+    root = tmp_path / "data"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    junction = root / "profiles"
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(junction), str(outside)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"junctions are unavailable: {result.stderr or result.stdout}")
+    try:
+        with pytest.raises(DataRootError, match="managed data directory is unsafe"):
+            resolve_data_root(root)
+    finally:
+        junction.rmdir()
+
+
+def test_delete_rejects_link_inside_profile_tree(tmp_path):
+    manager = ProfileManager(tmp_path / "data")
+    profile = manager.create("Work")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked = Path(profile.data_dir) / "escape"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory links are unavailable: {exc}")
+    with pytest.raises(DataRootError, match="link or reparse point"):
+        manager.delete(profile.id)
+    assert outside.is_dir()
+    assert Path(profile.data_dir).is_dir()
+
+
+def test_delete_refuses_active_profile_mutation(tmp_path):
+    manager = ProfileManager(tmp_path / "data")
+    profile = manager.create("Work")
+    with patch("profiledock.profile_manager.is_active_for_mutation", return_value=True):
+        with pytest.raises(ProfileRunningError, match="close it before deletion"):
+            manager.delete(profile.id)
+    assert Path(profile.data_dir).is_dir()
+    assert manager.get(profile.id).id == profile.id
 
 
 def test_rejects_runtime_inside_browser_data(tmp_path):

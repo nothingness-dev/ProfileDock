@@ -365,6 +365,72 @@ def test_repair_environment_recovers_when_versioned_primary_is_unsafe(tmp_path):
     assert json.loads(layout.profiles_file.read_text(encoding="utf-8"))["profiles"] == []
 
 
+def test_repair_refuses_metadata_recovery_for_active_profile(tmp_path):
+    layout = paths(tmp_path)
+    layout.profiles_file.write_text("corrupt", encoding="utf-8")
+    data_dir = layout.profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    layout.backup_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": [
+                    {
+                        "id": "p1",
+                        "name": "Active",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "data_dir": str(data_dir),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("profiledock.doctor.is_active_for_mutation", return_value=True):
+        repairs = repair_environment(tmp_path)
+    assert repairs == []
+    assert layout.profiles_file.read_text(encoding="utf-8") == "corrupt"
+
+
+def test_repair_recreation_rolls_back_when_later_profile_is_active(tmp_path):
+    layout = paths(tmp_path)
+    first_data = layout.profiles_dir / "p1" / "browser-data"
+    second_data = layout.profiles_dir / "p2" / "browser-data"
+    layout.profiles_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": [
+                    {
+                        "id": "p1",
+                        "name": "First",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "data_dir": str(first_data),
+                    },
+                    {
+                        "id": "p2",
+                        "name": "Second",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "data_dir": str(second_data),
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def active_state(data_dir, runtime_dir):
+        return Path(data_dir) == second_data
+
+    with patch(
+        "profiledock.doctor.is_active_for_mutation", side_effect=active_state
+    ):
+        repairs = repair_environment(tmp_path, recreate_missing_directories=True)
+    assert repairs == []
+    assert not first_data.exists()
+    assert not second_data.exists()
+
+
 def test_doctor_cli_healthy():
     with patch("profiledock.cli.run_diagnostics") as mock_diag:
         mock_diag.return_value = [

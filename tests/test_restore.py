@@ -105,6 +105,11 @@ def test_restore_security_traversal_rejected(tmp_path):
         restore_backup_archive(malicious_archive, dst_paths)
 
 
+def test_restore_rejects_cross_platform_backslash_traversal(tmp_path, malicious_archive):
+    with pytest.raises(DecompressionSecurityError, match="unsafe path"):
+        restore_backup_archive(malicious_archive, make_paths(tmp_path / "destination"))
+
+
 def test_restore_security_absolute_path_rejected(tmp_path):
     dst_paths = make_paths(tmp_path / "dst")
     malicious_archive = tmp_path / "abs.tar.gz"
@@ -317,9 +322,23 @@ def test_force_restore_refuses_running_profile(tmp_path):
         destination.profiles_file,
         destination.profiles_dir,
     )
-    with patch("profiledock.restore.is_running", return_value=True):
+    with patch("profiledock.restore.is_active_for_mutation", return_value=True):
         with pytest.raises(RestoreConflictError, match="cannot overwrite running profile"):
             restore_backup_archive(archive_file, destination, overwrite=True)
+
+
+def test_restore_refuses_active_orphan_runtime_state(tmp_path):
+    source = make_paths(tmp_path / "source")
+    data_dir = source.profiles_dir / "p1" / "browser-data"
+    data_dir.mkdir(parents=True)
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data_dir))
+    archive_file = tmp_path / "active-orphan.tar.gz"
+    create_backup_archive([profile], source, archive_file)
+    destination = make_paths(tmp_path / "destination")
+    with patch("profiledock.restore.is_active_for_mutation", return_value=True):
+        with pytest.raises(RestoreConflictError, match="active profile state"):
+            restore_backup_archive(archive_file, destination)
+    assert not (destination.profiles_dir / "p1").exists()
 
 
 def test_cli_restore_command_and_json(tmp_path):

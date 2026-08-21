@@ -18,7 +18,7 @@ from profiledock.migration import (
 )
 from profiledock.models import Profile, MetadataDocument
 from profiledock.process_manager import close_controller, is_running, start_controller
-from profiledock.storage import save_metadata
+from profiledock.storage import load_metadata, save_metadata
 
 runner = CliRunner()
 
@@ -803,6 +803,69 @@ def test_migrate_rejects_overlapping_roots(tmp_path):
     destination = make_paths(source / "destination")
     with pytest.raises(MigrationError, match="cannot overlap"):
         migrate_project(source, destination)
+
+
+def test_migrate_refuses_active_destination_runtime_state(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    make_source(source)
+    destination = make_paths(tmp_path / "destination")
+
+    def destination_active(data_dir, runtime_dir):
+        try:
+            Path(runtime_dir).resolve().relative_to(destination.root.resolve())
+            return True
+        except ValueError:
+            return False
+
+    with patch(
+        "profiledock.migration.is_active_for_mutation",
+        side_effect=destination_active,
+    ):
+        with pytest.raises(ConflictError, match="destination runtime state"):
+            migrate_project(source, destination)
+    assert load_metadata(destination.profiles_file).profiles == []
+
+
+def test_remove_source_rolls_back_staged_paths_on_failure(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _, first_data = make_source(source)
+    first = Profile(
+        "p1",
+        "Work",
+        "2026-01-01T00:00:00+00:00",
+        str(first_data),
+        "2026-01-02T00:00:00+00:00",
+    )
+    second_data = source / "profiles" / "p2" / "browser-data"
+    second_data.mkdir(parents=True)
+    second = Profile(
+        "p2",
+        "Second",
+        "2026-01-02T00:00:00+00:00",
+        str(second_data),
+    )
+    source.joinpath("profiles.json").write_text(
+        json.dumps(
+            {"schema_version": 1, "profiles": [first.to_dict(), second.to_dict()]}
+        ),
+        encoding="utf-8",
+    )
+    destination = make_paths(tmp_path / "destination")
+    original_replace = Path.replace
+
+    def fail_second_source_move(path, target):
+        if path == source / "profiles" / "p2":
+            raise OSError("injected source staging failure")
+        return original_replace(path, target)
+
+    with patch("pathlib.Path.replace", new=fail_second_source_move):
+        with pytest.raises(MigrationError, match="failed to remove source data"):
+            migrate_project(source, destination, remove_source=True)
+    assert (source / "profiles" / "p1" / "browser-data").is_dir()
+    assert (source / "profiles" / "p2" / "browser-data").is_dir()
+    assert (source / "profiles.json").is_file()
 
 
 def test_migrate_rejects_source_root_symlink(tmp_path):

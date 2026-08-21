@@ -13,6 +13,7 @@ import pytest
 from profiledock.models import MetadataDocument, METADATA_SCHEMA_VERSION, Profile
 from profiledock.storage import (
     MetadataCorruptedError,
+    StorageError,
     add_profile_atomic,
     load_metadata,
     load_metadata_with_recovery,
@@ -26,6 +27,36 @@ from profiledock.storage import (
     _write_all,
 )
 from profiledock.validation import ValidationError
+
+
+def test_metadata_fixture_rejects_root_escape(tmp_path, malicious_metadata_document):
+    profiles_dir = tmp_path / "data" / "profiles"
+    profiles_dir.mkdir(parents=True)
+    metadata_path = tmp_path / "data" / "metadata" / "profiles.json"
+    metadata_path.parent.mkdir()
+    metadata_path.write_text(json.dumps(malicious_metadata_document), encoding="utf-8")
+    with pytest.raises(MetadataCorruptedError, match="must be under profile root"):
+        load_metadata(metadata_path)
+
+
+def test_metadata_write_rejects_backup_outside_configured_root(tmp_path):
+    root = tmp_path / "data"
+    profiles_dir = root / "profiles"
+    data_dir = profiles_dir / "safe-id" / "browser-data"
+    data_dir.mkdir(parents=True)
+    profile = Profile(
+        "safe-id",
+        "Safe",
+        "2026-01-01T00:00:00+00:00",
+        str(data_dir),
+    )
+    with pytest.raises(StorageError, match="unsafe metadata storage path"):
+        save_metadata(
+            MetadataDocument(schema_version=1, profiles=[profile]),
+            root / "metadata" / "profiles.json",
+            profiles_dir,
+            tmp_path / "outside.json.bak",
+        )
 
 
 @pytest.fixture

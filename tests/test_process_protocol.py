@@ -14,6 +14,7 @@ from profiledock.process_manager import (
     _wait_for_close,
     _write_all,
     get_status,
+    is_active_for_mutation,
     state_path,
 )
 
@@ -63,6 +64,61 @@ def test_close_protocol_rejects_malformed_non_token_commands():
     _wait_for_close(Server([malformed, correct]), context, "secret")
     assert malformed.response == b"error\n"
     assert correct.response == b"ok\n"
+
+
+def test_close_protocol_authenticates_availability_probe():
+    probe = Connection(b"probe:secret\n")
+    close = Connection(b"close:secret\n")
+    context = type("Context", (), {"pages": [object()]})()
+    _wait_for_close(Server([probe, close]), context, "secret")
+    assert probe.response == b"ok\n"
+    assert close.response == b"ok\n"
+
+
+def test_mutation_check_uses_direct_pid_identity(tmp_path):
+    data_dir = tmp_path / "direct" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_path(str(data_dir)).write_text(
+        json.dumps(
+            {
+                "profile_id": "direct",
+                "pid": 123,
+                "launcher_pid": 1,
+                "process_create_time": 10.0,
+                "engine": "direct",
+                "tabs": 1,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("profiledock.process_manager._alive", return_value=True), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=20.0
+    ):
+        assert not is_active_for_mutation(str(data_dir))
+
+
+def test_mutation_check_uses_playwright_controller_availability(tmp_path):
+    data_dir = tmp_path / "playwright" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_path(str(data_dir)).write_text(
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "profile_id": "playwright",
+                "token": "x" * 32,
+                "controller_pid": 999999,
+                "launcher_pid": 999998,
+                "port": 12345,
+                "controller_started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("profiledock.process_manager._alive", return_value=False), patch(
+        "profiledock.process_manager._controller_available", return_value=True
+    ):
+        assert is_active_for_mutation(str(data_dir))
 
 
 def test_direct_close_detects_pid_reuse(tmp_path):

@@ -123,7 +123,7 @@ def test_backup_refuses_when_profile_is_running(tmp_path):
     p_data.mkdir(parents=True)
     profile = Profile("p1", "RunningWork", "2026-01-01T00:00:00+00:00", str(p_data), engine="direct")
 
-    with patch("profiledock.backup.get_status", return_value="running"):
+    with patch("profiledock.backup.is_active_for_mutation", return_value=True):
         with pytest.raises(ProfileNotStoppedError, match="must be stopped before creating a backup"):
             create_backup_archive([profile], paths, tmp_path / "out.tar.gz")
 
@@ -211,3 +211,17 @@ def test_backup_rejects_linked_profile_content(tmp_path):
     with patch("profiledock.backup._is_link", side_effect=lambda path: path == linked_file):
         with pytest.raises(BackupError, match="unsafe file"):
             create_backup_archive([profile], paths, tmp_path / "backup.tar.gz")
+
+
+def test_backup_rejects_profile_metadata_outside_data_root(tmp_path):
+    paths = make_paths(tmp_path / "data")
+    outside = tmp_path / "outside" / "browser-data"
+    outside.mkdir(parents=True)
+    profile = Profile(
+        "p1",
+        "Escaped",
+        "2026-01-01T00:00:00+00:00",
+        str(outside),
+    )
+    with pytest.raises(BackupError, match="unsafe profile path"):
+        create_backup_archive([profile], paths, tmp_path / "backup.tar.gz")
