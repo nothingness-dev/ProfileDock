@@ -587,6 +587,42 @@ Run only browser and controller integration tests:
 .\.venv\Scripts\python.exe -m pytest -m browser
 ```
 
+## Continuous Integration & Local Equivalents
+
+ProfileDock runs automated GitHub Actions CI across **Ubuntu**, **macOS**, and **Windows** on Python **3.9**, **3.10**, **3.11**, **3.12**, and **3.13**.
+
+### Local Equivalents of CI Checks
+
+**1. Build distribution package:**
+```bash
+python -m pip install --upgrade build
+python -m build
+```
+
+**2. Lightweight install test (Standard library + Typer only):**
+```bash
+python -m pip install .
+python -m pytest -m "not browser"
+```
+
+**3. Full install test (with Playwright extras):**
+```bash
+python -m pip install ".[playwright,test]"
+python -m playwright install chromium
+python -m pytest
+```
+
+**4. Code formatting & whitespace check:**
+```bash
+git diff --check
+```
+
+**5. Version alignment check:**
+```bash
+python -c "import importlib.metadata, profiledock; assert importlib.metadata.version('profiledock') == profiledock.__version__"
+```
+
+
 ## JSON output format
 
 All JSON output from `--json` flags is stable and safe for scripting:

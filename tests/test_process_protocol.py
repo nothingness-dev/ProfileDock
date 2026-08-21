@@ -345,3 +345,19 @@ def test_system_browser_preference_selects_requested_family(tmp_path):
         assert _system_browser_executable("chrome") == chrome
         assert _system_browser_executable("brave") == brave
         assert _system_browser_executable("unsupported") is None
+
+
+def test_start_direct_chrome_operates_without_playwright(tmp_path):
+    from profiledock.process_manager import start_direct_chrome
+
+    data_dir = tmp_path / "profile-no-pw" / "browser-data"
+    data_dir.mkdir(parents=True)
+    executable = tmp_path / "chrome.exe"
+    executable.write_text("browser", encoding="utf-8")
+
+    with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
+        process = type("Process", (), {"pid": 54321})()
+        with patch("profiledock.process_manager.subprocess.Popen", return_value=process):
+            state = start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
+            assert state["pid"] == 54321
+            assert state["engine"] == "direct"
