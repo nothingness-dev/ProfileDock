@@ -394,7 +394,7 @@ Creates a versioned, self-contained, verified archive of profile metadata and br
 
 **Backup guarantees & requirements:**
 
-- **Stopped state required**: Profiles must be fully stopped (`get_status() == "stopped"`) before backup. Active or starting profiles are refused to avoid partial or inconsistent database states.
+- **Stopped state required**: Profiles must be fully stopped before backup. Direct profiles are checked by PID and process identity; Playwright profiles are checked by controller PID and authenticated controller availability. Active or starting profiles are refused to avoid partial or inconsistent database states.
 - **Engine metadata preserved**: Retains profile configuration, including whether direct Chrome or Playwright engine is used.
 - **Clean archives**: Automatically excludes transient runtime state (`running.json`, `controller.error`) and logs.
 - **Manifest & checksums**: Every backup includes `backup_manifest.json` with archive schema format version (version 1), creation timestamp, ProfileDock version, and SHA-256 checksums of every file.
@@ -538,6 +538,16 @@ ProfileDock implements several safety mechanisms to protect metadata integrity:
 **Path safety**: Data directories must exactly match `profiles/<id>/browser-data`. Symlinks, junctions, reparse points, duplicate paths, and path traversal attempts are rejected.
 
 **Managed-directory safety**: ProfileDock rejects unsafe managed directories, path-like profile IDs, runtime paths beneath `browser-data`, and deletion targets that do not exactly match `profiles/<id>/browser-data`.
+
+### Filesystem security boundary
+
+The configured data root is ProfileDock's write and destructive-operation boundary. Managed metadata, profile data, runtime state, logs, backups, temporary directories, and quarantines must resolve beneath that root. ProfileDock validates profile IDs before constructing paths, rejects absolute and parent-traversal archive entries, and refuses any operation whose lexical or resolved path escapes the boundary.
+
+Deletion, restore overwrite, migration cleanup, and repair cleanup resolve their targets before mutation and reject the data root itself. Existing path components and directory trees are checked for symbolic links, Windows junctions, and other reparse points so a managed path cannot redirect an operation outside the data root. Backup and migration source trees receive the same link checks before files are read or copied.
+
+Destructive profile mutations require a stopped profile. Direct-engine state is validated using PID liveness and recorded process creation time to detect PID reuse. Playwright-engine state is checked using controller-process liveness and an authenticated loopback availability probe. Ambiguous or active state is treated conservatively and blocks mutation.
+
+Metadata writes use cross-process locking, validated destinations, a previous-version backup, private temporary files, `fsync`, and atomic replacement. Restore, migration, and deletion stage changes in temporary or quarantine directories and roll back pre-commit filesystem changes on failure. Malformed metadata, malicious archives, interrupted temporary state, and conflicting destination content are rejected rather than overwritten silently.
 
 **Private storage**: On POSIX systems, ProfileDock restricts managed directories to the owner and writes metadata, lock, controller-state, and controller-error files with owner-only permissions. Windows access remains governed by the directory's inherited ACLs.
 
