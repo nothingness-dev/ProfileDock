@@ -250,6 +250,33 @@ profiledock set-engine <id-or-name> playwright
 
 Updates the default launch engine for an existing profile.
 
+### Config (Launch Presets)
+
+```bash
+profiledock config <id-or-name> show
+profiledock config <id-or-name> show --json
+
+profiledock config <id-or-name> set default-tabs 4
+
+profiledock config <id-or-name> set engine direct
+profiledock config <id-or-name> set engine playwright
+
+profiledock config <id-or-name> set browser chrome
+profiledock config <id-or-name> set browser /path/to/custom/chrome
+
+profiledock config <id-or-name> set window-size 1440x900
+
+profiledock config <id-or-name> add-url https://github.com
+profiledock config <id-or-name> add-url https://news.ycombinator.com
+profiledock config <id-or-name> remove-url https://github.com
+
+
+profiledock config <id-or-name> reset
+```
+
+Configured presets automatically apply when launching the profile. Any explicit options passed to `profiledock launch` (such as `--tabs`, `--engine`, `--browser`, `--url`) override the stored profile presets for that session.
+
+
 ### Status
 
 ```bash
