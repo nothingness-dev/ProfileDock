@@ -622,6 +622,25 @@ git diff --check
 python -c "import importlib.metadata, profiledock; assert importlib.metadata.version('profiledock') == profiledock.__version__"
 ```
 
+## Dependency Management & Policy
+
+ProfileDock adheres to a strict, reproducible dependency policy designed for maximum portability and resilience:
+
+- **Core Minimalism**: Base runtime (`profiledock`) strictly depends only on `typer>=0.9` and the Python standard library. Direct engine operations (`--engine direct`) and CLI features require zero external automation packages.
+- **Optional Playwright Extra**: Playwright automation capabilities are isolated under `[project.optional-dependencies] playwright = ["playwright>=1.40"]`.
+- **Reproducible Lockfile**: A cross-platform development lockfile is maintained at `requirements-dev.lock`. To update the lockfile in a clean environment:
+  ```bash
+  pip install -e .[test,playwright]
+  pip freeze > requirements-dev.lock
+  ```
+- **Automated Dependency Updates**: Dependabot is configured via `.github/dependabot.yml` to monitor both `pip` packages and GitHub Actions weekly.
+- **Upgrading Dependencies**:
+  ```bash
+  python -m pip install --upgrade --upgrade-strategy eager -e .[test,playwright]
+  python -m pytest
+  ```
+
+
 
 ## JSON output format
 
