@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -31,6 +32,9 @@ class Connection:
     def recv(self, size):
         return self.payload
 
+    def settimeout(self, timeout):
+        return None
+
     def sendall(self, payload):
         self.response = payload
 
@@ -45,16 +49,20 @@ class Server:
 
 def test_close_protocol_rejects_oversized_commands():
     oversized = Connection(b"close:" + b"x" * 1000 + b"\n")
+    correct = Connection(b"close:secret\n")
     context = type("Context", (), {"pages": [object()]})()
-    _wait_for_close(Server([oversized]), context, "secret")
+    _wait_for_close(Server([oversized, correct]), context, "secret")
     assert oversized.response == b"error\n"
+    assert correct.response == b"ok\n"
 
 
 def test_close_protocol_rejects_malformed_non_token_commands():
     malformed = Connection(b"kill:12345\n")
+    correct = Connection(b"close:secret\n")
     context = type("Context", (), {"pages": [object()]})()
-    _wait_for_close(Server([malformed]), context, "secret")
+    _wait_for_close(Server([malformed, correct]), context, "secret")
     assert malformed.response == b"error\n"
+    assert correct.response == b"ok\n"
 
 
 def test_direct_close_detects_pid_reuse(tmp_path):

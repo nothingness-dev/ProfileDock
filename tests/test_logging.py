@@ -28,7 +28,7 @@ def make_paths(root: Path) -> DataPaths:
 
 
 def test_sanitize_url():
-    assert sanitize_url("https://example.com/login?token=secret#hash") == "https://example.com/login/..."
+    assert sanitize_url("https://example.com/login?token=secret#hash") == "https://example.com/login"
     assert sanitize_url("https://accounts.google.com/signin/v2/identifier?auth=123") == "https://accounts.google.com/signin/..."
     assert sanitize_url("about:blank") == "about:blank"
     assert sanitize_url("") == ""
