@@ -4,12 +4,13 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import tarfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
-from .data_root import DataPaths
+from .data_root import DataPaths, _is_link
 from .models import LaunchConfig, METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from .storage import (
     _atomic_write,
@@ -17,11 +18,13 @@ from .storage import (
     load_metadata,
     metadata_lock,
 )
+from .process_manager import is_running
 from .validation import ValidationError, validate_metadata_document, validate_required_fields
 from .version import __version__
 
 MAX_MEMBER_SIZE_BYTES = 5 * 1024 * 1024 * 1024
 MAX_TOTAL_EXTRACT_BYTES = 20 * 1024 * 1024 * 1024
+MAX_MANIFEST_SIZE_BYTES = 16 * 1024 * 1024
 
 
 class RestoreError(Exception):
@@ -92,10 +95,90 @@ def _verify_checksum(path: Path, expected_sha256: str) -> bool:
 def _validate_safe_member_path(member_name: str) -> Path:
     if member_name.startswith("/") or member_name.startswith("\\"):
         raise DecompressionSecurityError(f"archive member contains absolute path: {member_name}")
-    parts = Path(member_name).parts
+    candidate = Path(member_name)
+    if candidate.is_absolute() or candidate.drive:
+        raise DecompressionSecurityError(f"archive member contains absolute path: {member_name}")
+    parts = candidate.parts
     if ".." in parts:
         raise DecompressionSecurityError(f"archive member contains parent traversal: {member_name}")
-    return Path(member_name)
+    return candidate
+
+
+def _validated_archive_profile(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise InvalidArchiveError("manifest profile entries must be JSON objects")
+    profile_value = {
+        "id": value.get("id"),
+        "name": value.get("name"),
+        "created_at": value.get("created_at"),
+        "data_dir": "archive-placeholder",
+        "last_launched_at": value.get("last_launched_at"),
+        "engine": value.get("engine"),
+        "launch_config": value.get("launch_config"),
+    }
+    try:
+        profile = Profile.from_dict(profile_value)
+        validate_required_fields(profile)
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise InvalidArchiveError(f"invalid profile metadata in manifest: {exc}") from exc
+    files = value.get("files")
+    if not isinstance(files, dict):
+        raise InvalidArchiveError(f"manifest files for profile '{profile.id}' must be an object")
+    for relative_path, metadata in files.items():
+        if not isinstance(relative_path, str) or not relative_path or relative_path in (".", ".."):
+            raise InvalidArchiveError(f"invalid file path in manifest for profile '{profile.id}'")
+        _validate_safe_member_path(relative_path)
+        if not isinstance(metadata, dict):
+            raise InvalidArchiveError(f"invalid file metadata for '{relative_path}'")
+        size = metadata.get("size")
+        checksum = metadata.get("sha256")
+        if type(size) is not int or size < 0 or size > MAX_MEMBER_SIZE_BYTES:
+            raise InvalidArchiveError(f"invalid file size for '{relative_path}'")
+        if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
+            raise InvalidArchiveError(f"invalid SHA-256 checksum for '{relative_path}'")
+    normalized = dict(value)
+    normalized["id"] = profile.id
+    normalized["name"] = profile.name
+    normalized["created_at"] = profile.created_at
+    normalized["last_launched_at"] = profile.last_launched_at
+    normalized["engine"] = profile.engine
+    normalized["launch_config"] = (
+        profile.launch_config.to_dict() if profile.launch_config is not None else None
+    )
+    return normalized
+
+
+def _existing_profile_matches_archive(profile: Profile, archive_profile: Dict[str, Any]) -> bool:
+    launch_config = profile.launch_config.to_dict() if profile.launch_config is not None else None
+    if (
+        profile.name != archive_profile["name"]
+        or profile.created_at != archive_profile["created_at"]
+        or profile.last_launched_at != archive_profile.get("last_launched_at")
+        or profile.engine != archive_profile.get("engine")
+        or launch_config != archive_profile.get("launch_config")
+    ):
+        return False
+    data_dir = Path(profile.data_dir)
+    if not data_dir.is_dir() or _is_link(data_dir):
+        return False
+    expected_files = archive_profile["files"]
+    actual_paths: Set[str] = set()
+    for root, directories, files in os.walk(data_dir, followlinks=False):
+        root_path = Path(root)
+        if any(_is_link(root_path / directory) for directory in directories):
+            return False
+        for filename in files:
+            file_path = root_path / filename
+            if _is_link(file_path) or not file_path.is_file():
+                return False
+            relative_path = file_path.relative_to(data_dir).as_posix()
+            actual_paths.add(relative_path)
+            metadata = expected_files.get(relative_path)
+            if metadata is None or file_path.stat().st_size != metadata["size"]:
+                return False
+            if not _verify_checksum(file_path, metadata["sha256"]):
+                return False
+    return actual_paths == set(expected_files)
 
 
 def restore_backup_archive(
@@ -118,29 +201,36 @@ def restore_backup_archive(
         except KeyError:
             raise InvalidArchiveError("archive missing required 'backup_manifest.json'")
 
-        manifest_bytes = tar.extractfile(manifest_member).read()
+        if not manifest_member.isfile() or manifest_member.size > MAX_MANIFEST_SIZE_BYTES:
+            raise InvalidArchiveError("backup manifest is not a safe regular file")
+
+        manifest_file = tar.extractfile(manifest_member)
+        if manifest_file is None:
+            raise InvalidArchiveError("backup manifest is unreadable")
+        manifest_bytes = manifest_file.read(MAX_MANIFEST_SIZE_BYTES + 1)
+        if len(manifest_bytes) > MAX_MANIFEST_SIZE_BYTES:
+            raise InvalidArchiveError("backup manifest exceeds the maximum allowed size")
         try:
             manifest = json.loads(manifest_bytes.decode("utf-8"))
         except Exception as exc:
             raise InvalidArchiveError(f"corrupted manifest in archive: {exc}") from exc
 
+        if not isinstance(manifest, dict):
+            raise InvalidArchiveError("backup manifest must be a JSON object")
         format_version = manifest.get("format_version")
         if format_version != 1:
             raise InvalidArchiveError(f"unsupported backup archive format version: {format_version}")
-
         profiles_data = manifest.get("profiles", [])
         if not isinstance(profiles_data, list):
             raise InvalidArchiveError("manifest profiles must be a list")
+        profiles_data = [_validated_archive_profile(profile) for profile in profiles_data]
 
         archive_profile_ids: Set[str] = set()
         archive_profile_names: Set[str] = set()
 
         for prof in profiles_data:
-            pid = prof.get("id")
-            pname = prof.get("name")
-            pcreated = prof.get("created_at")
-            if not pid or not pname or not pcreated:
-                raise InvalidArchiveError("manifest profile entry missing required fields")
+            pid = prof["id"]
+            pname = prof["name"]
             if pid in archive_profile_ids:
                 raise InvalidArchiveError(f"duplicate profile id in manifest: {pid}")
             archive_profile_ids.add(pid)
@@ -148,10 +238,17 @@ def restore_backup_archive(
                 raise InvalidArchiveError(f"duplicate profile name in manifest: {pname}")
             archive_profile_names.add(pname)
 
+        members = tar.getmembers()
+        member_names = [member.name for member in members]
+        if len(member_names) != len(set(member_names)):
+            raise InvalidArchiveError("archive contains duplicate member names")
         total_extracted_bytes = 0
-        for member in tar.getmembers():
+        regular_members: Set[str] = set()
+        for member in members:
             if member.islnk() or member.issym():
                 raise DecompressionSecurityError(f"archive member is an unsafe link: {member.name}")
+            if not member.isfile() and not member.isdir():
+                raise DecompressionSecurityError(f"archive member has an unsafe type: {member.name}")
             if member.size > MAX_MEMBER_SIZE_BYTES:
                 raise DecompressionSecurityError(f"archive member exceeds maximum allowed size: {member.name}")
             total_extracted_bytes += member.size
@@ -159,6 +256,25 @@ def restore_backup_archive(
                 raise DecompressionSecurityError("total archive uncompressed size exceeds maximum allowed threshold")
 
             _validate_safe_member_path(member.name)
+            if member.isfile():
+                regular_members.add(member.name)
+
+        expected_members = {"backup_manifest.json"}
+        for profile in profiles_data:
+            for relative_path, metadata in profile["files"].items():
+                member_name = f"profiles/{profile['id']}/browser-data/{relative_path}"
+                expected_members.add(member_name)
+                try:
+                    member = tar.getmember(member_name)
+                except KeyError as exc:
+                    raise InvalidArchiveError(f"archive missing member for file '{member_name}'") from exc
+                if not member.isfile() or member.size != metadata["size"]:
+                    raise InvalidArchiveError(f"archive member size does not match manifest: {member_name}")
+        unexpected_members = regular_members - expected_members
+        if unexpected_members:
+            raise InvalidArchiveError(
+                f"archive contains unlisted file: {sorted(unexpected_members)[0]}"
+            )
 
         dst_metadata = data_paths.profiles_file
         dst_profiles_dir = data_paths.profiles_dir
@@ -180,7 +296,7 @@ def restore_backup_archive(
                 if pid in current_id_map:
                     existing = current_id_map[pid]
                     if not overwrite:
-                        if existing.name == pname and existing.engine == pengine:
+                        if _existing_profile_matches_archive(existing, prof):
                             skipped.append(
                                 RestoreProfileResult(
                                     id=pid,
@@ -193,6 +309,13 @@ def restore_backup_archive(
                             continue
                         raise RestoreConflictError(
                             f"conflict: profile ID '{pid}' already exists with different attributes in destination"
+                        )
+                    if is_running(
+                        existing.data_dir,
+                        runtime_dir=data_paths.runtime_dir / existing.id,
+                    ):
+                        raise RestoreConflictError(
+                            f"cannot overwrite running profile '{existing.name}' ({existing.id})"
                         )
 
                 if pname in current_name_map and current_name_map[pname].id != pid:
@@ -233,10 +356,13 @@ def restore_backup_archive(
                         target_file_path = temp_browser_data / rel_file_path
                         target_file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-                        with tar.extractfile(member) as src_f, target_file_path.open("wb") as dst_f:
-                            shutil.copyfileobj(src_f, dst_f)
+                        source_file = tar.extractfile(member)
+                        if source_file is None:
+                            raise InvalidArchiveError(f"archive member is unreadable: {member_path}")
+                        with source_file, target_file_path.open("xb") as dst_f:
+                            shutil.copyfileobj(source_file, dst_f)
 
-                        if expected_sha and not _verify_checksum(target_file_path, expected_sha):
+                        if not _verify_checksum(target_file_path, expected_sha):
                             raise InvalidArchiveError(
                                 f"checksum verification failed for restored file '{member_path}'"
                             )

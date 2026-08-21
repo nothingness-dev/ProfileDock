@@ -12,7 +12,7 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
-from .data_root import DataPaths
+from .data_root import DataPaths, _is_link
 from .models import METADATA_SCHEMA_VERSION, Profile, utc_now
 from .process_manager import get_status
 from .version import __version__
@@ -107,12 +107,19 @@ def _collect_profile_files(
     files_manifest: Dict[str, Tuple[int, str]] = {}
     total_size = 0
 
-    if not data_dir.exists():
-        return files_manifest, total_size
+    if not data_dir.is_dir() or _is_link(data_dir):
+        raise BackupError(f"profile data directory is missing or unsafe: {data_dir}")
 
-    for root_dir, _, filenames in os.walk(data_dir):
+    for root_dir, directory_names, filenames in os.walk(data_dir, followlinks=False):
+        root_path = Path(root_dir)
+        for directory_name in list(directory_names):
+            directory = root_path / directory_name
+            if _is_link(directory) or not directory.is_dir():
+                raise BackupError(f"profile data contains an unsafe directory: {directory}")
         for fname in sorted(filenames):
-            fpath = Path(root_dir) / fname
+            fpath = root_path / fname
+            if _is_link(fpath) or not fpath.is_file():
+                raise BackupError(f"profile data contains an unsafe file: {fpath}")
             rel_path = fpath.relative_to(data_dir).as_posix()
             if _is_runtime_or_log_file(rel_path):
                 continue
@@ -137,11 +144,21 @@ def create_backup_archive(
     output_file: Path,
     force: bool = False,
 ) -> BackupReport:
-    out_path = Path(output_file).resolve()
+    requested_output = Path(output_file).expanduser()
+    if _is_link(requested_output):
+        raise BackupError(f"backup output cannot be a link or reparse point: {requested_output}")
+    out_path = requested_output.resolve()
     if out_path.exists() and not force:
         raise TargetExistsError(f"output backup archive already exists: {out_path} (use --force to overwrite)")
 
     for p in profiles:
+        profile_data = Path(p.data_dir).resolve()
+        try:
+            out_path.relative_to(profile_data)
+        except ValueError:
+            pass
+        else:
+            raise BackupError("backup output cannot be inside a profile browser-data directory")
         status = get_status(p.data_dir, runtime_dir=data_paths.runtime_dir / p.id)
         if status != "stopped":
             raise ProfileNotStoppedError(
@@ -226,7 +243,9 @@ def create_backup_archive(
             tar.addfile(tar_info, io.BytesIO(manifest_bytes))
 
         with tarfile.open(temp_archive, "r:gz") as verify_tar:
-            names = set(verify_tar.getnames())
+            names = verify_tar.getnames()
+            if len(names) != len(set(names)):
+                raise BackupError("backup archive verification failed: duplicate member names")
             if "backup_manifest.json" not in names:
                 raise BackupError("backup archive verification failed: missing manifest")
             manifest_file = verify_tar.extractfile("backup_manifest.json")
@@ -235,6 +254,24 @@ def create_backup_archive(
             loaded_manifest = json.loads(manifest_file.read().decode("utf-8"))
             if loaded_manifest.get("format_version") != BACKUP_ARCHIVE_SCHEMA_VERSION:
                 raise BackupError("backup archive verification failed: invalid format version")
+            for profile_info in loaded_manifest.get("profiles", []):
+                for rel_path, file_meta in profile_info.get("files", {}).items():
+                    member_name = f"profiles/{profile_info['id']}/browser-data/{rel_path}"
+                    member = verify_tar.getmember(member_name)
+                    extracted = verify_tar.extractfile(member)
+                    if extracted is None:
+                        raise BackupError(f"backup archive verification failed: unreadable {member_name}")
+                    digest = sha256()
+                    size = 0
+                    with extracted:
+                        while True:
+                            chunk = extracted.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            digest.update(chunk)
+                    if size != file_meta["size"] or digest.hexdigest() != file_meta["sha256"]:
+                        raise BackupError(f"backup archive verification failed: checksum mismatch for {member_name}")
 
         temp_archive.replace(out_path)
 

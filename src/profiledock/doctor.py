@@ -7,8 +7,8 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
-from .data_root import DataPaths
+from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, utc_now
+from .data_root import DataPaths, _is_link
 from .process_manager import _system_browser_executable, get_status
 from .storage import (
     MetadataCorruptedError,
@@ -595,23 +595,33 @@ def repair_environment(
             )
 
     if profiles_dir.exists():
-        stale_temp_dirs: List[Path] = []
-        for pattern in (".m-*", ".temp_restore_*", ".temp_migrating_*", ".quarantine_*"):
-            stale_temp_dirs.extend(profiles_dir.glob(pattern))
-        cleaned_temps = 0
-        for temp_path in stale_temp_dirs:
-            if temp_path.is_dir():
-                try:
-                    shutil.rmtree(temp_path, ignore_errors=True)
-                    cleaned_temps += 1
-                except OSError:
-                    pass
-        if cleaned_temps > 0:
+        try:
+            with metadata_lock(paths.profiles_file):
+                stale_temp_dirs: List[Path] = []
+                for pattern in (".m-*", ".temp_restore_*", ".temp_migrating_*", ".quarantine_*"):
+                    stale_temp_dirs.extend(profiles_dir.glob(pattern))
+                cleaned_temps = 0
+                for temp_path in stale_temp_dirs:
+                    if temp_path.is_dir() and not _is_link(temp_path):
+                        try:
+                            shutil.rmtree(temp_path, ignore_errors=False)
+                            cleaned_temps += 1
+                        except OSError:
+                            pass
+                if cleaned_temps > 0:
+                    repairs.append(
+                        DiagnosticCheck(
+                            id="repair_incomplete_operations",
+                            status=STATUS_OK,
+                            summary=f"Cleaned up {cleaned_temps} incomplete migration/restore temporary directory(ies).",
+                        )
+                    )
+        except MetadataLockedError:
             repairs.append(
                 DiagnosticCheck(
                     id="repair_incomplete_operations",
-                    status=STATUS_OK,
-                    summary=f"Cleaned up {cleaned_temps} incomplete migration/restore temporary directory(ies).",
+                    status=STATUS_WARNING,
+                    summary="Skipped temporary-directory cleanup because another metadata operation is active.",
                 )
             )
 
@@ -689,6 +699,7 @@ def repair_environment(
     if profiles_file.exists():
         try:
             doc = load_metadata(profiles_file)
+            validate_metadata_document(doc.profiles, profiles_dir)
             if recreate_missing_directories:
                 recreated_count = 0
                 for p in doc.profiles:
@@ -710,7 +721,7 @@ def repair_environment(
                 known_names = {p.name for p in doc.profiles}
                 reattached_profiles: List[Profile] = []
                 for entry in sorted(profiles_dir.iterdir()):
-                    if entry.is_dir() and not entry.name.startswith(".") and entry.name not in known_ids:
+                    if entry.is_dir() and not _is_link(entry) and not entry.name.startswith(".") and entry.name not in known_ids:
                         data_dir_path = entry / "browser-data"
                         if data_dir_path.is_dir():
                             base_name = f"Recovered-{entry.name}"
@@ -724,7 +735,7 @@ def repair_environment(
                             reattached_p = Profile(
                                 id=entry.name,
                                 name=candidate_name,
-                                created_at=doc.profiles[0].created_at if doc.profiles else "2026-01-01T00:00:00+00:00",
+                                created_at=utc_now(),
                                 data_dir=str(data_dir_path.resolve()),
                                 engine=None,
                             )
