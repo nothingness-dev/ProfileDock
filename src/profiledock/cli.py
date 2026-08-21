@@ -38,6 +38,7 @@ from .migration import (
     migrate_project,
 )
 from .data_root import DataPaths, DataRootError, resolve_data_root
+from .logger import generate_correlation_id, read_profile_logs, write_log_entry
 from .models import LaunchConfig, Profile
 from .process_manager import (
     BrowserLaunchError,
@@ -61,6 +62,8 @@ EXIT_SUCCESS = 0
 EXIT_USER_ERROR = 1
 _paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
 _paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared", default=False)
+_verbose: ContextVar[bool] = ContextVar("profiledock_verbose", default=False)
+_log_level: ContextVar[str] = ContextVar("profiledock_log_level", default="INFO")
 
 
 def version_callback(value: bool) -> None:
@@ -76,6 +79,17 @@ def main(
         "--data-root",
         help="Override the ProfileDock application-data directory.",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose output and trace logging.",
+    ),
+    log_level: str = typer.Option(
+        "INFO",
+        "--log-level",
+        help="Logging level threshold: DEBUG, INFO, WARNING, ERROR.",
+    ),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -84,12 +98,15 @@ def main(
         callback=version_callback,
         is_eager=True,
     ),
-    ) -> None:
+) -> None:
     try:
         _paths.set(resolve_data_root(data_root, prepare=False))
         _paths_prepared.set(False)
+        _verbose.set(verbose)
+        _log_level.set(log_level.upper())
     except DataRootError as exc:
         fail(str(exc))
+
 
 
 def selected_paths() -> DataPaths:
@@ -446,6 +463,8 @@ def launch(
         help="Start URL(s) to open.",
     ),
 ) -> None:
+    corr_id = generate_correlation_id()
+    paths = selected_paths()
     try:
         profile_manager = manager()
         profile = profile_manager.resolve(profile_id)
@@ -478,6 +497,23 @@ def launch(
         if not Path(profile.data_dir).is_dir():
             fail("profile data directory is missing")
 
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="INFO",
+            event="browser_launch_requested",
+            profile_id=profile.id,
+            correlation_id=corr_id,
+            engine=active_engine,
+            command="launch",
+            browser_path=target_browser,
+            details={
+                "tabs": target_tabs,
+                "urls": target_urls,
+                "window_width": width,
+                "window_height": height,
+            },
+        )
+
         if active_engine == "direct":
             exec_path = Path(target_browser) if target_browser and Path(target_browser).is_file() else None
             direct_options = {"runtime_dir": runtime_path(profile)}
@@ -490,7 +526,17 @@ def launch(
             if width is not None and height is not None:
                 direct_options["window_width"] = width
                 direct_options["window_height"] = height
-            start_direct_chrome(profile.data_dir, target_tabs, **direct_options)
+            state = start_direct_chrome(profile.data_dir, target_tabs, **direct_options)
+            write_log_entry(
+                log_dir=paths.logs_dir,
+                level="INFO",
+                event="browser_process_spawned",
+                profile_id=profile.id,
+                correlation_id=corr_id,
+                engine="direct",
+                pid=state.get("pid"),
+                result="success",
+            )
         else:
             controller_options = {"runtime_dir": runtime_path(profile)}
             if target_browser is not None:
@@ -500,7 +546,17 @@ def launch(
             if width is not None and height is not None:
                 controller_options["window_width"] = width
                 controller_options["window_height"] = height
-            start_controller(profile.data_dir, target_tabs, **controller_options)
+            state = start_controller(profile.data_dir, target_tabs, **controller_options)
+            write_log_entry(
+                log_dir=paths.logs_dir,
+                level="INFO",
+                event="controller_spawned",
+                profile_id=profile.id,
+                correlation_id=corr_id,
+                engine="playwright",
+                pid=state.get("controller_pid") or state.get("pid"),
+                result="success",
+            )
     except (
         ProfileNotFoundError,
         AmbiguousProfileError,
@@ -510,7 +566,17 @@ def launch(
         ValidationError,
         ValueError,
     ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="browser_launch_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc)},
+        )
         fail(str(exc))
+
     try:
         profile_manager.mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
@@ -809,6 +875,45 @@ def restore(
         for p in report.skipped:
             eng_label = p.engine or "default (direct)"
             typer.echo(f"  = {p.name} ({p.id}) [engine: {eng_label}] - {p.message}")
+
+
+@app.command("logs")
+def show_logs(
+    profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name to filter logs."),
+    last: Optional[int] = typer.Option(None, "--last", "-n", help="Show last N log entries."),
+    json_output: bool = typer.Option(False, "--json", help="Output logs in JSON format."),
+) -> None:
+    paths = selected_paths()
+    prof_id = None
+    if profile_id is not None:
+        try:
+            profile = manager().resolve(profile_id)
+            prof_id = profile.id
+        except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
+            fail(str(exc))
+
+    entries = read_profile_logs(paths.logs_dir, profile_id=prof_id, last_n=last)
+
+    if json_output:
+        typer.echo(json.dumps(entries, indent=2))
+        return
+
+    if not entries:
+        typer.echo("No log entries found.")
+        return
+
+    for entry in entries:
+        ts = entry.get("timestamp", "")
+        lvl = entry.get("level", "INFO")
+        evt = entry.get("event", "")
+        cid = entry.get("correlation_id", "")
+        pid = entry.get("profile_id", "-")
+        eng = entry.get("engine", "-")
+        typer.echo(f"[{ts}] [{lvl}] [{evt}] (cid: {cid}, profile: {pid}, engine: {eng})")
+        details = entry.get("details")
+        if details and isinstance(details, dict):
+            for k, v in details.items():
+                typer.echo(f"    {k}: {v}")
 
 
 if __name__ == "__main__":
