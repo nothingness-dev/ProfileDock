@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from .data_root import DataPaths
-from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
+from .models import LaunchConfig, METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from .storage import (
     _atomic_write,
     _backup_metadata,
@@ -267,6 +267,10 @@ def restore_backup_archive(
                         prof_bytes = sum(f["size"] for f in files_dict.values())
                         data_dir_str = str((dst_profiles_dir / pid / "browser-data").resolve())
 
+                        launch_cfg = None
+                        if "launch_config" in prof and prof["launch_config"] is not None:
+                            launch_cfg = LaunchConfig.from_dict(prof["launch_config"])
+
                         new_p = Profile(
                             id=pid,
                             name=pname,
@@ -274,7 +278,9 @@ def restore_backup_archive(
                             data_dir=data_dir_str,
                             last_launched_at=plaunched,
                             engine=pengine,
+                            launch_config=launch_cfg,
                         )
+
                         new_profiles_map[pid] = new_p
 
                         restored_results.append(

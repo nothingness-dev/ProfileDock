@@ -380,6 +380,7 @@ def rename_profile_atomic(
                         data_dir=p.data_dir,
                         last_launched_at=p.last_launched_at,
                         engine=p.engine,
+                        launch_config=p.launch_config,
                     )
                 )
             else:
@@ -410,6 +411,7 @@ def mark_launched_atomic(
                         data_dir=p.data_dir,
                         last_launched_at=launched_at,
                         engine=p.engine,
+                        launch_config=p.launch_config,
                     )
                 )
             else:
@@ -440,6 +442,7 @@ def set_engine_atomic(
                         data_dir=p.data_dir,
                         last_launched_at=p.last_launched_at,
                         engine=engine,
+                        launch_config=p.launch_config,
                     )
                 )
             else:
@@ -449,3 +452,34 @@ def set_engine_atomic(
         )
 
     return atomic_update_metadata(path, profile_root, _set, backup_path)
+
+
+def set_launch_config_atomic(
+    profile_id: str,
+    launch_config: Optional[Any],
+    path: Union[str, Path] = "profiles.json",
+    profile_root: Union[str, Path] = "profiles",
+    backup_path: Union[str, Path, None] = None,
+) -> MetadataDocument:
+    def _update_cfg(doc: MetadataDocument) -> MetadataDocument:
+        new_profiles = []
+        for p in doc.profiles:
+            if p.id == profile_id:
+                new_profiles.append(
+                    Profile(
+                        id=p.id,
+                        name=p.name,
+                        created_at=p.created_at,
+                        data_dir=p.data_dir,
+                        last_launched_at=p.last_launched_at,
+                        engine=p.engine,
+                        launch_config=launch_config,
+                    )
+                )
+            else:
+                new_profiles.append(p)
+        return MetadataDocument(
+            schema_version=doc.schema_version, profiles=new_profiles
+        )
+
+    return atomic_update_metadata(path, profile_root, _update_cfg, backup_path)

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from .data_root import DataPaths, resolve_data_root
-from .models import Profile, utc_now
+from .models import LaunchConfig, Profile, utc_now
 from .storage import (
     add_profile_atomic,
     load_metadata,
@@ -13,7 +13,9 @@ from .storage import (
     remove_profile_atomic,
     rename_profile_atomic,
     set_engine_atomic,
+    set_launch_config_atomic,
 )
+from .validation import ValidationError, validate_launch_config
 
 
 class ProfileNotFoundError(Exception):
@@ -136,6 +138,46 @@ class ProfileManager:
         profile = self.resolve(identifier)
         set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
         return self.get(profile.id)
+
+    def set_launch_config(self, identifier: str, config: Optional[LaunchConfig]) -> Profile:
+        profile = self.resolve(identifier)
+        if config is not None:
+            validate_launch_config(config, profile.engine)
+        set_launch_config_atomic(profile.id, config, self.profiles_file, self.profiles_dir, self.backup_file)
+        return self.get(profile.id)
+
+    def get_launch_config(self, identifier: str) -> LaunchConfig:
+        profile = self.resolve(identifier)
+        return profile.launch_config or LaunchConfig()
+
+    def update_launch_config(self, identifier: str, **kwargs: Any) -> Profile:
+        profile = self.resolve(identifier)
+        current = profile.launch_config or LaunchConfig()
+        cfg_dict = current.to_dict()
+        for k, v in kwargs.items():
+            if k in cfg_dict:
+                cfg_dict[k] = v
+        new_cfg = LaunchConfig.from_dict(cfg_dict)
+        return self.set_launch_config(identifier, new_cfg)
+
+    def add_start_url(self, identifier: str, url: str) -> Profile:
+        profile = self.resolve(identifier)
+        current = profile.launch_config or LaunchConfig()
+        clean_url = url.strip()
+        urls = list(current.start_urls)
+        if clean_url not in urls:
+            urls.append(clean_url)
+        return self.update_launch_config(identifier, start_urls=urls)
+
+    def remove_start_url(self, identifier: str, url: str) -> Profile:
+        profile = self.resolve(identifier)
+        current = profile.launch_config or LaunchConfig()
+        clean_url = url.strip()
+        urls = [u for u in current.start_urls if u != clean_url]
+        return self.update_launch_config(identifier, start_urls=urls)
+
+    def reset_launch_config(self, identifier: str) -> Profile:
+        return self.set_launch_config(identifier, None)
 
     def mark_launched(self, identifier: str) -> None:
         profile = self.resolve(identifier)

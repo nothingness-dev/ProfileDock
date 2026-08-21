@@ -419,6 +419,7 @@ def migrate_project(
                     data_dir=str(destination_profiles / profile.id / "browser-data"),
                     last_launched_at=profile.last_launched_at,
                     engine=profile.engine,
+                    launch_config=profile.launch_config,
                 )
                 new_profiles.append(new_profile)
                 migrated.append(

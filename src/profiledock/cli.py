@@ -38,7 +38,7 @@ from .migration import (
     migrate_project,
 )
 from .data_root import DataPaths, DataRootError, resolve_data_root
-from .models import Profile
+from .models import LaunchConfig, Profile
 from .process_manager import (
     BrowserLaunchError,
     ProfileRunningError,
@@ -53,6 +53,8 @@ from .storage import StorageError
 from .version import __version__
 
 app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
+config_app = typer.Typer(help="Manage launch configuration presets for a profile.")
+app.add_typer(config_app, name="config")
 
 EXIT_SUCCESS = 0
 EXIT_USER_ERROR = 1
@@ -110,6 +112,8 @@ def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
         if clean not in ("direct", "playwright"):
             fail("engine must be 'direct' or 'playwright'")
         return clean
+    if profile.launch_config and profile.launch_config.engine:
+        return profile.launch_config.engine
     profile_engine = getattr(profile, "engine", None)
     if profile_engine:
         if profile_engine not in ("direct", "playwright"):
@@ -133,9 +137,12 @@ def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
         "last_launched_at": profile.last_launched_at,
         "engine": resolve_engine(None, profile),
     }
+    if profile.launch_config is not None:
+        data["launch_config"] = profile.launch_config.to_dict()
     if status is not None:
         data["status"] = status
     return data
+
 
 
 def _render_table(rows: List[List[str]]) -> str:
@@ -235,6 +242,106 @@ def rename(profile_id: str, new_name: str) -> None:
     typer.echo(f"Renamed profile to '{profile.name}' ({profile.id})")
 
 
+@config_app.command("show")
+def config_show(
+    profile_id: str = typer.Argument(..., help="Profile identifier."),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+) -> None:
+    try:
+        profile = manager().resolve(profile_id)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
+        fail(str(exc))
+    cfg = profile.launch_config or LaunchConfig()
+    if json_output:
+        typer.echo(json.dumps(cfg.to_dict(), indent=2))
+        return
+    rows = [
+        ["Profile:", f"{profile.name} ({profile.id})"],
+        ["Default Tabs:", str(cfg.default_tabs) if cfg.default_tabs is not None else "None"],
+        ["Engine:", cfg.engine or "None (inherits profile/default)"],
+        ["Browser:", cfg.browser or "None (auto-detect)"],
+        ["Window Size:", f"{cfg.window_width}x{cfg.window_height}" if cfg.window_width and cfg.window_height else "None"],
+        ["Start URLs:", ", ".join(cfg.start_urls) if cfg.start_urls else "None"],
+    ]
+    typer.echo(_render_table(rows))
+
+
+@config_app.command("set")
+def config_set(
+    profile_id: str = typer.Argument(..., help="Profile identifier."),
+    setting: str = typer.Argument(..., help="Setting name (default-tabs, engine, browser, window-size)."),
+    value: str = typer.Argument(..., help="Setting value."),
+) -> None:
+    clean_setting = setting.strip().lower()
+    clean_val = value.strip()
+    profile_manager = manager()
+
+    try:
+        profile = profile_manager.resolve(profile_id)
+        if clean_setting == "default-tabs":
+            if not clean_val.isdigit() or int(clean_val) < 1:
+                fail("default-tabs must be a positive integer >= 1")
+            profile_manager.update_launch_config(profile_id, default_tabs=int(clean_val))
+            typer.echo(f"Set default-tabs to {clean_val} for profile '{profile.name}' ({profile.id})")
+        elif clean_setting == "engine":
+            val_eng = clean_val.lower()
+            if val_eng not in ("direct", "playwright"):
+                fail("engine must be 'direct' or 'playwright'")
+            profile_manager.update_launch_config(profile_id, engine=val_eng)
+            typer.echo(f"Set engine to '{val_eng}' for profile '{profile.name}' ({profile.id})")
+        elif clean_setting == "browser":
+            profile_manager.update_launch_config(profile_id, browser=clean_val)
+            typer.echo(f"Set browser to '{clean_val}' for profile '{profile.name}' ({profile.id})")
+        elif clean_setting == "window-size":
+            parts = clean_val.lower().split("x")
+            if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+                fail("window-size must be in format <width>x<height> (e.g. 1280x720)")
+            w, h = int(parts[0]), int(parts[1])
+            if w < 100 or h < 100:
+                fail("width and height must be at least 100")
+            profile_manager.update_launch_config(profile_id, window_width=w, window_height=h)
+            typer.echo(f"Set window-size to {w}x{h} for profile '{profile.name}' ({profile.id})")
+        else:
+            fail(f"unknown setting '{setting}' (valid: default-tabs, engine, browser, window-size)")
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        fail(str(exc))
+
+
+@config_app.command("add-url")
+def config_add_url(
+    profile_id: str = typer.Argument(..., help="Profile identifier."),
+    url: str = typer.Argument(..., help="URL to add."),
+) -> None:
+    try:
+        profile = manager().add_start_url(profile_id, url)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        fail(str(exc))
+    typer.echo(f"Added start URL '{url}' to profile '{profile.name}' ({profile.id})")
+
+
+@config_app.command("remove-url")
+def config_remove_url(
+    profile_id: str = typer.Argument(..., help="Profile identifier."),
+    url: str = typer.Argument(..., help="URL to remove."),
+) -> None:
+    try:
+        profile = manager().remove_start_url(profile_id, url)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        fail(str(exc))
+    typer.echo(f"Removed start URL '{url}' from profile '{profile.name}' ({profile.id})")
+
+
+@config_app.command("reset")
+def config_reset(
+    profile_id: str = typer.Argument(..., help="Profile identifier."),
+) -> None:
+    try:
+        profile = manager().reset_launch_config(profile_id)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+        fail(str(exc))
+    typer.echo(f"Reset launch configuration for profile '{profile.name}' ({profile.id})")
+
+
 @app.command("set-engine")
 def set_engine(
     profile_id: str,
@@ -299,35 +406,91 @@ def status(
 @app.command()
 def launch(
     profile_id: str,
-    tabs: int = typer.Option(None, "--tabs", "-t"),
+    tabs: Optional[int] = typer.Option(None, "--tabs", "-t", help="Number of tabs to open."),
     engine: Optional[str] = typer.Option(
         None,
         "--engine",
         "-e",
         help="Override engine: 'direct' or 'playwright'",
     ),
+    browser: Optional[str] = typer.Option(
+        None,
+        "--browser",
+        "-b",
+        help="Override browser channel/executable.",
+    ),
+    url: Optional[List[str]] = typer.Option(
+        None,
+        "--url",
+        "-u",
+        help="Start URL(s) to open.",
+    ),
 ) -> None:
     try:
         profile_manager = manager()
         profile = profile_manager.resolve(profile_id)
+        cfg = profile.launch_config
         active_engine = resolve_engine(engine, profile)
-        if tabs is None:
-            tabs = typer.prompt("How many tabs do you want to open?", type=int)
-        if tabs < 1:
+
+        target_tabs = tabs
+        if target_tabs is None and cfg and cfg.default_tabs is not None:
+            target_tabs = cfg.default_tabs
+        if target_tabs is None:
+            target_tabs = typer.prompt("How many tabs do you want to open?", type=int)
+        if target_tabs < 1:
             fail("tab count must be at least 1")
+
+        target_urls = url if url else (cfg.start_urls if cfg and cfg.start_urls else [])
+        for u in target_urls:
+            if not u.startswith("about:"):
+                from urllib.parse import urlparse
+                parsed = urlparse(u)
+                if parsed.scheme.lower() not in ("http", "https", "about"):
+                    fail(f"invalid URL scheme '{parsed.scheme}' (allowed: http, https, about)")
+
+        target_browser = browser if browser is not None else (cfg.browser if cfg else None)
+        width = cfg.window_width if cfg else None
+        height = cfg.window_height if cfg else None
+
         if not Path(profile.data_dir).exists():
             fail("profile data directory is missing")
+
         if active_engine == "direct":
-            start_direct_chrome(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
+            exec_path = Path(target_browser) if target_browser and Path(target_browser).exists() else None
+            start_direct_chrome(
+                profile.data_dir,
+                target_tabs,
+                runtime_dir=runtime_path(profile),
+                executable_path=exec_path,
+                start_urls=target_urls,
+                window_width=width,
+                window_height=height,
+            )
         else:
-            start_controller(profile.data_dir, tabs, runtime_dir=runtime_path(profile))
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError, ValueError) as exc:
+            start_controller(
+                profile.data_dir,
+                target_tabs,
+                runtime_dir=runtime_path(profile),
+                browser_channel=target_browser,
+                start_urls=target_urls,
+                window_width=width,
+                window_height=height,
+            )
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileRunningError,
+        BrowserLaunchError,
+        ValueError,
+    ) as exc:
         fail(str(exc))
     try:
         profile_manager.mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         typer.echo(f"Warning: browser launched but launch timestamp was not saved: {exc}", err=True)
-    typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {tabs} tab(s).")
+    typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {target_tabs} tab(s).")
+
 
 
 @app.command()

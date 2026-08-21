@@ -378,6 +378,9 @@ def start_direct_chrome(
     tabs: int,
     runtime_dir: Optional[Path] = None,
     executable_path: Optional[Path] = None,
+    start_urls: Optional[List[str]] = None,
+    window_width: Optional[int] = None,
+    window_height: Optional[int] = None,
 ) -> Dict[str, Any]:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
@@ -425,14 +428,22 @@ def start_direct_chrome(
     except FileExistsError as exc:
         raise ProfileRunningError("profile is already running") from exc
 
+    urls = list(start_urls or [])
+    if len(urls) < tabs:
+        urls.extend(["about:blank" for _ in range(tabs - len(urls))])
+    elif not urls:
+        urls = ["about:blank" for _ in range(tabs)]
+
     args = [
         str(browser_bin),
         f"--user-data-dir={data_dir}",
         "--no-first-run",
         "--no-default-browser-check",
         "--new-window",
-        *["about:blank" for _ in range(tabs)],
     ]
+    if window_width is not None and window_height is not None:
+        args.append(f"--window-size={window_width},{window_height}")
+    args.extend(urls)
 
     popen_kwargs: Dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
@@ -482,6 +493,10 @@ def start_controller(
     headless: bool = False,
     startup_timeout: float = 30,
     runtime_dir: Optional[Path] = None,
+    browser_channel: Optional[str] = None,
+    start_urls: Optional[List[str]] = None,
+    window_width: Optional[int] = None,
+    window_height: Optional[int] = None,
 ) -> Dict[str, Any]:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
@@ -520,9 +535,26 @@ def start_controller(
     except FileExistsError as exc:
         raise ProfileRunningError("profile is already running") from exc
 
-    command = [sys.executable, "-m", "profiledock.process_manager", "--controller", str(path), data_dir, str(tabs), token]
+    command = [
+        sys.executable,
+        "-m",
+        "profiledock.process_manager",
+        "--controller",
+        str(path),
+        data_dir,
+        str(tabs),
+        token,
+    ]
     if headless:
         command.append("--headless")
+    if browser_channel:
+        command.extend(["--browser-channel", browser_channel])
+    if window_width is not None and window_height is not None:
+        command.extend(["--window-size", f"{window_width},{window_height}"])
+    if start_urls:
+        for u in start_urls:
+            command.extend(["--url", u])
+
     try:
         process = subprocess.Popen(
             command,
@@ -693,14 +725,31 @@ def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
             connection.sendall(b"error\n")
 
 
-def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any, str]:
+def _launch_context(
+    playwright: Any,
+    data_dir: str,
+    headless: bool,
+    channel_override: Optional[str] = None,
+    window_width: Optional[int] = None,
+    window_height: Optional[int] = None,
+) -> Tuple[Any, str]:
     from playwright.sync_api import Error as PlaywrightError
 
+    kwargs: Dict[str, Any] = {"headless": headless}
+    if window_width is not None and window_height is not None:
+        kwargs["viewport"] = {"width": window_width, "height": window_height}
+        kwargs["args"] = [f"--window-size={window_width},{window_height}"]
+
+    if channel_override:
+        if Path(channel_override).exists():
+            return playwright.chromium.launch_persistent_context(data_dir, executable_path=channel_override, **kwargs), channel_override
+        return playwright.chromium.launch_persistent_context(data_dir, channel=channel_override, **kwargs), channel_override
+
     try:
-        return playwright.chromium.launch_persistent_context(data_dir, headless=headless), "chromium"
+        return playwright.chromium.launch_persistent_context(data_dir, **kwargs), "chromium"
     except PlaywrightError as chromium_error:
         try:
-            return playwright.chromium.launch_persistent_context(data_dir, channel="chrome", headless=headless), "chrome"
+            return playwright.chromium.launch_persistent_context(data_dir, channel="chrome", **kwargs), "chrome"
         except PlaywrightError as chrome_error:
             executable = _system_browser_executable()
             if executable is not None:
@@ -708,7 +757,7 @@ def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any
                     return playwright.chromium.launch_persistent_context(
                         data_dir,
                         executable_path=str(executable),
-                        headless=headless,
+                        **kwargs,
                     ), "system"
                 except PlaywrightError as system_error:
                     raise PlaywrightError(
@@ -717,6 +766,7 @@ def _launch_context(playwright: Any, data_dir: str, headless: bool) -> Tuple[Any
             raise PlaywrightError(
                 f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}\nSystem browser: not found"
             ) from chromium_error
+
 
 
 def _system_browser_executable() -> Optional[Path]:
@@ -766,7 +816,17 @@ def _system_browser_executable() -> Optional[Path]:
     return next((candidate for candidate in candidates if candidate.is_file()), None)
 
 
-def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool) -> int:
+def _controller(
+    path: Path,
+    data_dir: str,
+    tabs: int,
+    token: str,
+    headless: bool,
+    browser_channel: Optional[str] = None,
+    window_width: Optional[int] = None,
+    window_height: Optional[int] = None,
+    start_urls: Optional[List[str]] = None,
+) -> int:
     err = path.parent / "controller.error"
     try:
         from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -775,7 +835,7 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
         return 2
 
     context = None
-    channel = "chromium,chrome"
+    channel = browser_channel or "chromium,chrome"
     server = None
     try:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -785,12 +845,30 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
         server.settimeout(0.5)
         port = server.getsockname()[1]
         with sync_playwright() as playwright:
-            context, channel = _launch_context(playwright, data_dir, headless)
+            context, channel = _launch_context(
+                playwright,
+                data_dir,
+                headless,
+                channel_override=browser_channel,
+                window_width=window_width,
+                window_height=window_height,
+            )
             try:
-                while len(context.pages) > tabs:
-                    context.pages[-1].close()
-                while len(context.pages) < tabs:
+                urls = list(start_urls or [])
+                target_pages = max(tabs, len(urls)) if urls else tabs
+
+                while len(context.pages) < target_pages:
                     context.new_page()
+                while len(context.pages) > target_pages:
+                    context.pages[-1].close()
+
+                for idx, url in enumerate(urls):
+                    if idx < len(context.pages):
+                        try:
+                            context.pages[idx].goto(url)
+                        except Exception:
+                            pass
+
                 _atomic_private_json(
                     path,
                     {
@@ -801,7 +879,7 @@ def _controller(path: Path, data_dir: str, tabs: int, token: str, headless: bool
                         "controller_started_at": _utc_now(),
                         "port": port,
                         "token": token,
-                        "tabs": tabs,
+                        "tabs": len(context.pages),
                         "page_count": len(context.pages),
                         "channel": channel,
                         "status": "running",
@@ -846,8 +924,33 @@ def main() -> None:
     parser.add_argument("tabs", type=int)
     parser.add_argument("token")
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--browser-channel", type=str, default=None)
+    parser.add_argument("--window-size", type=str, default=None)
+    parser.add_argument("--url", action="append", default=[])
     args = parser.parse_args()
-    raise SystemExit(_controller(args.controller, args.data_dir, args.tabs, args.token, args.headless))
+
+    width = None
+    height = None
+    if args.window_size:
+        parts = args.window_size.split(",")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            width = int(parts[0])
+            height = int(parts[1])
+
+    raise SystemExit(
+        _controller(
+            args.controller,
+            args.data_dir,
+            args.tabs,
+            args.token,
+            args.headless,
+            browser_channel=args.browser_channel,
+            window_width=width,
+            window_height=height,
+            start_urls=args.url,
+        )
+    )
+
 
 
 if __name__ == "__main__":

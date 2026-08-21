@@ -4,12 +4,65 @@ import os
 import re
 from typing import List, Set
 
+from urllib.parse import urlparse
+
 from .data_root import _is_link
-from .models import Profile
+from .models import LaunchConfig, Profile
 
 
 class ValidationError(Exception):
     pass
+
+
+_ALLOWED_URL_SCHEMES = frozenset({"http", "https", "about"})
+_ALLOWED_PLAYWRIGHT_CHANNELS = frozenset({"chromium", "chrome", "msedge", "chrome-beta", "msedge-beta", "msedge-dev"})
+_ALLOWED_DIRECT_BROWSERS = frozenset({"chrome", "chromium", "brave", "google-chrome", "google-chrome-stable", "chromium-browser", "brave-browser"})
+
+
+def validate_url(url: str) -> None:
+    if not isinstance(url, str) or not url.strip():
+        raise ValidationError("URL must be a non-empty string")
+    clean = url.strip()
+    if clean.startswith("about:"):
+        return
+    parsed = urlparse(clean)
+    if parsed.scheme.lower() not in ("http", "https", "about"):
+        raise ValidationError(f"invalid URL scheme '{parsed.scheme}' (allowed: http, https, about)")
+    if parsed.scheme.lower() in ("http", "https") and not parsed.netloc:
+        raise ValidationError(f"invalid URL format: '{clean}'")
+
+
+def validate_launch_config(config: LaunchConfig, profile_engine: Optional[str] = None) -> None:
+    effective_engine = config.engine or profile_engine or "direct"
+
+    if config.default_tabs is not None and config.default_tabs < 1:
+        raise ValidationError("default_tabs must be at least 1")
+
+    for u in config.start_urls:
+        validate_url(u)
+
+    if config.engine is not None and config.engine not in {"direct", "playwright"}:
+        raise ValidationError(f"invalid engine '{config.engine}', must be 'direct' or 'playwright'")
+
+    if config.browser is not None:
+        clean_browser = config.browser.strip().lower()
+        if effective_engine == "direct":
+            if clean_browser == "chromium" and clean_browser not in _ALLOWED_DIRECT_BROWSERS:
+                pass
+            if clean_browser in ("chrome-beta", "msedge-beta", "msedge-dev"):
+                raise ValidationError(f"browser channel '{config.browser}' is not supported on engine 'direct'")
+        elif effective_engine == "playwright":
+            if clean_browser not in _ALLOWED_PLAYWRIGHT_CHANNELS and not Path(config.browser).exists():
+                raise ValidationError(f"unsupported Playwright browser channel '{config.browser}'")
+
+    if config.window_width is not None and config.window_width < 100:
+        raise ValidationError("window_width must be at least 100")
+
+    if config.window_height is not None and config.window_height < 100:
+        raise ValidationError("window_height must be at least 100")
+
+    if (config.window_width is None and config.window_height is not None) or (config.window_width is not None and config.window_height is None):
+        raise ValidationError("both window_width and window_height must be specified together")
 
 
 def validate_timestamp(timestamp_str: str, field_name: str) -> None:
@@ -39,6 +92,9 @@ def validate_required_fields(profile: Profile) -> None:
         raise ValidationError(
             f"invalid engine '{profile.engine}', must be 'direct' or 'playwright'"
         )
+    if profile.launch_config is not None:
+        validate_launch_config(profile.launch_config, profile.engine)
+
 
 
 def validate_duplicate_ids(profiles: List[Profile]) -> None:

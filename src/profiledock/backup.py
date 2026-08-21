@@ -183,6 +183,7 @@ def create_backup_archive(
                     "created_at": p.created_at,
                     "last_launched_at": p.last_launched_at,
                     "engine": p.engine,
+                    "launch_config": p.launch_config.to_dict() if p.launch_config else None,
                     "file_count": len(files_manifest),
                     "total_bytes": p_bytes,
                     "files": {
@@ -190,6 +191,7 @@ def create_backup_archive(
                         for rel_path, (size, checksum) in files_manifest.items()
                     },
                 }
+
                 manifest_profiles.append(profile_info)
 
                 grand_total_files += len(files_manifest)
