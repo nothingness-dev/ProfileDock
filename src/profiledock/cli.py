@@ -50,6 +50,7 @@ from .process_manager import (
 )
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from .storage import StorageError
+from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
 
 app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
@@ -59,6 +60,7 @@ app.add_typer(config_app, name="config")
 EXIT_SUCCESS = 0
 EXIT_USER_ERROR = 1
 _paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
+_paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared", default=False)
 
 
 def version_callback(value: bool) -> None:
@@ -82,18 +84,30 @@ def main(
         callback=version_callback,
         is_eager=True,
     ),
-) -> None:
+    ) -> None:
     try:
-        _paths.set(resolve_data_root(data_root))
+        _paths.set(resolve_data_root(data_root, prepare=False))
+        _paths_prepared.set(False)
     except DataRootError as exc:
         fail(str(exc))
 
 
-def manager() -> ProfileManager:
+def selected_paths() -> DataPaths:
     paths = _paths.get()
     if paths is None:
-        paths = resolve_data_root()
+        paths = resolve_data_root(prepare=False)
         _paths.set(paths)
+    if not _paths_prepared.get():
+        try:
+            paths.prepare()
+        except (DataRootError, OSError) as exc:
+            fail(f"cannot prepare data root: {exc}")
+        _paths_prepared.set(True)
+    return paths
+
+
+def manager() -> ProfileManager:
+    paths = selected_paths()
     return ProfileManager(paths)
 
 
@@ -112,8 +126,9 @@ def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
         if clean not in ("direct", "playwright"):
             fail("engine must be 'direct' or 'playwright'")
         return clean
-    if profile.launch_config and profile.launch_config.engine:
-        return profile.launch_config.engine
+    launch_config = getattr(profile, "launch_config", None)
+    if launch_config and launch_config.engine:
+        return launch_config.engine
     profile_engine = getattr(profile, "engine", None)
     if profile_engine:
         if profile_engine not in ("direct", "playwright"):
@@ -137,8 +152,9 @@ def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
         "last_launched_at": profile.last_launched_at,
         "engine": resolve_engine(None, profile),
     }
-    if profile.launch_config is not None:
-        data["launch_config"] = profile.launch_config.to_dict()
+    launch_config = getattr(profile, "launch_config", None)
+    if launch_config is not None:
+        data["launch_config"] = launch_config.to_dict()
     if status is not None:
         data["status"] = status
     return data
@@ -251,7 +267,7 @@ def config_show(
         profile = manager().resolve(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
         fail(str(exc))
-    cfg = profile.launch_config or LaunchConfig()
+    cfg = getattr(profile, "launch_config", None) or LaunchConfig()
     if json_output:
         typer.echo(json.dumps(cfg.to_dict(), indent=2))
         return
@@ -290,8 +306,12 @@ def config_set(
             profile_manager.update_launch_config(profile_id, engine=val_eng)
             typer.echo(f"Set engine to '{val_eng}' for profile '{profile.name}' ({profile.id})")
         elif clean_setting == "browser":
-            profile_manager.update_launch_config(profile_id, browser=clean_val)
-            typer.echo(f"Set browser to '{clean_val}' for profile '{profile.name}' ({profile.id})")
+            effective_engine = resolve_engine(None, profile)
+            candidate = Path(clean_val).expanduser()
+            stored_browser = str(candidate.resolve()) if candidate.is_file() else clean_val.lower()
+            validate_browser(stored_browser, effective_engine, require_executable=True)
+            profile_manager.update_launch_config(profile_id, browser=stored_browser)
+            typer.echo(f"Set browser to '{stored_browser}' for profile '{profile.name}' ({profile.id})")
         elif clean_setting == "window-size":
             parts = clean_val.lower().split("x")
             if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
@@ -303,7 +323,7 @@ def config_set(
             typer.echo(f"Set window-size to {w}x{h} for profile '{profile.name}' ({profile.id})")
         else:
             fail(f"unknown setting '{setting}' (valid: default-tabs, engine, browser, window-size)")
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail(str(exc))
 
 
@@ -314,7 +334,7 @@ def config_add_url(
 ) -> None:
     try:
         profile = manager().add_start_url(profile_id, url)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail(str(exc))
     typer.echo(f"Added start URL '{url}' to profile '{profile.name}' ({profile.id})")
 
@@ -429,7 +449,7 @@ def launch(
     try:
         profile_manager = manager()
         profile = profile_manager.resolve(profile_id)
-        cfg = profile.launch_config
+        cfg = getattr(profile, "launch_config", None)
         active_engine = resolve_engine(engine, profile)
 
         target_tabs = tabs
@@ -440,48 +460,54 @@ def launch(
         if target_tabs < 1:
             fail("tab count must be at least 1")
 
-        target_urls = url if url else (cfg.start_urls if cfg and cfg.start_urls else [])
-        for u in target_urls:
-            if not u.startswith("about:"):
-                from urllib.parse import urlparse
-                parsed = urlparse(u)
-                if parsed.scheme.lower() not in ("http", "https", "about"):
-                    fail(f"invalid URL scheme '{parsed.scheme}' (allowed: http, https, about)")
+        target_urls = list(url) if url else list(cfg.start_urls if cfg and cfg.start_urls else [])
+        target_urls = [item.strip() for item in target_urls]
+        for target_url in target_urls:
+            validate_url(target_url)
+        if len(target_urls) > target_tabs:
+            fail("number of start URLs cannot exceed the requested tab count")
 
         target_browser = browser if browser is not None else (cfg.browser if cfg else None)
+        if target_browser is not None:
+            candidate = Path(target_browser).expanduser()
+            target_browser = str(candidate.resolve()) if candidate.is_file() else target_browser.strip().lower()
+            validate_browser(target_browser, active_engine, require_executable=True)
         width = cfg.window_width if cfg else None
         height = cfg.window_height if cfg else None
 
-        if not Path(profile.data_dir).exists():
+        if not Path(profile.data_dir).is_dir():
             fail("profile data directory is missing")
 
         if active_engine == "direct":
-            exec_path = Path(target_browser) if target_browser and Path(target_browser).exists() else None
-            start_direct_chrome(
-                profile.data_dir,
-                target_tabs,
-                runtime_dir=runtime_path(profile),
-                executable_path=exec_path,
-                start_urls=target_urls,
-                window_width=width,
-                window_height=height,
-            )
+            exec_path = Path(target_browser) if target_browser and Path(target_browser).is_file() else None
+            direct_options = {"runtime_dir": runtime_path(profile)}
+            if exec_path is not None:
+                direct_options["executable_path"] = exec_path
+            elif target_browser is not None:
+                direct_options["browser"] = target_browser
+            if target_urls:
+                direct_options["start_urls"] = target_urls
+            if width is not None and height is not None:
+                direct_options["window_width"] = width
+                direct_options["window_height"] = height
+            start_direct_chrome(profile.data_dir, target_tabs, **direct_options)
         else:
-            start_controller(
-                profile.data_dir,
-                target_tabs,
-                runtime_dir=runtime_path(profile),
-                browser_channel=target_browser,
-                start_urls=target_urls,
-                window_width=width,
-                window_height=height,
-            )
+            controller_options = {"runtime_dir": runtime_path(profile)}
+            if target_browser is not None:
+                controller_options["browser_channel"] = target_browser
+            if target_urls:
+                controller_options["start_urls"] = target_urls
+            if width is not None and height is not None:
+                controller_options["window_width"] = width
+                controller_options["window_height"] = height
+            start_controller(profile.data_dir, target_tabs, **controller_options)
     except (
         ProfileNotFoundError,
         AmbiguousProfileError,
         StorageError,
         ProfileRunningError,
         BrowserLaunchError,
+        ValidationError,
         ValueError,
     ) as exc:
         fail(str(exc))
@@ -538,7 +564,7 @@ def doctor(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
-    paths = _paths.get() or resolve_data_root()
+    paths = selected_paths()
     root = paths.root
 
     if (reattach_orphans or recreate_missing) and not repair:
@@ -614,7 +640,7 @@ def migrate(
         help="Output migration report in JSON format.",
     ),
 ) -> None:
-    paths = _paths.get() or resolve_data_root()
+    paths = selected_paths()
     if remove_source and not yes:
         if json_output:
             report = failure_report(
@@ -686,7 +712,7 @@ def backup(
         help="Output backup report in JSON format.",
     ),
 ) -> None:
-    paths = _paths.get() or resolve_data_root()
+    paths = selected_paths()
     profile_manager = manager()
 
     if not all_profiles and profile_id is None:
@@ -748,7 +774,7 @@ def restore(
         help="Output restore report in JSON format.",
     ),
 ) -> None:
-    paths = _paths.get() or resolve_data_root()
+    paths = selected_paths()
 
     try:
         report = restore_backup_archive(

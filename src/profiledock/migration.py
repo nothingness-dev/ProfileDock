@@ -151,6 +151,7 @@ def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> List[P
                 data_dir=str(source_path),
                 last_launched_at=profile.last_launched_at,
                 engine=profile.engine,
+                launch_config=profile.launch_config,
             )
         )
     try:
@@ -238,6 +239,7 @@ def _identical_profile(source: Profile, destination: Profile) -> bool:
         and source.created_at == destination.created_at
         and source.last_launched_at == destination.last_launched_at
         and source.engine == destination.engine
+        and source.launch_config == destination.launch_config
     )
 
 

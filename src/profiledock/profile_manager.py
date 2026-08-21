@@ -1,7 +1,7 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from .data_root import DataPaths, resolve_data_root
 from .models import LaunchConfig, Profile, utc_now
@@ -15,7 +15,7 @@ from .storage import (
     set_engine_atomic,
     set_launch_config_atomic,
 )
-from .validation import ValidationError, validate_launch_config
+from .validation import validate_launch_config
 
 
 class ProfileNotFoundError(Exception):
@@ -142,7 +142,7 @@ class ProfileManager:
     def set_launch_config(self, identifier: str, config: Optional[LaunchConfig]) -> Profile:
         profile = self.resolve(identifier)
         if config is not None:
-            validate_launch_config(config, profile.engine)
+            validate_launch_config(config, profile.engine, require_browser_executable=True)
         set_launch_config_atomic(profile.id, config, self.profiles_file, self.profiles_dir, self.backup_file)
         return self.get(profile.id)
 
@@ -155,8 +155,9 @@ class ProfileManager:
         current = profile.launch_config or LaunchConfig()
         cfg_dict = current.to_dict()
         for k, v in kwargs.items():
-            if k in cfg_dict:
-                cfg_dict[k] = v
+            if k not in cfg_dict:
+                raise ValueError(f"unknown launch configuration field: {k}")
+            cfg_dict[k] = v
         new_cfg = LaunchConfig.from_dict(cfg_dict)
         return self.set_launch_config(identifier, new_cfg)
 

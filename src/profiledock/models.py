@@ -43,13 +43,17 @@ class LaunchConfig:
         for item in start_urls_raw:
             if not isinstance(item, str):
                 raise ValueError("start_urls items must be strings")
-            start_urls.append(item)
+            start_urls.append(item.strip())
         engine = value.get("engine")
         if engine is not None and not isinstance(engine, str):
             raise ValueError("engine must be a string or null")
+        if engine is not None:
+            engine = engine.strip().lower()
         browser = value.get("browser")
         if browser is not None and not isinstance(browser, str):
             raise ValueError("browser must be a string or null")
+        if browser is not None:
+            browser = browser.strip()
         window_width = value.get("window_width")
         if window_width is not None and (type(window_width) is not int or window_width < 100):
             raise ValueError("window_width must be an integer >= 100 or null")
@@ -110,8 +114,6 @@ class Profile:
             engine=engine,
             launch_config=launch_config,
         )
-
-
 
 @dataclass
 class MetadataDocument:

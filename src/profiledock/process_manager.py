@@ -10,7 +10,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from uuid import uuid4
 
 _MAX_ERROR_BYTES = 4096
@@ -378,19 +378,29 @@ def start_direct_chrome(
     tabs: int,
     runtime_dir: Optional[Path] = None,
     executable_path: Optional[Path] = None,
+    browser: Optional[str] = None,
     start_urls: Optional[List[str]] = None,
     window_width: Optional[int] = None,
     window_height: Optional[int] = None,
 ) -> Dict[str, Any]:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
+    if executable_path is not None and browser is not None:
+        raise ValueError("specify either executable_path or browser, not both")
+    if (window_width is None) != (window_height is None):
+        raise ValueError("both window_width and window_height must be specified together")
+    if window_width is not None and (window_width < 100 or window_height is None or window_height < 100):
+        raise ValueError("window width and height must be at least 100")
+    urls = list(start_urls or [])
+    if len(urls) > tabs:
+        raise ValueError("number of start URLs cannot exceed the requested tab count")
     if not Path(data_dir).is_dir():
         raise BrowserLaunchError(
             "profile data directory is missing or invalid",
             "invalid_data_directory",
         )
-    browser_bin = executable_path if executable_path is not None else _system_browser_executable()
-    if browser_bin is None or not Path(browser_bin).exists():
+    browser_bin = executable_path if executable_path is not None else _system_browser_executable(browser)
+    if browser_bin is None or not Path(browser_bin).is_file():
         raise BrowserLaunchError(
             "Google Chrome, Chromium, or Brave executable not found on system",
             "browser_not_found",
@@ -428,11 +438,8 @@ def start_direct_chrome(
     except FileExistsError as exc:
         raise ProfileRunningError("profile is already running") from exc
 
-    urls = list(start_urls or [])
     if len(urls) < tabs:
         urls.extend(["about:blank" for _ in range(tabs - len(urls))])
-    elif not urls:
-        urls = ["about:blank" for _ in range(tabs)]
 
     args = [
         str(browser_bin),
@@ -500,6 +507,13 @@ def start_controller(
 ) -> Dict[str, Any]:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
+    if (window_width is None) != (window_height is None):
+        raise ValueError("both window_width and window_height must be specified together")
+    if window_width is not None and (window_width < 100 or window_height is None or window_height < 100):
+        raise ValueError("window width and height must be at least 100")
+    urls = list(start_urls or [])
+    if len(urls) > tabs:
+        raise ValueError("number of start URLs cannot exceed the requested tab count")
     if not Path(data_dir).is_dir():
         raise BrowserLaunchError(
             "profile data directory is missing or invalid",
@@ -524,6 +538,10 @@ def start_controller(
         "token": token,
         "tabs": tabs,
         "status": "starting",
+        "browser_channel": browser_channel,
+        "start_urls": urls,
+        "window_width": window_width,
+        "window_height": window_height,
     }
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     try:
@@ -547,14 +565,6 @@ def start_controller(
     ]
     if headless:
         command.append("--headless")
-    if browser_channel:
-        command.extend(["--browser-channel", browser_channel])
-    if window_width is not None and window_height is not None:
-        command.extend(["--window-size", f"{window_width},{window_height}"])
-    if start_urls:
-        for u in start_urls:
-            command.extend(["--url", u])
-
     try:
         process = subprocess.Popen(
             command,
@@ -741,7 +751,7 @@ def _launch_context(
         kwargs["args"] = [f"--window-size={window_width},{window_height}"]
 
     if channel_override:
-        if Path(channel_override).exists():
+        if Path(channel_override).is_file():
             return playwright.chromium.launch_persistent_context(data_dir, executable_path=channel_override, **kwargs), channel_override
         return playwright.chromium.launch_persistent_context(data_dir, channel=channel_override, **kwargs), channel_override
 
@@ -769,51 +779,69 @@ def _launch_context(
 
 
 
-def _system_browser_executable() -> Optional[Path]:
-    candidates = []
+def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path]:
+    candidates: Dict[str, List[Path]] = {"chrome": [], "chromium": [], "brave": []}
     if sys.platform == "win32":
         for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
             base = os.environ.get(variable)
             if base:
-                candidates.append(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
-                candidates.append(Path(base) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe")
+                candidates["chrome"].append(
+                    Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe"
+                )
+                candidates["brave"].append(
+                    Path(base) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe"
+                )
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
-            candidates.append(Path(local_app_data) / "Chromium" / "Application" / "chrome.exe")
-        candidates.extend(
-            Path(value)
-            for value in filter(
-                None,
-                (
-                    shutil.which("chrome"),
-                    shutil.which("google-chrome"),
-                    shutil.which("chromium"),
-                    shutil.which("chromium-browser"),
-                    shutil.which("brave"),
-                    shutil.which("brave-browser"),
-                ),
+            candidates["chromium"].append(
+                Path(local_app_data) / "Chromium" / "Application" / "chrome.exe"
             )
-        )
+        commands = {
+            "chrome": ("chrome", "google-chrome", "google-chrome-stable"),
+            "chromium": ("chromium", "chromium-browser"),
+            "brave": ("brave", "brave-browser"),
+        }
+        for group, names in commands.items():
+            candidates[group].extend(
+                Path(value) for value in (shutil.which(name) for name in names) if value
+            )
     elif sys.platform == "darwin":
-        candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
-        candidates.append(Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
-        candidates.append(Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"))
-    else:
-        candidates.extend(
-            Path(value)
-            for value in filter(
-                None,
-                (
-                    shutil.which("google-chrome"),
-                    shutil.which("google-chrome-stable"),
-                    shutil.which("chromium"),
-                    shutil.which("chromium-browser"),
-                    shutil.which("brave-browser"),
-                    shutil.which("brave"),
-                ),
-            )
+        candidates["chrome"].append(
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         )
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
+        candidates["chromium"].append(
+            Path("/Applications/Chromium.app/Contents/MacOS/Chromium")
+        )
+        candidates["brave"].append(
+            Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")
+        )
+    else:
+        commands = {
+            "chrome": ("google-chrome", "google-chrome-stable", "chrome"),
+            "chromium": ("chromium", "chromium-browser"),
+            "brave": ("brave-browser", "brave"),
+        }
+        for group, names in commands.items():
+            candidates[group].extend(
+                Path(value) for value in (shutil.which(name) for name in names) if value
+            )
+    aliases = {
+        "chrome": "chrome",
+        "google-chrome": "chrome",
+        "google-chrome-stable": "chrome",
+        "chromium": "chromium",
+        "chromium-browser": "chromium",
+        "brave": "brave",
+        "brave-browser": "brave",
+    }
+    selected_group = aliases.get(preferred.lower()) if preferred else None
+    if preferred and selected_group is None:
+        return None
+    groups = [selected_group] if selected_group else ["chrome", "chromium", "brave"]
+    return next(
+        (candidate for group in groups for candidate in candidates[group] if candidate.is_file()),
+        None,
+    )
 
 
 def _controller(
@@ -828,6 +856,15 @@ def _controller(
     start_urls: Optional[List[str]] = None,
 ) -> int:
     err = path.parent / "controller.error"
+    initial_state = _read_state(path) or {}
+    if browser_channel is None and isinstance(initial_state.get("browser_channel"), str):
+        browser_channel = initial_state["browser_channel"]
+    if window_width is None and type(initial_state.get("window_width")) is int:
+        window_width = initial_state["window_width"]
+    if window_height is None and type(initial_state.get("window_height")) is int:
+        window_height = initial_state["window_height"]
+    if start_urls is None and isinstance(initial_state.get("start_urls"), list):
+        start_urls = [value for value in initial_state["start_urls"] if isinstance(value, str)]
     try:
         from playwright.sync_api import Error as PlaywrightError, sync_playwright
     except ImportError as exc:
@@ -855,7 +892,7 @@ def _controller(
             )
             try:
                 urls = list(start_urls or [])
-                target_pages = max(tabs, len(urls)) if urls else tabs
+                target_pages = tabs
 
                 while len(context.pages) < target_pages:
                     context.new_page()

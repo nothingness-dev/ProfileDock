@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator, List, Optional, Union
 
-from .models import MetadataDocument, METADATA_SCHEMA_VERSION, Profile
+from .models import LaunchConfig, MetadataDocument, METADATA_SCHEMA_VERSION, Profile
 from .validation import ValidationError, validate_metadata_document
 
 
@@ -456,7 +456,7 @@ def set_engine_atomic(
 
 def set_launch_config_atomic(
     profile_id: str,
-    launch_config: Optional[Any],
+    launch_config: Optional[LaunchConfig],
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
