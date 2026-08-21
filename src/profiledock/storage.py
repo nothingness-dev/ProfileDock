@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Generator, List, Optional, Union
 
+from .data_root import DataRootError, ensure_within_root
 from .models import LaunchConfig, MetadataDocument, METADATA_SCHEMA_VERSION, Profile
 from .validation import ValidationError, validate_metadata_document
 
@@ -21,6 +22,28 @@ class MetadataCorruptedError(StorageError):
 
 class MetadataLockedError(StorageError):
     pass
+
+
+def _metadata_root(path: Path) -> Path:
+    absolute = path.expanduser().absolute()
+    return absolute.parent.parent if absolute.parent.name == "metadata" else absolute.parent
+
+
+def _validate_metadata_paths(
+    path: Path,
+    profile_root: Path,
+    backup_path: Union[str, Path, None] = None,
+) -> Path:
+    root = profile_root.expanduser().absolute().parent
+    try:
+        ensure_within_root(profile_root, root)
+        ensure_within_root(path, root)
+        ensure_within_root(path.with_suffix(".lock"), root)
+        if backup_path is not None:
+            ensure_within_root(Path(backup_path), root)
+    except DataRootError as exc:
+        raise StorageError(f"unsafe metadata storage path: {exc}") from exc
+    return root.resolve(strict=False)
 
 
 def _lock_file(fd: Any) -> None:
@@ -57,7 +80,13 @@ def _unlock_file(fd: Any) -> None:
 def metadata_lock(
     metadata_path: Union[str, Path], timeout: float = 5.0
 ) -> Generator[None, None, None]:
-    lock_path = Path(metadata_path).with_suffix(".lock")
+    metadata_path = Path(metadata_path)
+    root = _metadata_root(metadata_path)
+    try:
+        ensure_within_root(metadata_path, root)
+        lock_path = ensure_within_root(metadata_path.with_suffix(".lock"), root)
+    except DataRootError as exc:
+        raise MetadataLockedError(f"unsafe metadata lock path: {exc}") from exc
     lock_fd = None
     raw_fd = None
     try:
@@ -134,7 +163,13 @@ def _write_all(fd: int, payload: bytes) -> None:
         offset += written
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def _atomic_write(path: Path, content: str, root: Optional[Path] = None) -> None:
+    if root is None:
+        root = _metadata_root(path)
+    try:
+        path = ensure_within_root(path, root)
+    except DataRootError as exc:
+        raise StorageError(f"unsafe metadata write path: {exc}") from exc
     dir_path = path.parent
     dir_path.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
@@ -174,12 +209,22 @@ def _atomic_write(path: Path, content: str) -> None:
                 pass
 
 
-def _backup_metadata(path: Path, backup_path: Union[str, Path, None] = None) -> None:
+def _backup_metadata(
+    path: Path,
+    backup_path: Union[str, Path, None] = None,
+    root: Optional[Path] = None,
+) -> None:
     backup_path = Path(backup_path) if backup_path is not None else path.with_suffix(".json.bak")
+    root = root or _metadata_root(path)
+    try:
+        ensure_within_root(path, root)
+        backup_path = ensure_within_root(backup_path, root)
+    except DataRootError as exc:
+        raise StorageError(f"unsafe metadata backup path: {exc}") from exc
     if path.exists():
         try:
             backup_path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write(backup_path, path.read_text(encoding="utf-8"))
+            _atomic_write(backup_path, path.read_text(encoding="utf-8"), root)
         except (OSError, StorageError) as exc:
             raise StorageError(f"could not backup {path}: {exc}") from exc
 
@@ -220,6 +265,7 @@ def _migrate_metadata_unlocked(
 ) -> MetadataDocument:
     path = Path(path)
     profile_root = Path(profile_root)
+    root = _validate_metadata_paths(path, profile_root, backup_path)
     if not path.exists():
         return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[])
     data = _read_json_file(path)
@@ -235,9 +281,9 @@ def _migrate_metadata_unlocked(
     profiles = _load_profiles_from_bare_array(data)
     validate_metadata_document(profiles, profile_root)
     if backup:
-        _backup_metadata(path, backup_path)
+        _backup_metadata(path, backup_path, root)
     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
-    _atomic_write(path, json.dumps(doc.to_dict(), indent=2) + "\n")
+    _atomic_write(path, json.dumps(doc.to_dict(), indent=2) + "\n", root)
     return doc
 
 
@@ -287,11 +333,12 @@ def save_metadata(
 ) -> None:
     path = Path(path)
     profile_root = Path(profile_root)
+    root = _validate_metadata_paths(path, profile_root, backup_path)
     with metadata_lock(path):
         validate_metadata_document(doc.profiles, profile_root)
-        _backup_metadata(path, backup_path)
+        _backup_metadata(path, backup_path, root)
         content = json.dumps(doc.to_dict(), indent=2) + "\n"
-        _atomic_write(path, content)
+        _atomic_write(path, content, root)
 
 
 def load_profiles(path: Union[str, Path] = "profiles.json") -> List[Profile]:
@@ -317,6 +364,7 @@ def atomic_update_metadata(
 ) -> MetadataDocument:
     path = Path(path)
     profile_root = Path(profile_root)
+    root = _validate_metadata_paths(path, profile_root, backup_path)
     with metadata_lock(path):
         doc = load_metadata(path)
         original_dict = json.dumps(doc.to_dict(), sort_keys=True)
@@ -325,8 +373,8 @@ def atomic_update_metadata(
         if original_dict == new_dict:
             return new_doc
         validate_metadata_document(new_doc.profiles, profile_root)
-        _backup_metadata(path, backup_path)
-        _atomic_write(path, json.dumps(new_doc.to_dict(), indent=2) + "\n")
+        _backup_metadata(path, backup_path, root)
+        _atomic_write(path, json.dumps(new_doc.to_dict(), indent=2) + "\n", root)
         return new_doc
 
 

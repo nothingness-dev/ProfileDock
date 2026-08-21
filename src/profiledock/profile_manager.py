@@ -3,8 +3,9 @@ import uuid
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-from .data_root import DataPaths, resolve_data_root
+from .data_root import DataPaths, ensure_tree_safe, ensure_within_root, resolve_data_root, validate_path_component
 from .models import LaunchConfig, Profile, utc_now
+from .process_manager import ProfileRunningError, is_active_for_mutation
 from .storage import (
     add_profile_atomic,
     load_metadata,
@@ -37,12 +38,11 @@ class ProfileManager:
         self.backup_file = paths.backup_file
 
     def runtime_path(self, profile_id: str) -> Path:
-        path = (self.runtime_dir / profile_id).resolve(strict=False)
         try:
-            path.relative_to(self.runtime_dir.resolve())
+            validate_path_component(profile_id, "profile id")
+            return ensure_within_root(self.runtime_dir / profile_id, self.root)
         except ValueError as exc:
             raise ValueError("unsafe profile id") from exc
-        return path
 
     def ensure_migrated(self) -> None:
         migrate_metadata(self.profiles_file, self.profiles_dir, backup_path=self.backup_file)
@@ -104,14 +104,23 @@ class ProfileManager:
 
     def delete(self, identifier: str) -> Profile:
         profile = self.resolve(identifier)
-        expected_root = (self.profiles_dir / profile.id).resolve()
+        validate_path_component(profile.id, "profile id")
+        expected_root = ensure_within_root(self.profiles_dir / profile.id, self.root)
         expected_data = expected_root / "browser-data"
-        profile_root = Path(profile.data_dir).parent.resolve()
-        if Path(profile.data_dir).resolve() != expected_data or profile_root != expected_root:
+        profile_data = ensure_within_root(Path(profile.data_dir), self.root)
+        profile_root = profile_data.parent
+        if profile_data != expected_data or profile_root != expected_root:
             raise ValueError("refusing to delete unsafe profile directory")
+        runtime_path = self.runtime_path(profile.id)
+        if is_active_for_mutation(profile.data_dir, runtime_path):
+            raise ProfileRunningError("profile is already running; close it before deletion")
         quarantine = None
         if profile_root.exists():
-            quarantine = self.profiles_dir / f".deleting-{profile.id}-{uuid.uuid4().hex}"
+            ensure_tree_safe(profile_root, self.root)
+            quarantine = ensure_within_root(
+                self.profiles_dir / f".deleting-{profile.id}-{uuid.uuid4().hex}",
+                self.root,
+            )
             profile_root.replace(quarantine)
         try:
             remove_profile_atomic(profile.id, self.profiles_file, self.profiles_dir, self.backup_file)
@@ -120,8 +129,11 @@ class ProfileManager:
                 quarantine.replace(profile_root)
             raise
         if quarantine is not None:
+            ensure_tree_safe(quarantine, self.root)
             shutil.rmtree(quarantine, ignore_errors=False)
-        shutil.rmtree(self.runtime_path(profile.id), ignore_errors=True)
+        if runtime_path.exists():
+            ensure_tree_safe(runtime_path, self.root)
+            shutil.rmtree(runtime_path, ignore_errors=False)
         return profile
 
     def rename(self, identifier: str, new_name: str) -> Profile:

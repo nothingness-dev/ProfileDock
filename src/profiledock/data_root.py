@@ -1,4 +1,5 @@
 import os
+import re
 import stat
 import sys
 from dataclasses import dataclass
@@ -18,6 +19,69 @@ def _is_link(path: Path) -> bool:
     except OSError:
         return False
     return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def validate_path_component(value: str, label: str = "identifier") -> str:
+    if not isinstance(value, str) or re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value
+    ) is None:
+        raise DataRootError(f"unsafe {label}")
+    return value
+
+
+def ensure_within_root(
+    target: Path,
+    root: Path,
+    allow_root: bool = False,
+    reject_links: bool = True,
+) -> Path:
+    root_absolute = Path(root).expanduser().absolute()
+    target_absolute = Path(target).expanduser()
+    if not target_absolute.is_absolute():
+        target_absolute = root_absolute / target_absolute
+    target_absolute = target_absolute.absolute()
+    try:
+        relative = target_absolute.relative_to(root_absolute)
+    except ValueError as exc:
+        raise DataRootError(f"path escapes configured data root: {target}") from exc
+    if any(part == ".." for part in relative.parts):
+        raise DataRootError(f"path traversal is not allowed: {target}")
+    if not relative.parts and not allow_root:
+        raise DataRootError("refusing to target the configured data root")
+    if reject_links:
+        if _is_link(root_absolute):
+            raise DataRootError(f"configured data root is a link or reparse point: {root}")
+        current = root_absolute
+        for part in relative.parts:
+            current = current / part
+            if _is_link(current):
+                raise DataRootError(f"path contains a link or reparse point: {current}")
+    try:
+        resolved_root = root_absolute.resolve(strict=False)
+        resolved_target = target_absolute.resolve(strict=False)
+        resolved_target.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise DataRootError(f"resolved path escapes configured data root: {target}") from exc
+    if resolved_target == resolved_root and not allow_root:
+        raise DataRootError("refusing to target the configured data root")
+    return resolved_target
+
+
+def ensure_tree_safe(target: Path, root: Path) -> Path:
+    resolved = ensure_within_root(target, root)
+    if not resolved.exists():
+        return resolved
+    if not resolved.is_dir() or _is_link(resolved):
+        raise DataRootError(f"unsafe directory target: {target}")
+    for current, directories, files in os.walk(resolved, followlinks=False):
+        current_path = Path(current)
+        ensure_within_root(current_path, root)
+        for name in directories + files:
+            child = current_path / name
+            if _is_link(child):
+                raise DataRootError(f"directory tree contains a link or reparse point: {child}")
+            ensure_within_root(child, root)
+    return resolved
 
 
 @dataclass(frozen=True)
@@ -70,6 +134,7 @@ class DataPaths:
         for path in (self.profiles_file, self.backup_file, self.profiles_file.with_suffix(".lock")):
             if _is_link(path) or (path.exists() and not path.is_file()):
                 raise DataRootError(f"managed data file is unsafe: {path}")
+            ensure_within_root(path, root)
 
 
 def platform_data_root(
@@ -108,7 +173,10 @@ def resolve_data_root(
     expanded = Path(os.path.expandvars(str(selected))).expanduser()
     if not expanded.is_absolute():
         expanded = Path.cwd() / expanded
-    root = expanded.resolve(strict=False)
+    expanded_absolute = expanded.absolute()
+    if _is_link(expanded_absolute):
+        raise DataRootError("data root cannot be a link or reparse point")
+    root = expanded_absolute.resolve(strict=False)
     anchor = Path(root.anchor)
     user_home = (home or Path.home()).resolve(strict=False)
     if root == anchor or root == user_home:

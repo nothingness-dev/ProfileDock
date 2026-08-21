@@ -361,7 +361,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                     _unlink_quietly(path)
                 return "stale"
             pid = state["pid"]
-            if pid > 0 and _alive(pid):
+            if pid > 0 and _is_matching_process(pid, state.get("process_create_time")):
                 if state.get("closing"):
                     return "closing"
                 return "running"
@@ -408,6 +408,67 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
 
 def is_running(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
     return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in ("starting", "running", "closing")
+
+
+def _controller_available(state: Dict[str, Any]) -> bool:
+    try:
+        port = int(state.get("port", 0))
+        token = state.get("token", "")
+        if port < 1 or not isinstance(token, str) or not token:
+            return False
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5) as connection:
+            if state.get("legacy_controller"):
+                return True
+            connection.settimeout(0.5)
+            connection.sendall(("probe:" + token + "\n").encode("utf-8"))
+            return connection.recv(16) == b"ok\n"
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
+    path = state_path(data_dir, runtime_dir)
+    state = _read_state(path)
+    if not state:
+        return False
+    profile_id = Path(data_dir).parent.name
+    if state.get("engine") == "direct":
+        if not _valid_direct_state(state, profile_id):
+            return False
+        pid = int(state.get("pid", -1))
+        launcher_pid = int(state.get("launcher_pid", -1))
+        return _is_matching_process(pid, state.get("process_create_time")) or (
+            pid == 0 and _alive(launcher_pid)
+        )
+    upgraded = dict(state)
+    if "protocol_version" not in upgraded:
+        try:
+            legacy_pid = int(upgraded.get("pid", 0))
+            legacy_port = int(upgraded.get("port", 0))
+            modified_at = path.stat().st_mtime
+        except (OSError, TypeError, ValueError):
+            return False
+        legacy_token = upgraded.get("token")
+        if legacy_pid < 1 or legacy_port < 1 or not isinstance(legacy_token, str):
+            return False
+        upgraded.update(
+            {
+                "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+                "profile_id": profile_id,
+                "controller_pid": legacy_pid,
+                "controller_started_at": datetime.fromtimestamp(
+                    modified_at, timezone.utc
+                ).isoformat(),
+                "legacy_controller": True,
+            }
+        )
+    if not _valid_state(upgraded, profile_id):
+        return False
+    controller_pid = int(upgraded.get("controller_pid", -1))
+    launcher_pid = int(upgraded.get("launcher_pid", -1))
+    return _alive(controller_pid) or _controller_available(upgraded) or (
+        controller_pid <= 0 and _alive(launcher_pid)
+    )
 
 
 def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
@@ -695,6 +756,16 @@ def start_controller(
 
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
     path = state_path(data_dir, runtime_dir)
+    initial_state = _read_state(path)
+    if initial_state and initial_state.get("engine") == "direct":
+        initial_pid = int(initial_state.get("pid", -1))
+        if initial_pid > 0 and _alive(initial_pid) and not _is_matching_process(
+            initial_pid, initial_state.get("process_create_time")
+        ):
+            _unlink_quietly(path)
+            raise ProfileRunningError(
+                "profile process is not running (PID was reused by another process)"
+            )
     if not is_running(data_dir, runtime_dir):
         _unlink_quietly(path)
         raise ProfileRunningError("profile is not running")
@@ -818,8 +889,15 @@ def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
                     pass
                 continue
             supplied = command.decode("utf-8", errors="replace").rstrip("\r\n")
-            expected = "close:" + token
-            if hmac.compare_digest(supplied, expected):
+            close_command = "close:" + token
+            probe_command = "probe:" + token
+            if hmac.compare_digest(supplied, probe_command):
+                try:
+                    connection.sendall(b"ok\n")
+                except OSError:
+                    pass
+                continue
+            if hmac.compare_digest(supplied, close_command):
                 try:
                     connection.sendall(b"ok\n")
                 except OSError:

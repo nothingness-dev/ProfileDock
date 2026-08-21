@@ -7,9 +7,9 @@ import shutil
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
-from .data_root import DataPaths, _is_link
+from .data_root import DataPaths, DataRootError, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
-from .process_manager import _alive
+from .process_manager import _alive, is_active_for_mutation
 from .storage import (
     _atomic_write,
     _backup_metadata,
@@ -114,6 +114,14 @@ def _detect_source_layout(source_root: Path) -> SourceLayout:
         not runtime_dir.is_dir() or _is_link(runtime_dir)
     ):
         raise MigrationError("source runtime directory is unsafe")
+    try:
+        ensure_within_root(metadata_file, root)
+        ensure_within_root(profiles_dir, root)
+        ensure_within_root(backup_file, root)
+        if runtime_dir is not None:
+            ensure_within_root(runtime_dir, root)
+    except DataRootError as exc:
+        raise MigrationError(f"source layout escapes its root: {exc}") from exc
     return SourceLayout(root, metadata_file, profiles_dir, runtime_dir, backup_file)
 
 
@@ -131,6 +139,10 @@ def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> List[P
     normalized = []
     names: Set[str] = set()
     for profile in profiles:
+        try:
+            validate_path_component(profile.id, "profile id")
+        except DataRootError as exc:
+            raise MigrationError(f"invalid source profile id: {profile.id}") from exc
         source_path = Path(profile.data_dir)
         if not source_path.is_absolute():
             source_path = layout.root / source_path
@@ -188,7 +200,11 @@ def _source_state_paths(layout: SourceLayout, profile_id: str) -> List[Path]:
 
 
 def _source_profile_running(layout: SourceLayout, profile_id: str) -> bool:
+    validate_path_component(profile_id, "profile id")
+    data_dir = layout.profiles_dir / profile_id / "browser-data"
     for path in _source_state_paths(layout, profile_id):
+        if is_active_for_mutation(str(data_dir), path.parent):
+            return True
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError):
@@ -272,17 +288,85 @@ def _validate_removal_scope(layout: SourceLayout, profiles: List[Profile]) -> No
 
 def _remove_source(layout: SourceLayout, profiles: List[Profile]) -> None:
     _validate_removal_scope(layout, profiles)
+    staged: List[Tuple[Path, Path, bool]] = []
     for profile in profiles:
         profile_dir = layout.profiles_dir / profile.id
         if profile_dir.exists():
-            shutil.rmtree(profile_dir)
+            ensure_tree_safe(profile_dir, layout.root)
+            staged.append(
+                (
+                    profile_dir,
+                    ensure_within_root(
+                        layout.profiles_dir / f".removing-{profile.id}-{uuid4().hex}",
+                        layout.root,
+                    ),
+                    True,
+                )
+            )
         if layout.runtime_dir is not None:
             runtime_profile = layout.runtime_dir / profile.id
             if runtime_profile.exists():
-                shutil.rmtree(runtime_profile)
-    layout.metadata_file.unlink()
+                ensure_tree_safe(runtime_profile, layout.root)
+                staged.append(
+                    (
+                        runtime_profile,
+                        ensure_within_root(
+                            layout.runtime_dir / f".removing-{profile.id}-{uuid4().hex}",
+                            layout.root,
+                        ),
+                        True,
+                    )
+                )
+    ensure_within_root(layout.metadata_file, layout.root)
+    staged.append(
+        (
+            layout.metadata_file,
+            ensure_within_root(
+                layout.metadata_file.with_name(
+                    f".{layout.metadata_file.name}.removing-{uuid4().hex}"
+                ),
+                layout.root,
+            ),
+            False,
+        )
+    )
     if layout.backup_file.exists():
-        layout.backup_file.unlink()
+        ensure_within_root(layout.backup_file, layout.root)
+        staged.append(
+            (
+                layout.backup_file,
+                ensure_within_root(
+                    layout.backup_file.with_name(
+                        f".{layout.backup_file.name}.removing-{uuid4().hex}"
+                    ),
+                    layout.root,
+                ),
+                False,
+            )
+        )
+    moved: List[Tuple[Path, Path, bool]] = []
+    try:
+        for original, quarantine, is_directory in staged:
+            original.replace(quarantine)
+            moved.append((original, quarantine, is_directory))
+    except Exception:
+        for original, quarantine, _ in reversed(moved):
+            if quarantine.exists() and not original.exists():
+                quarantine.replace(original)
+        raise
+    for _, quarantine, is_directory in moved:
+        if is_directory:
+            try:
+                ensure_tree_safe(quarantine, layout.root)
+                shutil.rmtree(quarantine, ignore_errors=False)
+            except (DataRootError, OSError):
+                pass
+        else:
+            try:
+                ensure_within_root(quarantine, layout.root)
+                quarantine.unlink(missing_ok=True)
+            except (DataRootError, OSError):
+                pass
     for directory in (layout.profiles_dir, layout.runtime_dir):
         if directory is not None and directory.exists():
             try:
@@ -384,12 +468,26 @@ def migrate_project(
             if stale_temporary:
                 raise ConflictError("conflict: incomplete destination migration exists")
             for profile in to_migrate:
-                final_profile = destination_profiles / profile.id
+                validate_path_component(profile.id, "profile id")
+                final_profile = ensure_within_root(
+                    destination_profiles / profile.id, destination_root
+                )
+                destination_runtime = ensure_within_root(
+                    destination_paths.runtime_dir / profile.id, destination_root
+                )
+                if is_active_for_mutation(
+                    str(final_profile / "browser-data"), destination_runtime
+                ):
+                    raise ConflictError(
+                        f"conflict: destination runtime state for profile '{profile.id}' is active"
+                    )
                 if final_profile.exists() or _is_link(final_profile):
                     raise ConflictError(
                         f"conflict: destination directory for profile '{profile.id}' already exists"
                     )
-                temporary = destination_profiles / f".m-{uuid4().hex[:12]}"
+                temporary = ensure_within_root(
+                    destination_profiles / f".m-{uuid4().hex[:12]}", destination_root
+                )
                 temporary.mkdir(mode=0o700)
                 temporary_data = temporary / "browser-data"
                 temporary_directories.append((temporary, final_profile))
@@ -438,17 +536,20 @@ def migrate_project(
             )
             if to_migrate:
                 validate_metadata_document(new_document.profiles, destination_profiles)
-                _backup_metadata(destination_metadata, destination_backup)
+                _backup_metadata(destination_metadata, destination_backup, destination_root)
                 _atomic_write(
                     destination_metadata,
                     json.dumps(new_document.to_dict(), indent=2) + "\n",
+                    destination_root,
                 )
         except Exception as exc:
             for temporary, _ in temporary_directories:
                 if temporary.exists():
+                    ensure_tree_safe(temporary, destination_root)
                     shutil.rmtree(temporary, ignore_errors=True)
             for final_profile in finalized_directories:
                 if final_profile.exists():
+                    ensure_tree_safe(final_profile, destination_root)
                     shutil.rmtree(final_profile, ignore_errors=True)
             if isinstance(exc, (MigrationError, ValidationError)):
                 raise

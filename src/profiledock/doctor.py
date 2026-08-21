@@ -8,8 +8,8 @@ import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, utc_now
-from .data_root import DataPaths, _is_link
-from .process_manager import _system_browser_executable, get_status
+from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
+from .process_manager import _system_browser_executable, get_status, is_active_for_mutation
 from .storage import (
     MetadataCorruptedError,
     MetadataLockedError,
@@ -441,7 +441,11 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
     stale_files: List[Path] = []
     for running_json in runtime_dir.glob("*/running.json"):
         data_dir = paths.profiles_dir / running_json.parent.name / "browser-data"
-        if get_status(str(data_dir), clean_stale=False, runtime_dir=running_json.parent) == "stale":
+        if not is_active_for_mutation(
+            str(data_dir), runtime_dir=running_json.parent
+        ) and get_status(
+            str(data_dir), clean_stale=False, runtime_dir=running_json.parent
+        ) == "stale":
             stale_files.append(running_json)
 
     if not stale_files:
@@ -576,11 +580,20 @@ def repair_environment(
     profiles_dir = paths.profiles_dir
     runtime_dir = paths.runtime_dir
 
+    def profiles_are_stopped(profiles: List[Profile]) -> bool:
+        return all(
+            not is_active_for_mutation(
+                profile.data_dir, paths.runtime_dir / profile.id
+            )
+            for profile in profiles
+        )
+
     if runtime_dir.exists():
         _, stale_files = check_stale_running_state(root)
         cleaned = 0
         for path in stale_files:
             try:
+                ensure_within_root(path, paths.root)
                 path.unlink(missing_ok=True)
                 cleaned += 1
             except OSError:
@@ -604,6 +617,7 @@ def repair_environment(
                 for temp_path in stale_temp_dirs:
                     if temp_path.is_dir() and not _is_link(temp_path):
                         try:
+                            ensure_tree_safe(temp_path, paths.root)
                             shutil.rmtree(temp_path, ignore_errors=False)
                             cleaned_temps += 1
                         except OSError:
@@ -634,13 +648,17 @@ def repair_environment(
             if _is_bare_array(data):
                 profiles = _load_profiles_from_bare_array(data)
                 validate_metadata_document(profiles, profiles_dir)
+                if not profiles_are_stopped(profiles):
+                    raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
-                    _backup_metadata(profiles_file, backup_file)
+                    _backup_metadata(profiles_file, backup_file, paths.root)
                     doc = MetadataDocument(
                         schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
                     )
                     _atomic_write(
-                        profiles_file, json.dumps(doc.to_dict(), indent=2) + "\n"
+                        profiles_file,
+                        json.dumps(doc.to_dict(), indent=2) + "\n",
+                        paths.root,
                     )
                 repairs.append(
                     DiagnosticCheck(
@@ -665,9 +683,13 @@ def repair_environment(
             if _is_versioned_document(data):
                 doc = MetadataDocument.from_dict(data)
                 validate_metadata_document(doc.profiles, profiles_dir)
+                if not profiles_are_stopped(doc.profiles):
+                    raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
                     _atomic_write(
-                        profiles_file, json.dumps(doc.to_dict(), indent=2) + "\n"
+                        profiles_file,
+                        json.dumps(doc.to_dict(), indent=2) + "\n",
+                        paths.root,
                     )
                 repairs.append(
                     DiagnosticCheck(
@@ -679,12 +701,16 @@ def repair_environment(
             elif _is_bare_array(data):
                 profiles = _load_profiles_from_bare_array(data)
                 validate_metadata_document(profiles, profiles_dir)
+                if not profiles_are_stopped(profiles):
+                    raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
                     doc = MetadataDocument(
                         schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
                     )
                     _atomic_write(
-                        profiles_file, json.dumps(doc.to_dict(), indent=2) + "\n"
+                        profiles_file,
+                        json.dumps(doc.to_dict(), indent=2) + "\n",
+                        paths.root,
                     )
                 repairs.append(
                     DiagnosticCheck(
@@ -702,11 +728,24 @@ def repair_environment(
             validate_metadata_document(doc.profiles, profiles_dir)
             if recreate_missing_directories:
                 recreated_count = 0
-                for p in doc.profiles:
-                    p_data_path = Path(p.data_dir)
-                    if not p_data_path.exists():
-                        p_data_path.mkdir(parents=True, mode=0o700, exist_ok=True)
-                        recreated_count += 1
+                recreated_paths: List[Path] = []
+                try:
+                    for p in doc.profiles:
+                        p_data_path = Path(p.data_dir)
+                        if not p_data_path.exists():
+                            if is_active_for_mutation(p.data_dir, paths.runtime_dir / p.id):
+                                raise StorageError("cannot recreate data for an active profile")
+                            ensure_within_root(p_data_path, paths.root)
+                            rollback_path = p_data_path.parent if not p_data_path.parent.exists() else p_data_path
+                            p_data_path.mkdir(parents=True, mode=0o700, exist_ok=False)
+                            recreated_paths.append(rollback_path)
+                            recreated_count += 1
+                except Exception:
+                    for recreated in reversed(recreated_paths):
+                        if recreated.exists():
+                            ensure_tree_safe(recreated, paths.root)
+                            shutil.rmtree(recreated, ignore_errors=True)
+                    raise
                 if recreated_count > 0:
                     repairs.append(
                         DiagnosticCheck(
@@ -722,8 +761,15 @@ def repair_environment(
                 reattached_profiles: List[Profile] = []
                 for entry in sorted(profiles_dir.iterdir()):
                     if entry.is_dir() and not _is_link(entry) and not entry.name.startswith(".") and entry.name not in known_ids:
+                        validate_path_component(entry.name, "profile id")
+                        ensure_within_root(entry, paths.root)
                         data_dir_path = entry / "browser-data"
                         if data_dir_path.is_dir():
+                            ensure_tree_safe(data_dir_path, paths.root)
+                            if is_active_for_mutation(
+                                str(data_dir_path), paths.runtime_dir / entry.name
+                            ):
+                                raise StorageError("cannot reattach an active profile")
                             base_name = f"Recovered-{entry.name}"
                             candidate_name = base_name
                             counter = 1
@@ -749,10 +795,11 @@ def repair_environment(
                     )
                     validate_metadata_document(new_doc.profiles, profiles_dir)
                     with metadata_lock(profiles_file):
-                        _backup_metadata(profiles_file, backup_file)
+                        _backup_metadata(profiles_file, backup_file, paths.root)
                         _atomic_write(
                             profiles_file,
                             json.dumps(new_doc.to_dict(), indent=2) + "\n",
+                            paths.root,
                         )
                     repairs.append(
                         DiagnosticCheck(

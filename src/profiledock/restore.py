@@ -10,7 +10,7 @@ import tarfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
-from .data_root import DataPaths, _is_link
+from .data_root import DataPaths, DataRootError, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
 from .models import LaunchConfig, METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from .storage import (
     _atomic_write,
@@ -18,7 +18,7 @@ from .storage import (
     load_metadata,
     metadata_lock,
 )
-from .process_manager import is_running
+from .process_manager import is_active_for_mutation
 from .validation import ValidationError, validate_metadata_document, validate_required_fields
 from .version import __version__
 
@@ -93,6 +93,14 @@ def _verify_checksum(path: Path, expected_sha256: str) -> bool:
 
 
 def _validate_safe_member_path(member_name: str) -> Path:
+    if (
+        not isinstance(member_name, str)
+        or not member_name
+        or "\x00" in member_name
+        or "\\" in member_name
+        or any(":" in part for part in member_name.split("/"))
+    ):
+        raise DecompressionSecurityError(f"archive member contains an unsafe path: {member_name}")
     if member_name.startswith("/") or member_name.startswith("\\"):
         raise DecompressionSecurityError(f"archive member contains absolute path: {member_name}")
     candidate = Path(member_name)
@@ -292,6 +300,22 @@ def restore_backup_archive(
                 pid = prof["id"]
                 pname = prof["name"]
                 pengine = prof.get("engine")
+                try:
+                    validate_path_component(pid, "profile id")
+                    expected_profile_dir = ensure_within_root(
+                        dst_profiles_dir / pid, data_paths.root
+                    )
+                    expected_runtime_dir = ensure_within_root(
+                        data_paths.runtime_dir / pid, data_paths.root
+                    )
+                except DataRootError as exc:
+                    raise InvalidArchiveError(f"unsafe profile destination for '{pid}': {exc}") from exc
+                if pid not in current_id_map and is_active_for_mutation(
+                    str(expected_profile_dir / "browser-data"), expected_runtime_dir
+                ):
+                    raise RestoreConflictError(
+                        f"cannot restore active profile state for '{pname}' ({pid})"
+                    )
 
                 if pid in current_id_map:
                     existing = current_id_map[pid]
@@ -310,7 +334,7 @@ def restore_backup_archive(
                         raise RestoreConflictError(
                             f"conflict: profile ID '{pid}' already exists with different attributes in destination"
                         )
-                    if is_running(
+                    if is_active_for_mutation(
                         existing.data_dir,
                         runtime_dir=data_paths.runtime_dir / existing.id,
                     ):
@@ -326,7 +350,9 @@ def restore_backup_archive(
 
                 to_restore.append(prof)
 
-            temp_restore_root = dst_profiles_dir / f".temp_restore_{uuid4().hex[:12]}"
+            temp_restore_root = ensure_within_root(
+                dst_profiles_dir / f".temp_restore_{uuid4().hex[:12]}", data_paths.root
+            )
             temp_restore_root.mkdir(parents=True, mode=0o700)
 
             restored_results: List[RestoreProfileResult] = []
@@ -368,12 +394,17 @@ def restore_backup_archive(
                             )
 
                     target_final_prof_dir = dst_profiles_dir / pid
+                    ensure_within_root(target_final_prof_dir, data_paths.root)
                     finalized_dirs.append((temp_prof_dir, target_final_prof_dir))
 
                 quarantined_existing: List[Tuple[Path, Path]] = []
                 for _, final_dir in finalized_dirs:
                     if final_dir.exists():
-                        q_dir = dst_profiles_dir / f".quarantine_{final_dir.name}_{uuid4().hex[:8]}"
+                        ensure_tree_safe(final_dir, data_paths.root)
+                        q_dir = ensure_within_root(
+                            dst_profiles_dir / f".quarantine_{final_dir.name}_{uuid4().hex[:8]}",
+                            data_paths.root,
+                        )
                         final_dir.replace(q_dir)
                         quarantined_existing.append((q_dir, final_dir))
 
@@ -426,16 +457,25 @@ def restore_backup_archive(
                         profiles=list(new_profiles_map.values()),
                     )
                     validate_metadata_document(new_doc.profiles, dst_profiles_dir)
-                    _backup_metadata(dst_metadata, dst_backup)
-                    _atomic_write(dst_metadata, json.dumps(new_doc.to_dict(), indent=2) + "\n")
+                    _backup_metadata(dst_metadata, dst_backup, data_paths.root)
+                    _atomic_write(
+                        dst_metadata,
+                        json.dumps(new_doc.to_dict(), indent=2) + "\n",
+                        data_paths.root,
+                    )
 
                     for q_dir, _ in quarantined_existing:
-                        shutil.rmtree(q_dir, ignore_errors=True)
+                        try:
+                            ensure_tree_safe(q_dir, data_paths.root)
+                            shutil.rmtree(q_dir, ignore_errors=False)
+                        except (DataRootError, OSError):
+                            pass
 
                 except Exception:
                     for temp_dir, final_dir in finalized_dirs:
                         if final_dir.exists():
-                            shutil.rmtree(final_dir, ignore_errors=True)
+                            ensure_tree_safe(final_dir, data_paths.root)
+                            shutil.rmtree(final_dir, ignore_errors=False)
                     for q_dir, final_dir in quarantined_existing:
                         if q_dir.exists():
                             q_dir.replace(final_dir)
@@ -443,7 +483,11 @@ def restore_backup_archive(
 
             finally:
                 if temp_restore_root.exists():
-                    shutil.rmtree(temp_restore_root, ignore_errors=True)
+                    try:
+                        ensure_tree_safe(temp_restore_root, data_paths.root)
+                        shutil.rmtree(temp_restore_root, ignore_errors=False)
+                    except (DataRootError, OSError):
+                        pass
 
     return RestoreReport(
         archive_path=str(archive),

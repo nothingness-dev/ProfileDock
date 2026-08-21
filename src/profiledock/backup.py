@@ -12,9 +12,9 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
-from .data_root import DataPaths, _is_link
+from .data_root import DataPaths, DataRootError, _is_link, ensure_within_root, validate_path_component
 from .models import METADATA_SCHEMA_VERSION, Profile, utc_now
-from .process_manager import get_status
+from .process_manager import is_active_for_mutation
 from .version import __version__
 
 BACKUP_ARCHIVE_SCHEMA_VERSION = 1
@@ -152,17 +152,25 @@ def create_backup_archive(
         raise TargetExistsError(f"output backup archive already exists: {out_path} (use --force to overwrite)")
 
     for p in profiles:
-        profile_data = Path(p.data_dir).resolve()
+        try:
+            validate_path_component(p.id, "profile id")
+            profile_data = ensure_within_root(Path(p.data_dir), data_paths.root)
+            expected_data = ensure_within_root(
+                data_paths.profiles_dir / p.id / "browser-data", data_paths.root
+            )
+        except DataRootError as exc:
+            raise BackupError(f"unsafe profile path for '{p.id}': {exc}") from exc
+        if profile_data != expected_data:
+            raise BackupError(f"profile data directory is outside its managed location: {p.id}")
         try:
             out_path.relative_to(profile_data)
         except ValueError:
             pass
         else:
             raise BackupError("backup output cannot be inside a profile browser-data directory")
-        status = get_status(p.data_dir, runtime_dir=data_paths.runtime_dir / p.id)
-        if status != "stopped":
+        if is_active_for_mutation(p.data_dir, data_paths.runtime_dir / p.id):
             raise ProfileNotStoppedError(
-                f"cannot backup profile '{p.name}' ({p.id}) because its status is '{status}'. "
+                f"cannot backup profile '{p.name}' ({p.id}) because it is active. "
                 "All profiles must be stopped before creating a backup."
             )
 
@@ -184,6 +192,12 @@ def create_backup_archive(
 
                 for rel_path, (size, checksum) in files_manifest.items():
                     fpath = p_data_dir / rel_path
+                    if _is_link(fpath) or not fpath.is_file():
+                        raise BackupError(f"profile data changed to an unsafe file during backup: {fpath}")
+                    try:
+                        fpath.resolve().relative_to(p_data_dir.resolve())
+                    except ValueError as exc:
+                        raise BackupError(f"profile data escaped during backup: {fpath}") from exc
                     arcname = f"profiles/{p.id}/browser-data/{rel_path}"
                     try:
                         tar.add(str(fpath), arcname=arcname)
@@ -242,6 +256,12 @@ def create_backup_archive(
             tar_info.mtime = int(time.time())
             tar.addfile(tar_info, io.BytesIO(manifest_bytes))
 
+        for p in profiles:
+            if is_active_for_mutation(p.data_dir, data_paths.runtime_dir / p.id):
+                raise ProfileNotStoppedError(
+                    f"cannot finalize backup because profile '{p.name}' ({p.id}) became active"
+                )
+
         with tarfile.open(temp_archive, "r:gz") as verify_tar:
             names = verify_tar.getnames()
             if len(names) != len(set(names)):
@@ -258,6 +278,8 @@ def create_backup_archive(
                 for rel_path, file_meta in profile_info.get("files", {}).items():
                     member_name = f"profiles/{profile_info['id']}/browser-data/{rel_path}"
                     member = verify_tar.getmember(member_name)
+                    if not member.isfile():
+                        raise BackupError(f"backup archive verification failed: unsafe member {member_name}")
                     extracted = verify_tar.extractfile(member)
                     if extracted is None:
                         raise BackupError(f"backup archive verification failed: unreadable {member_name}")
