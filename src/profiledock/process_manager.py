@@ -223,7 +223,82 @@ def _read_error(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _get_process_create_time(pid: int) -> Optional[float]:
+    if pid < 1:
+        return None
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class FILETIME(ctypes.Structure):
+            _fields_ = [
+                ("dwLowDateTime", wintypes.DWORD),
+                ("dwHighDateTime", wintypes.DWORD),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(FILETIME),
+            ctypes.POINTER(FILETIME),
+            ctypes.POINTER(FILETIME),
+            ctypes.POINTER(FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        handle = kernel32.OpenProcess(0x1000 | 0x0400, False, pid)
+        if not handle:
+            return None
+        creation_time = FILETIME()
+        exit_time = FILETIME()
+        kernel_time = FILETIME()
+        user_time = FILETIME()
+        try:
+            if not kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation_time),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel_time),
+                ctypes.byref(user_time),
+            ):
+                return None
+            time_val = (creation_time.dwHighDateTime << 32) + creation_time.dwLowDateTime
+            return (time_val - 116444736000000000) / 10000000.0
+        finally:
+            kernel32.CloseHandle(handle)
+
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.exists():
+        try:
+            content = proc_stat.read_text(encoding="utf-8")
+            parts = content.split(")")
+            if len(parts) >= 2:
+                fields = parts[-1].strip().split()
+                if len(fields) >= 20:
+                    starttime_ticks = float(fields[19])
+                    return starttime_ticks
+        except (OSError, ValueError, IndexError):
+            pass
+    return None
+
+
+def _is_matching_process(pid: int, expected_start_time: Optional[float]) -> bool:
+    if pid < 1 or not _alive(pid):
+        return False
+    if expected_start_time is None:
+        return True
+    actual_start_time = _get_process_create_time(pid)
+    if actual_start_time is None:
+        return True
+    return abs(actual_start_time - expected_start_time) < 2.0
+
+
 def _alive(pid: int) -> bool:
+
     if pid < 1:
         return False
     if sys.platform == "win32":
@@ -472,16 +547,19 @@ def start_direct_chrome(
         _write_error(err, "browser_launch_failed", str(exc))
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
 
+    proc_create_time = _get_process_create_time(process.pid)
     state = {
         "profile_id": initial["profile_id"],
         "pid": process.pid,
         "launcher_pid": initial["launcher_pid"],
+        "process_create_time": proc_create_time,
         "engine": "direct",
         "tabs": tabs,
         "channel": initial["channel"],
         "started_at": started_at,
         "status": "running",
     }
+
     try:
         _atomic_private_json(path, state)
     except OSError as exc:
@@ -632,7 +710,11 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         except OSError:
             pass
         pid = int(state.get("pid", -1))
+        expected_create_time = state.get("process_create_time")
         if pid > 0 and _alive(pid):
+            if not _is_matching_process(pid, expected_create_time):
+                _unlink_quietly(path)
+                raise ProfileRunningError("profile process is not running (PID was reused by another process)")
             if sys.platform == "win32":
                 subprocess.run(
                     ["taskkill", "/PID", str(pid), "/T"],
@@ -670,6 +752,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                 raise BrowserLaunchError("browser process did not close within the timeout")
         _unlink_quietly(path)
         return
+
 
     state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
     port = int(state.get("port", 0))
@@ -723,16 +806,30 @@ def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
         except socket.timeout:
             continue
         with connection:
-            command = connection.recv(_MAX_COMMAND_BYTES + 1)
-            if len(command) > _MAX_COMMAND_BYTES:
-                connection.sendall(b"error\n")
+            connection.settimeout(2.0)
+            try:
+                command = connection.recv(_MAX_COMMAND_BYTES + 1)
+            except (socket.timeout, OSError):
+                continue
+            if len(command) > _MAX_COMMAND_BYTES or not command:
+                try:
+                    connection.sendall(b"error\n")
+                except OSError:
+                    pass
                 continue
             supplied = command.decode("utf-8", errors="replace").rstrip("\r\n")
             expected = "close:" + token
             if hmac.compare_digest(supplied, expected):
-                connection.sendall(b"ok\n")
+                try:
+                    connection.sendall(b"ok\n")
+                except OSError:
+                    pass
                 return
-            connection.sendall(b"error\n")
+            try:
+                connection.sendall(b"error\n")
+            except OSError:
+                pass
+
 
 
 def _launch_context(
