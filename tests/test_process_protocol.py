@@ -43,13 +43,54 @@ class Server:
         return next(self.connections), None
 
 
-def test_close_protocol_rejects_wrong_token_before_accepting_match():
-    wrong = Connection(b"close:wrong\n")
-    correct = Connection(b"close:secret\n")
+def test_close_protocol_rejects_oversized_commands():
+    oversized = Connection(b"close:" + b"x" * 1000 + b"\n")
     context = type("Context", (), {"pages": [object()]})()
-    _wait_for_close(Server([wrong, correct]), context, "secret")
-    assert wrong.response == b"error\n"
-    assert correct.response == b"ok\n"
+    _wait_for_close(Server([oversized]), context, "secret")
+    assert oversized.response == b"error\n"
+
+
+def test_close_protocol_rejects_malformed_non_token_commands():
+    malformed = Connection(b"kill:12345\n")
+    context = type("Context", (), {"pages": [object()]})()
+    _wait_for_close(Server([malformed]), context, "secret")
+    assert malformed.response == b"error\n"
+
+
+def test_direct_close_detects_pid_reuse(tmp_path):
+    from profiledock.process_manager import (
+        ProfileRunningError,
+        close_controller,
+    )
+
+    data_dir = tmp_path / "profile-pid-reuse" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_file = data_dir.parent / "running.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "profile_id": "profile-pid-reuse",
+                "pid": 12345,
+                "launcher_pid": os.getpid(),
+                "process_create_time": 100.0,
+                "engine": "direct",
+                "tabs": 1,
+                "channel": "chrome",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "status": "running",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch("profiledock.process_manager._alive", return_value=True), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=999.0
+    ):
+        with pytest.raises(ProfileRunningError, match="PID was reused"):
+            close_controller(str(data_dir), timeout=0.1)
+
+    assert not state_file.exists()
+
 
 
 def test_legacy_live_state_is_upgraded(tmp_path):
