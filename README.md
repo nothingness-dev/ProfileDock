@@ -448,7 +448,27 @@ Migrates profiles and browser data from a legacy or another project directory in
 
 When combining `--remove-source` with `--json`, also pass `--yes`. This keeps standard output valid JSON without an interactive confirmation prompt.
 
+### Logs
+
+```bash
+profiledock logs
+profiledock logs <id-or-name>
+profiledock logs <id-or-name> --last 100
+profiledock logs <id-or-name> --json
+```
+
+Displays structured, bounded, privacy-safe execution logs.
+
+**Logging & Privacy Guarantees:**
+
+- **Structured & Correlated**: Emits JSON log entries with unique Correlation IDs shared between CLI operations and controller processes.
+- **Engine Lifecycle**: Records engine routing (`direct` vs `playwright`), native browser process PID lifecycle, Playwright IPC events, and browser executable paths used.
+- **Strict Privacy Redaction**: Never logs passwords, authentication tokens, cookies, LocalStorage data, or authorization headers. Full URLs are automatically sanitized to preserve origin and top path without query parameters or credentials.
+- **Size & Rotation Bounded**: Log files automatically rotate at 2 MiB with configurable retention backups, ensuring bounded disk usage.
+- **Failure-Safe**: Logging failures never block or interrupt browser launches or CLI commands.
+
 ## Data storage and persistence
+
 
 ProfileDock resolves one data root for each command and uses this structure:
 
@@ -730,7 +750,27 @@ Failures also use this report shape, place the error in `failed`, and exit with 
 
 
 
+**`logs --json`:**
+
+Returns an array of structured, redacted log entries:
+
+```json
+[
+  {
+    "timestamp": "2026-08-21T12:00:00+00:00",
+    "level": "INFO",
+    "event": "browser_process_spawned",
+    "correlation_id": "a1b2c3d4e5f6",
+    "profile_id": "abc123",
+    "engine": "direct",
+    "pid": 12345,
+    "result": "success"
+  }
+]
+```
+
 **Guarantees:**
+
 
 - JSON output is always valid and parseable
 - No human prose mixed with JSON
