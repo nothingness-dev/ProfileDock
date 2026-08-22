@@ -128,6 +128,8 @@ profiledock --data-root /path/to/profiledock-data list
 
 To use another location for every command in the current environment, set `PROFILEDOCK_DATA_ROOT`. The CLI option takes precedence over the environment variable, and the environment variable takes precedence over the platform default.
 
+For scripts and CI, pass `--non-interactive` or set `PROFILEDOCK_NON_INTERACTIVE=1`. ProfileDock then refuses to prompt: provide `--tabs` for launches and `--yes` for operations requiring confirmation.
+
 Create a profile:
 
 ```bash
@@ -566,6 +568,8 @@ Metadata writes use cross-process locking, validated destinations, a previous-ve
 `running.json` exists while a launch is tracked. Protocol version 2 uses an explicit `engine` discriminator. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, process creation time, launch PID, browser channel, start time, and status. State writes are atomic. Verifiably stale files can be cleaned automatically, while malformed or ambiguous state requires manual review.
 
 The complete schema definitions, historical migrations, rollback behavior, and compatibility policy are documented in [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
+
+The planned 1.0 command-line contract, including commands, options, aliases, exit codes, streams, error categories, profile resolution, confirmations, and deprecation policy, is documented in [CLI_CONTRACT.md](CLI_CONTRACT.md).
 
 Runtime state, logs, backups, metadata, and browser data are separated. Runtime files are never written inside `browser-data`.
 

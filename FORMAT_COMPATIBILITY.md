@@ -49,6 +49,8 @@ Commands that support `--json` emit output version 1:
 
 Consumers must check `output_version` before reading `data` and reject versions they do not support. Human-readable output is not a stable machine interface.
 
+The complete planned 1.0 command, option, exit-code, stream, confirmation, resolution, and deprecation guarantees are defined in [CLI_CONTRACT.md](CLI_CONTRACT.md). Golden fixtures enforce both the Typer command surface and JSON payloads.
+
 ## Support policy
 
 ProfileDock keeps readers for every historical format shipped by a tagged release unless a future major release explicitly documents removal. Fixtures for every historical version are part of the automated test suite. New fields require a format-version change unless the existing schema explicitly permits them.
