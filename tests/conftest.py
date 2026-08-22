@@ -37,11 +37,21 @@ def malicious_archive(tmp_path):
     archive = tmp_path / "malicious-backslash.tar.gz"
     manifest = {
         "format_version": 1,
+        "profiledock_version": "test",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "total_profiles": 1,
+        "total_files": 1,
+        "total_bytes": 1,
         "profiles": [
             {
                 "id": "safe-id",
                 "name": "Escaped",
                 "created_at": "2026-01-01T00:00:00+00:00",
+                "last_launched_at": None,
+                "engine": None,
+                "launch_config": None,
+                "file_count": 1,
+                "total_bytes": 1,
                 "files": {"..\\escape.txt": {"size": 1, "sha256": "0" * 64}},
             }
         ],

@@ -114,7 +114,7 @@ def test_start_reports_ready_with_actual_page_count(controller_env):
     assert state["port"] > 0
     assert state["pid"] > 0
     assert state["controller_pid"] > 0
-    assert state["protocol_version"] == 1
+    assert state["protocol_version"] == 2
     assert state["profile_id"] == profile.id
     assert state["controller_started_at"]
     assert state["token"]

@@ -1,0 +1,10 @@
+{
+  "protocol_version": 1,
+  "profile_id": "abc123",
+  "controller_pid": 1234,
+  "controller_started_at": "2026-01-01T00:00:00+00:00",
+  "port": 12345,
+  "token": "12345678901234567890123456789012",
+  "tabs": 1,
+  "status": "running"
+}

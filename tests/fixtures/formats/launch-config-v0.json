@@ -1,0 +1,8 @@
+{
+  "default_tabs": 3,
+  "start_urls": ["about:blank"],
+  "engine": "playwright",
+  "browser": null,
+  "window_width": null,
+  "window_height": null
+}

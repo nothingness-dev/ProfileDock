@@ -1,0 +1,11 @@
+{
+  "profile_id": "abc123",
+  "pid": 1234,
+  "launcher_pid": 1233,
+  "process_create_time": 100.0,
+  "engine": "direct",
+  "tabs": 1,
+  "channel": "chrome",
+  "started_at": "2026-01-01T00:00:00+00:00",
+  "status": "running"
+}

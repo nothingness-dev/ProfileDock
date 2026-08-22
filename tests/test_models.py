@@ -12,15 +12,15 @@ def test_profile_to_dict_and_from_dict_with_engine():
     assert parsed.engine == "direct"
 
 
-def test_profile_from_dict_without_engine():
+def test_profile_from_dict_without_engine_is_rejected():
     d = {
         "id": "id1",
         "name": "Name1",
         "created_at": "2026-01-01T00:00:00+00:00",
         "data_dir": "/path",
     }
-    parsed = Profile.from_dict(d)
-    assert parsed.engine is None
+    with pytest.raises(ValueError, match="missing a required field"):
+        Profile.from_dict(d)
 
 
 def test_profile_from_dict_invalid_engine_type():
@@ -30,6 +30,8 @@ def test_profile_from_dict_invalid_engine_type():
         "created_at": "2026-01-01T00:00:00+00:00",
         "data_dir": "/path",
         "engine": 123,
+        "last_launched_at": None,
+        "launch_config": None,
     }
     with pytest.raises(ValueError, match="profile field engine must be a string or null"):
         Profile.from_dict(d)

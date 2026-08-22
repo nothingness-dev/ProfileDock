@@ -207,7 +207,7 @@ def test_legacy_live_state_is_upgraded(tmp_path):
     )
     assert get_status(str(data_dir)) == "running"
     state = _read_state(path)
-    assert state["protocol_version"] == 1
+    assert state["protocol_version"] == 2
     assert state["profile_id"] == "profile-a"
     assert state["controller_pid"] == os.getpid()
     assert state["legacy_controller"] is True

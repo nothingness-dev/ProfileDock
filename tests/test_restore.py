@@ -24,6 +24,22 @@ from profiledock.storage import load_metadata, save_metadata
 runner = CliRunner()
 
 
+def complete_manifest(value):
+    profiles = value.get("profiles", [])
+    for profile in profiles:
+        profile.setdefault("last_launched_at", None)
+        profile.setdefault("engine", None)
+        profile.setdefault("launch_config", None)
+        profile.setdefault("file_count", len(profile.get("files", {})))
+        profile.setdefault("total_bytes", sum(item.get("size", 0) for item in profile.get("files", {}).values()))
+    value.setdefault("profiledock_version", "test")
+    value.setdefault("created_at", "2026-01-01T00:00:00+00:00")
+    value.setdefault("total_profiles", len(profiles))
+    value.setdefault("total_files", sum(profile["file_count"] for profile in profiles))
+    value.setdefault("total_bytes", sum(profile["total_bytes"] for profile in profiles))
+    return value
+
+
 def make_paths(root: Path) -> DataPaths:
     layout = DataPaths.from_root(root)
     layout.prepare()
@@ -92,7 +108,7 @@ def test_restore_security_traversal_rejected(tmp_path):
                 }
             ],
         }
-        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
         tarinfo = tarfile.TarInfo("backup_manifest.json")
         tarinfo.size = len(manifest_bytes)
         tar.addfile(tarinfo, io.BytesIO(manifest_bytes))
@@ -126,7 +142,7 @@ def test_restore_security_absolute_path_rejected(tmp_path):
                 }
             ],
         }
-        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
         tarinfo = tarfile.TarInfo("backup_manifest.json")
         tarinfo.size = len(manifest_bytes)
         tar.addfile(tarinfo, io.BytesIO(manifest_bytes))
@@ -155,7 +171,7 @@ def test_restore_security_link_rejected(tmp_path):
                 }
             ],
         }
-        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
         tarinfo = tarfile.TarInfo("backup_manifest.json")
         tarinfo.size = len(manifest_bytes)
         tar.addfile(tarinfo, io.BytesIO(manifest_bytes))
@@ -172,7 +188,7 @@ def test_restore_security_link_rejected(tmp_path):
 def test_restore_rejects_excessive_archive_member_count(tmp_path):
     archive_file = tmp_path / "too-many-members.tar.gz"
     with tarfile.open(archive_file, "w:gz") as tar:
-        manifest = json.dumps({"format_version": 1, "profiles": []}).encode("utf-8")
+        manifest = json.dumps(complete_manifest({"format_version": 1, "profiles": []})).encode("utf-8")
         manifest_member = tarfile.TarInfo("backup_manifest.json")
         manifest_member.size = len(manifest)
         tar.addfile(manifest_member, io.BytesIO(manifest))
@@ -203,7 +219,7 @@ def test_restore_security_checksum_mismatch_fails(tmp_path):
                 }
             ],
         }
-        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
         tarinfo = tarfile.TarInfo("backup_manifest.json")
         tarinfo.size = len(manifest_bytes)
         tar.addfile(tarinfo, io.BytesIO(manifest_bytes))
@@ -261,7 +277,7 @@ def test_restore_rejects_unsafe_manifest_profile_id(tmp_path):
         ],
     }
     with tarfile.open(archive_file, "w:gz") as tar:
-        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
         member = tarfile.TarInfo("backup_manifest.json")
         member.size = len(manifest_bytes)
         tar.addfile(member, io.BytesIO(manifest_bytes))
@@ -286,7 +302,7 @@ def test_restore_rejects_unsafe_manifest_file_path(tmp_path):
         ],
     }
     with tarfile.open(archive_file, "w:gz") as tar:
-        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
         member = tarfile.TarInfo("backup_manifest.json")
         member.size = len(manifest_bytes)
         tar.addfile(member, io.BytesIO(manifest_bytes))
@@ -368,6 +384,8 @@ def test_cli_restore_command_and_json(tmp_path):
     result = runner.invoke(app, ["--data-root", str(dst_dir), "restore", str(archive_file), "--json"])
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert data["format_version"] == 1
     assert data["total_restored"] == 1
     assert data["restored"][0]["name"] == "Work"

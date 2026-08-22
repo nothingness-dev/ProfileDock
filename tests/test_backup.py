@@ -167,6 +167,8 @@ def test_cli_backup_single_and_json(tmp_path):
     )
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert data["format_version"] == 1
     assert data["total_profiles"] == 1
     assert data["profiles"][0]["name"] == "Work"

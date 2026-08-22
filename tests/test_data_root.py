@@ -159,7 +159,7 @@ def test_cli_uses_environment_data_root_from_another_directory(tmp_path, monkeyp
     assert created.exit_code == 0
     listed = runner.invoke(app, ["list", "--json"])
     assert listed.exit_code == 0
-    assert json.loads(listed.output)[0]["name"] == "Portable"
+    assert json.loads(listed.output)["data"][0]["name"] == "Portable"
     assert (data_root / "metadata" / "profiles.json").is_file()
     assert not (other_directory / "metadata").exists()
 

@@ -474,6 +474,8 @@ def test_doctor_cli_json():
         result = runner.invoke(app, ["doctor", "--json"])
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert "checks" in data
     assert "repairs" in data
     assert "healthy" in data

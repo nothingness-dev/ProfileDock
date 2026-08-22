@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "abc123",
+      "name": "Current",
+      "created_at": "2026-01-01T00:00:00+00:00",
+      "data_dir": "profiles/abc123/browser-data",
+      "last_launched_at": null,
+      "engine": "direct",
+      "launch_config": null
+    }
+  ]
+}

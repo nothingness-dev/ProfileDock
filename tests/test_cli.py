@@ -250,6 +250,8 @@ def test_list_json_format():
         result = runner.invoke(app, ["list", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["id"] == "abc123"
@@ -304,6 +306,8 @@ def test_show_json_command():
         result = runner.invoke(app, ["show", "abc123", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert data["id"] == "abc123"
     assert data["name"] == "Work"
     assert data["status"] == "running"
@@ -380,6 +384,8 @@ def test_status_all_profiles_json():
         result = runner.invoke(app, ["status", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert isinstance(data, list)
     assert data[0]["id"] == "abc123"
     assert data[0]["name"] == "Work"
@@ -400,6 +406,8 @@ def test_status_single_profile_json():
         result = runner.invoke(app, ["status", "abc123", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["id"] == "abc123"
@@ -451,6 +459,8 @@ def test_json_list_schema():
 
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert isinstance(data, list)
     assert len(data) == 1
 
@@ -497,6 +507,8 @@ def test_json_show_schema():
 
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert isinstance(data, dict)
 
     required_fields = ["id", "name", "status", "created_at", "data_dir", "last_launched_at", "engine"]
@@ -533,6 +545,8 @@ def test_json_status_schema():
 
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
 
     assert isinstance(data, list)
     assert len(data) == 1
@@ -730,6 +744,8 @@ def test_config_cli_commands_and_presets(tmp_path):
     res_show_json = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"])
     assert res_show_json.exit_code == 0
     cfg_data = json.loads(res_show_json.output)
+    assert cfg_data["output_version"] == 1
+    cfg_data = cfg_data["data"]
     assert cfg_data["default_tabs"] == 4
     assert cfg_data["engine"] == "playwright"
     assert cfg_data["window_width"] == 1440
@@ -742,7 +758,7 @@ def test_config_cli_commands_and_presets(tmp_path):
     assert res_reset.exit_code == 0
 
     res_show_after = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"])
-    cfg_after = json.loads(res_show_after.output)
+    cfg_after = json.loads(res_show_after.output)["data"]
     assert cfg_after["default_tabs"] is None
     assert cfg_after["start_urls"] == []
 

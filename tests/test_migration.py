@@ -370,6 +370,8 @@ def test_migrate_cli_json_output(tmp_path):
     result = runner.invoke(app, ["--data-root", str(dst_root), "migrate", "--from-project", str(src_root), "--json"])
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert "migrated" in data
     assert len(data["migrated"]) == 1
     assert data["migrated"][0]["id"] == "p1"
@@ -690,6 +692,8 @@ def test_migrate_json_failure_is_machine_readable(tmp_path):
     )
     assert result.exit_code == EXIT_USER_ERROR
     report = json.loads(result.output)
+    assert report["output_version"] == 1
+    report = report["data"]
     assert report["migrated"] == []
     assert report["failed"][0]["status"] == "failed"
     assert "corrupted" in report["failed"][0]["message"]
@@ -762,6 +766,8 @@ def test_json_remove_source_requires_yes_without_prompt_text(tmp_path):
     )
     assert result.exit_code == EXIT_USER_ERROR
     report = json.loads(result.output)
+    assert report["output_version"] == 1
+    report = report["data"]
     assert "requires --yes" in report["failed"][0]["message"]
     assert metadata.exists()
     assert data_dir.exists()

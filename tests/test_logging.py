@@ -95,6 +95,8 @@ def test_cli_logs_command(tmp_path):
     res_json = runner.invoke(app, ["--data-root", str(tmp_path), "logs", "--json"])
     assert res_json.exit_code == EXIT_SUCCESS
     data = json.loads(res_json.output)
+    assert data["output_version"] == 1
+    data = data["data"]
     assert len(data) >= 1
     assert data[0]["correlation_id"] == "cid999"
 
