@@ -53,18 +53,17 @@ from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFo
 from .storage import StorageError
 from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
+from .cli_contract import CLI_JSON_OUTPUT_VERSION, EXIT_SUCCESS, EXIT_USER_ERROR, error_category
 
 app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
 config_app = typer.Typer(help="Manage launch configuration presets for a profile.")
 app.add_typer(config_app, name="config")
 
-EXIT_SUCCESS = 0
-EXIT_USER_ERROR = 1
-CLI_JSON_OUTPUT_VERSION = 1
 _paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
 _paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared", default=False)
 _verbose: ContextVar[bool] = ContextVar("profiledock_verbose", default=False)
 _log_level: ContextVar[str] = ContextVar("profiledock_log_level", default="INFO")
+_non_interactive: ContextVar[bool] = ContextVar("profiledock_non_interactive", default=False)
 
 
 def version_callback(value: bool) -> None:
@@ -91,6 +90,11 @@ def main(
         "--log-level",
         help="Logging level threshold: DEBUG, INFO, WARNING, ERROR.",
     ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Never prompt; fail when required input or confirmation is missing.",
+    ),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -105,8 +109,10 @@ def main(
         _paths_prepared.set(False)
         _verbose.set(verbose)
         _log_level.set(log_level.upper())
+        env_non_interactive = os.environ.get("PROFILEDOCK_NON_INTERACTIVE", "").strip().lower()
+        _non_interactive.set(non_interactive or env_non_interactive in {"1", "true", "yes", "on"})
     except DataRootError as exc:
-        fail(str(exc))
+        fail_exception(exc)
 
 
 
@@ -133,13 +139,38 @@ def runtime_path(profile: Profile) -> Path:
     return manager().runtime_path(profile.id)
 
 
-def fail(message: str, code: int = EXIT_USER_ERROR) -> None:
-    typer.echo(f"Error: {message}", err=True)
+def fail(message: str, code: int = EXIT_USER_ERROR, category: Optional[str] = None) -> None:
+    selected_category = category or error_category(message)
+    typer.echo(f"Error [{selected_category}]: {message}", err=True)
     raise typer.Exit(code)
 
 
-def emit_json(command: str, data: object) -> None:
-    typer.echo(json.dumps({"output_version": CLI_JSON_OUTPUT_VERSION, "command": command, "data": data}, indent=2))
+def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
+    if isinstance(error, AmbiguousProfileError):
+        category = "ambiguous_profile"
+    elif isinstance(error, ProfileNotFoundError):
+        category = "not_found"
+    elif isinstance(error, ProfileRunningError):
+        category = "profile_active"
+    elif isinstance(error, BrowserLaunchError):
+        category = "browser_launch_failed"
+    elif isinstance(error, (DataRootError, DecompressionSecurityError)):
+        category = "security_violation"
+    elif isinstance(error, (StorageError, OSError)):
+        category = "storage_error"
+    else:
+        category = error_category(str(error))
+    fail(str(error), code=code, category=category)
+
+
+def emit_json(command: str, data: object, err: bool = False) -> None:
+    typer.echo(json.dumps({"output_version": CLI_JSON_OUTPUT_VERSION, "command": command, "data": data}, indent=2), err=err)
+
+
+def confirm(message: str) -> bool:
+    if _non_interactive.get():
+        fail("confirmation required; rerun with --yes", category="confirmation_required")
+    return typer.confirm(message)
 
 
 def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
@@ -212,7 +243,7 @@ def create(
     try:
         profile = manager().create(name, engine=engine)
     except (StorageError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Created profile '{profile.name}' ({profile.id})")
 
 
@@ -223,7 +254,7 @@ def list_profiles(
     try:
         profiles = manager().list_profiles()
     except StorageError as exc:
-        fail(str(exc))
+        fail_exception(exc)
     if json_output:
         items = []
         for profile in profiles:
@@ -250,7 +281,7 @@ def show(
     try:
         profile = manager().resolve(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
     data = _safe_profile_dict(profile, status=status)
     if json_output:
@@ -276,7 +307,7 @@ def rename(profile_id: str, new_name: str) -> None:
     try:
         profile = manager().rename(profile_id, clean_name)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Renamed profile to '{profile.name}' ({profile.id})")
 
 
@@ -288,7 +319,7 @@ def config_show(
     try:
         profile = manager().resolve(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     cfg = getattr(profile, "launch_config", None) or LaunchConfig()
     if json_output:
         emit_json("config show", cfg.to_dict())
@@ -346,7 +377,7 @@ def config_set(
         else:
             fail(f"unknown setting '{setting}' (valid: default-tabs, engine, browser, window-size)")
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
 
 
 @config_app.command("add-url")
@@ -357,7 +388,7 @@ def config_add_url(
     try:
         profile = manager().add_start_url(profile_id, url)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Added start URL '{url}' to profile '{profile.name}' ({profile.id})")
 
 
@@ -369,7 +400,7 @@ def config_remove_url(
     try:
         profile = manager().remove_start_url(profile_id, url)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Removed start URL '{url}' from profile '{profile.name}' ({profile.id})")
 
 
@@ -380,7 +411,7 @@ def config_reset(
     try:
         profile = manager().reset_launch_config(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Reset launch configuration for profile '{profile.name}' ({profile.id})")
 
 
@@ -395,7 +426,7 @@ def set_engine(
     try:
         profile = manager().set_engine(profile_id, clean_engine)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Set engine to '{clean_engine}' for profile '{profile.name}' ({profile.id})")
 
 
@@ -413,7 +444,7 @@ def status(
             profiles = manager().list_profiles()
             single = False
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     if json_output:
         items = []
         for prof in profiles:
@@ -480,6 +511,8 @@ def launch(
         if target_tabs is None and cfg and cfg.default_tabs is not None:
             target_tabs = cfg.default_tabs
         if target_tabs is None:
+            if _non_interactive.get():
+                fail("tab count is required in non-interactive mode; use --tabs")
             target_tabs = typer.prompt("How many tabs do you want to open?", type=int)
         if target_tabs < 1:
             fail("tab count must be at least 1")
@@ -580,7 +613,7 @@ def launch(
             error_category=getattr(exc, "category", type(exc).__name__),
             details={"error": str(exc)},
         )
-        fail(str(exc))
+        fail_exception(exc)
 
     try:
         profile_manager.mark_launched(profile.id)
@@ -596,7 +629,7 @@ def close(profile_id: str) -> None:
         profile = manager().resolve(profile_id)
         close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Closed '{profile.name}'.")
 
 
@@ -606,11 +639,11 @@ def delete(profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help=
         profile = manager().resolve(profile_id)
         if is_running(profile.data_dir, runtime_path(profile)):
             fail("profile is running; close it first")
-        if not yes and not typer.confirm(f"Delete profile '{profile.name}' and all browser data?"):
+        if not yes and not confirm(f"Delete profile '{profile.name}' and all browser data?"):
             raise typer.Abort()
         manager().delete(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, OSError, ValueError) as exc:
-        fail(str(exc))
+        fail_exception(exc)
     typer.echo(f"Deleted '{profile.name}'.")
 
 
@@ -642,11 +675,11 @@ def doctor(
         fail("--reattach-orphans and --recreate-missing require --repair flag")
 
     if recreate_missing and not yes and not json_output:
-        if not typer.confirm("Recreate missing empty profile browser-data directories?"):
+        if not confirm("Recreate missing empty profile browser-data directories?"):
             raise typer.Abort()
 
     if reattach_orphans and not yes and not json_output:
-        if not typer.confirm("Reattach discovered orphan profile directories to metadata?"):
+        if not confirm("Reattach discovered orphan profile directories to metadata?"):
             raise typer.Abort()
 
     repairs: List[DiagnosticCheck] = []
@@ -719,9 +752,9 @@ def migrate(
                 paths.root,
                 "--remove-source requires --yes when using --json",
             )
-            emit_json("migrate", report.to_dict())
+            emit_json("migrate", report.to_dict(), err=True)
             raise typer.Exit(EXIT_USER_ERROR)
-        if not typer.confirm(
+        if not confirm(
             f"Are you sure you want to delete source profile data in '{from_project}' after migration?"
         ):
             raise typer.Abort()
@@ -735,9 +768,9 @@ def migrate(
     except (MigrationError, ConflictError, SourceRunningError, StorageError, ValueError) as exc:
         if json_output:
             report = failure_report(from_project, paths.root, str(exc))
-            emit_json("migrate", report.to_dict())
+            emit_json("migrate", report.to_dict(), err=True)
             raise typer.Exit(EXIT_USER_ERROR)
-        fail(str(exc))
+        fail_exception(exc)
 
     if json_output:
         emit_json("migrate", report.to_dict())
@@ -816,7 +849,7 @@ def backup(
         BackupError,
         ValueError,
     ) as exc:
-        fail(str(exc))
+        fail_exception(exc)
 
     if json_output:
         emit_json("backup", report.to_dict())
@@ -861,7 +894,7 @@ def restore(
         StorageError,
         ValueError,
     ) as exc:
-        fail(str(exc))
+        fail_exception(exc)
 
     if json_output:
         emit_json("restore", report.to_dict())
@@ -895,7 +928,7 @@ def show_logs(
             profile = manager().resolve(profile_id)
             prof_id = profile.id
         except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
-            fail(str(exc))
+            fail_exception(exc)
 
     entries = read_profile_logs(paths.logs_dir, profile_id=prof_id, last_n=last)
 
