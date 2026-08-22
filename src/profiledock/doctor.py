@@ -7,7 +7,7 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, utc_now
+from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value, utc_now
 from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
 from .process_manager import _system_browser_executable, get_status, is_active_for_mutation
 from .storage import (
@@ -101,7 +101,7 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
     try:
         data = _read_json_file(profiles_file)
         if _is_versioned_document(data):
-            doc = MetadataDocument.from_dict(data)
+            doc = MetadataDocument.from_dict(migrate_metadata_value(data))
             profiles_dir = paths.profiles_dir
             validate_metadata_document(doc.profiles, profiles_dir)
             return DiagnosticCheck(
@@ -154,7 +154,7 @@ def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
     try:
         data = _read_json_file(backup_file)
         if _is_versioned_document(data):
-            doc = MetadataDocument.from_dict(data)
+            doc = MetadataDocument.from_dict(migrate_metadata_value(data))
             validate_metadata_document(doc.profiles, paths.profiles_dir)
             return DiagnosticCheck(
                 id=check_id,
@@ -682,7 +682,7 @@ def repair_environment(
                     )
                 )
             elif _is_versioned_document(data):
-                doc = MetadataDocument.from_dict(data)
+                doc = MetadataDocument.from_dict(migrate_metadata_value(data))
                 validate_metadata_document(doc.profiles, profiles_dir)
             else:
                 primary_bad = True
@@ -695,7 +695,7 @@ def repair_environment(
         try:
             data = _read_json_file(backup_file)
             if _is_versioned_document(data):
-                doc = MetadataDocument.from_dict(data)
+                doc = MetadataDocument.from_dict(migrate_metadata_value(data))
                 validate_metadata_document(doc.profiles, profiles_dir)
                 if not profiles_are_stopped(doc.profiles):
                     raise StorageError("cannot repair metadata while a profile is active")

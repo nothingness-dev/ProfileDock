@@ -60,6 +60,7 @@ app.add_typer(config_app, name="config")
 
 EXIT_SUCCESS = 0
 EXIT_USER_ERROR = 1
+CLI_JSON_OUTPUT_VERSION = 1
 _paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
 _paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared", default=False)
 _verbose: ContextVar[bool] = ContextVar("profiledock_verbose", default=False)
@@ -135,6 +136,10 @@ def runtime_path(profile: Profile) -> Path:
 def fail(message: str, code: int = EXIT_USER_ERROR) -> None:
     typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(code)
+
+
+def emit_json(command: str, data: object) -> None:
+    typer.echo(json.dumps({"output_version": CLI_JSON_OUTPUT_VERSION, "command": command, "data": data}, indent=2))
 
 
 def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
@@ -224,7 +229,7 @@ def list_profiles(
         for profile in profiles:
             status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
             items.append(_safe_profile_dict(profile, status=status))
-        typer.echo(json.dumps(items, indent=2))
+        emit_json("list", items)
         return
     if not profiles:
         typer.echo("No profiles found.")
@@ -249,7 +254,7 @@ def show(
     status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
     data = _safe_profile_dict(profile, status=status)
     if json_output:
-        typer.echo(json.dumps(data, indent=2))
+        emit_json("show", data)
         return
     rows = [
         ["ID:", profile.id],
@@ -286,7 +291,7 @@ def config_show(
         fail(str(exc))
     cfg = getattr(profile, "launch_config", None) or LaunchConfig()
     if json_output:
-        typer.echo(json.dumps(cfg.to_dict(), indent=2))
+        emit_json("config show", cfg.to_dict())
         return
     rows = [
         ["Profile:", f"{profile.name} ({profile.id})"],
@@ -421,7 +426,7 @@ def status(
                     "status": st,
                 }
             )
-        typer.echo(json.dumps(items, indent=2))
+        emit_json("status", items)
         return
     if not profiles:
         typer.echo("No profiles found.")
@@ -659,7 +664,7 @@ def doctor(
             "repairs": [r.to_dict() for r in repairs],
             "healthy": not has_failed,
         }
-        typer.echo(json.dumps(payload, indent=2))
+        emit_json("doctor", payload)
         if has_failed:
             raise typer.Exit(EXIT_USER_ERROR)
         return
@@ -714,7 +719,7 @@ def migrate(
                 paths.root,
                 "--remove-source requires --yes when using --json",
             )
-            typer.echo(json.dumps(report.to_dict(), indent=2))
+            emit_json("migrate", report.to_dict())
             raise typer.Exit(EXIT_USER_ERROR)
         if not typer.confirm(
             f"Are you sure you want to delete source profile data in '{from_project}' after migration?"
@@ -730,12 +735,12 @@ def migrate(
     except (MigrationError, ConflictError, SourceRunningError, StorageError, ValueError) as exc:
         if json_output:
             report = failure_report(from_project, paths.root, str(exc))
-            typer.echo(json.dumps(report.to_dict(), indent=2))
+            emit_json("migrate", report.to_dict())
             raise typer.Exit(EXIT_USER_ERROR)
         fail(str(exc))
 
     if json_output:
-        typer.echo(json.dumps(report.to_dict(), indent=2))
+        emit_json("migrate", report.to_dict())
         return
 
     typer.echo(f"Migration completed from '{from_project}' to '{paths.root}'.")
@@ -814,7 +819,7 @@ def backup(
         fail(str(exc))
 
     if json_output:
-        typer.echo(json.dumps(report.to_dict(), indent=2))
+        emit_json("backup", report.to_dict())
         return
 
     typer.echo(f"Backup created successfully: {report.output_path}")
@@ -859,7 +864,7 @@ def restore(
         fail(str(exc))
 
     if json_output:
-        typer.echo(json.dumps(report.to_dict(), indent=2))
+        emit_json("restore", report.to_dict())
         return
 
     typer.echo(f"Restore completed from archive: {report.archive_path}")
@@ -895,7 +900,7 @@ def show_logs(
     entries = read_profile_logs(paths.logs_dir, profile_id=prof_id, last_n=last)
 
     if json_output:
-        typer.echo(json.dumps(entries, indent=2))
+        emit_json("logs", entries)
         return
 
     if not entries:

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Generator, List, Optional, Union
 
 from .data_root import DataRootError, ensure_within_root
-from .models import LaunchConfig, MetadataDocument, METADATA_SCHEMA_VERSION, Profile
+from .models import LaunchConfig, MetadataDocument, METADATA_SCHEMA_VERSION, Profile, migrate_metadata_value
 from .validation import ValidationError, validate_metadata_document
 
 
@@ -230,12 +230,7 @@ def _backup_metadata(
 
 
 def _load_profiles_from_bare_array(data: List[Any]) -> List[Profile]:
-    profiles = []
-    for i, item in enumerate(data):
-        if not isinstance(item, dict):
-            raise ValidationError(f"bare array item {i} must be a JSON object")
-        profiles.append(Profile.from_dict(item))
-    return profiles
+    return MetadataDocument.from_dict(migrate_metadata_value(data)).profiles
 
 
 def load_metadata(path: Union[str, Path] = "profiles.json") -> MetadataDocument:
@@ -243,18 +238,12 @@ def load_metadata(path: Union[str, Path] = "profiles.json") -> MetadataDocument:
     if not path.exists():
         return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[])
     data = _read_json_file(path)
-    if _is_versioned_document(data):
-        try:
-            doc = MetadataDocument.from_dict(data)
-            validate_metadata_document(doc.profiles, _profile_root_for_metadata(path))
-            return doc
-        except (ValidationError, ValueError) as exc:
-            raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
-    if _is_bare_array(data):
-        profiles = _load_profiles_from_bare_array(data)
-        validate_metadata_document(profiles, _profile_root_for_metadata(path))
-        return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
-    raise MetadataCorruptedError(f"unrecognized metadata format in {path}")
+    try:
+        doc = MetadataDocument.from_dict(migrate_metadata_value(data))
+        validate_metadata_document(doc.profiles, _profile_root_for_metadata(path))
+        return doc
+    except (ValidationError, ValueError) as exc:
+        raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
 
 
 def _migrate_metadata_unlocked(
@@ -269,21 +258,16 @@ def _migrate_metadata_unlocked(
     if not path.exists():
         return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[])
     data = _read_json_file(path)
-    if _is_versioned_document(data):
-        try:
-            doc = MetadataDocument.from_dict(data)
-            validate_metadata_document(doc.profiles, profile_root)
-            return doc
-        except (ValidationError, ValueError) as exc:
-            raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
-    if not _is_bare_array(data):
-        raise MetadataCorruptedError(f"unrecognized metadata format in {path}")
-    profiles = _load_profiles_from_bare_array(data)
-    validate_metadata_document(profiles, profile_root)
-    if backup:
-        _backup_metadata(path, backup_path, root)
-    doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
-    _atomic_write(path, json.dumps(doc.to_dict(), indent=2) + "\n", root)
+    try:
+        migrated = migrate_metadata_value(data)
+        doc = MetadataDocument.from_dict(migrated)
+        validate_metadata_document(doc.profiles, profile_root)
+    except ValueError as exc:
+        raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
+    if migrated != data:
+        if backup:
+            _backup_metadata(path, backup_path, root)
+        _atomic_write(path, json.dumps(migrated, indent=2) + "\n", root)
     return doc
 
 
@@ -310,16 +294,9 @@ def load_metadata_with_recovery(
         if recovery_path.exists():
             try:
                 data = _read_json_file(recovery_path)
-                if _is_versioned_document(data):
-                    doc = MetadataDocument.from_dict(data)
-                    validate_metadata_document(doc.profiles, _profile_root_for_metadata(path))
-                    return doc
-                if _is_bare_array(data):
-                    profiles = _load_profiles_from_bare_array(data)
-                    validate_metadata_document(profiles, _profile_root_for_metadata(path))
-                    return MetadataDocument(
-                        schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
-                    )
+                doc = MetadataDocument.from_dict(migrate_metadata_value(data))
+                validate_metadata_document(doc.profiles, _profile_root_for_metadata(path))
+                return doc
             except (MetadataCorruptedError, ValidationError, ValueError):
                 pass
         raise

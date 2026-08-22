@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from .data_root import DataPaths, DataRootError, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
-from .models import LaunchConfig, METADATA_SCHEMA_VERSION, MetadataDocument, Profile
+from .models import LaunchConfig, METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_launch_config
 from .storage import (
     _atomic_write,
     _backup_metadata,
@@ -116,6 +116,18 @@ def _validate_safe_member_path(member_name: str) -> Path:
 def _validated_archive_profile(value: Any) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise InvalidArchiveError("manifest profile entries must be JSON objects")
+    expected_fields = {
+        "id", "name", "created_at", "last_launched_at", "engine",
+        "launch_config", "file_count", "total_bytes", "files",
+    }
+    if set(value) != expected_fields:
+        raise InvalidArchiveError("manifest profile fields do not match backup format version 1")
+    launch_config = value.get("launch_config")
+    if launch_config is not None:
+        try:
+            launch_config = migrate_launch_config(launch_config)
+        except ValueError as exc:
+            raise InvalidArchiveError(f"invalid launch config in manifest: {exc}") from exc
     profile_value = {
         "id": value.get("id"),
         "name": value.get("name"),
@@ -123,7 +135,7 @@ def _validated_archive_profile(value: Any) -> Dict[str, Any]:
         "data_dir": "archive-placeholder",
         "last_launched_at": value.get("last_launched_at"),
         "engine": value.get("engine"),
-        "launch_config": value.get("launch_config"),
+        "launch_config": launch_config,
     }
     try:
         profile = Profile.from_dict(profile_value)
@@ -133,6 +145,11 @@ def _validated_archive_profile(value: Any) -> Dict[str, Any]:
     files = value.get("files")
     if not isinstance(files, dict):
         raise InvalidArchiveError(f"manifest files for profile '{profile.id}' must be an object")
+    if type(value["file_count"]) is not int or value["file_count"] != len(files):
+        raise InvalidArchiveError(f"manifest file count for profile '{profile.id}' is invalid")
+    if type(value["total_bytes"]) is not int or value["total_bytes"] < 0:
+        raise InvalidArchiveError(f"manifest byte total for profile '{profile.id}' is invalid")
+    calculated_bytes = 0
     for relative_path, metadata in files.items():
         if not isinstance(relative_path, str) or not relative_path or relative_path in (".", ".."):
             raise InvalidArchiveError(f"invalid file path in manifest for profile '{profile.id}'")
@@ -143,8 +160,11 @@ def _validated_archive_profile(value: Any) -> Dict[str, Any]:
         checksum = metadata.get("sha256")
         if type(size) is not int or size < 0 or size > MAX_MEMBER_SIZE_BYTES:
             raise InvalidArchiveError(f"invalid file size for '{relative_path}'")
+        calculated_bytes += size
         if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
             raise InvalidArchiveError(f"invalid SHA-256 checksum for '{relative_path}'")
+    if calculated_bytes != value["total_bytes"]:
+        raise InvalidArchiveError(f"manifest byte total for profile '{profile.id}' does not match files")
     normalized = dict(value)
     normalized["id"] = profile.id
     normalized["name"] = profile.name
@@ -226,13 +246,30 @@ def restore_backup_archive(
 
         if not isinstance(manifest, dict):
             raise InvalidArchiveError("backup manifest must be a JSON object")
+        expected_manifest_fields = {
+            "format_version", "profiledock_version", "created_at", "total_profiles",
+            "total_files", "total_bytes", "profiles",
+        }
+        if set(manifest) != expected_manifest_fields:
+            raise InvalidArchiveError("manifest fields do not match backup format version 1")
         format_version = manifest.get("format_version")
-        if format_version != 1:
+        if type(format_version) is not int or format_version != 1:
             raise InvalidArchiveError(f"unsupported backup archive format version: {format_version}")
+        if not isinstance(manifest["profiledock_version"], str) or not isinstance(manifest["created_at"], str):
+            raise InvalidArchiveError("manifest version and creation time must be strings")
+        for field in ("total_profiles", "total_files", "total_bytes"):
+            if type(manifest[field]) is not int or manifest[field] < 0:
+                raise InvalidArchiveError(f"manifest {field} must be a non-negative integer")
         profiles_data = manifest.get("profiles", [])
         if not isinstance(profiles_data, list):
             raise InvalidArchiveError("manifest profiles must be a list")
         profiles_data = [_validated_archive_profile(profile) for profile in profiles_data]
+        if manifest["total_profiles"] != len(profiles_data):
+            raise InvalidArchiveError("manifest profile total does not match profile entries")
+        if manifest["total_files"] != sum(profile["file_count"] for profile in profiles_data):
+            raise InvalidArchiveError("manifest file total does not match profile entries")
+        if manifest["total_bytes"] != sum(profile["total_bytes"] for profile in profiles_data):
+            raise InvalidArchiveError("manifest byte total does not match profile entries")
 
         archive_profile_ids: Set[str] = set()
         archive_profile_names: Set[str] = set()

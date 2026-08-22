@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from .data_root import DataPaths, DataRootError, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
-from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
+from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value
 from .process_manager import _alive, is_active_for_mutation
 from .storage import (
     _atomic_write,
@@ -128,12 +128,7 @@ def _detect_source_layout(source_root: Path) -> SourceLayout:
 def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> List[Profile]:
     try:
         data = json.loads(metadata_bytes.decode("utf-8"))
-        if _is_versioned_document(data):
-            profiles = MetadataDocument.from_dict(data).profiles
-        elif _is_bare_array(data):
-            profiles = _load_profiles_from_bare_array(data)
-        else:
-            raise ValueError("unrecognized source metadata format")
+        profiles = MetadataDocument.from_dict(migrate_metadata_value(data)).profiles
     except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
         raise MigrationError(f"source metadata corrupted: {exc}") from exc
     normalized = []

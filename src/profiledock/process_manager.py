@@ -14,8 +14,18 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from uuid import uuid4
 
 _MAX_ERROR_BYTES = 4096
-RUNNING_STATE_PROTOCOL_VERSION = 1
+RUNNING_STATE_PROTOCOL_VERSION = 2
 _MAX_COMMAND_BYTES = 512
+_DIRECT_STATE_FIELDS = frozenset({
+    "protocol_version", "engine", "profile_id", "pid", "launcher_pid",
+    "process_create_time", "tabs", "channel", "started_at", "status", "closing",
+})
+_PLAYWRIGHT_STATE_FIELDS = frozenset({
+    "protocol_version", "engine", "profile_id", "controller_pid",
+    "controller_started_at", "launcher_pid", "port", "token", "tabs",
+    "page_count", "channel", "status", "closing", "browser_channel",
+    "start_urls", "window_width", "window_height", "legacy_controller", "pid",
+})
 
 
 class ProfileRunningError(Exception):
@@ -109,6 +119,8 @@ def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
 
 
 def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> bool:
+    if value.get("engine") != "playwright" or set(value) - _PLAYWRIGHT_STATE_FIELDS:
+        return False
     if (
         type(value.get("protocol_version")) is not int
         or value["protocol_version"] != RUNNING_STATE_PROTOCOL_VERSION
@@ -132,7 +144,13 @@ def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> boo
 
 
 def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
-    if value.get("engine") != "direct" or value.get("profile_id") != profile_id:
+    if (
+        value.get("engine") != "direct"
+        or value.get("profile_id") != profile_id
+        or set(value) - _DIRECT_STATE_FIELDS
+        or type(value.get("protocol_version")) is not int
+        or value["protocol_version"] != RUNNING_STATE_PROTOCOL_VERSION
+    ):
         return False
     if type(value.get("pid")) is not int or type(value.get("launcher_pid")) is not int:
         return False
@@ -152,37 +170,48 @@ def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
 
 
 def _upgrade_legacy_state(path: Path, value: Dict[str, Any], profile_id: str) -> Dict[str, Any]:
-    if "protocol_version" in value:
-        return value
-    try:
-        pid = int(value.get("pid", 0))
-        port = int(value.get("port", 0))
-    except (TypeError, ValueError):
-        return value
-    token = value.get("token")
-    if pid < 1 or port < 1 or not isinstance(token, str) or len(token) < 32:
+    version = value.get("protocol_version", 0)
+    if type(version) is not int or version < 0 or version > RUNNING_STATE_PROTOCOL_VERSION:
         return value
     upgraded = dict(value)
     try:
         modified_at = path.stat().st_mtime
     except OSError:
         return value
-    upgraded.update(
-        {
-            "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
-            "profile_id": profile_id,
-            "controller_pid": pid,
-            "controller_started_at": datetime.fromtimestamp(
-                modified_at, timezone.utc
-            ).isoformat(),
-            "status": "running",
-            "legacy_controller": True,
-        }
-    )
+    while version < RUNNING_STATE_PROTOCOL_VERSION:
+        if version == 0:
+            engine = "direct" if upgraded.get("engine") == "direct" else "playwright"
+            if engine == "playwright":
+                try:
+                    pid = int(upgraded.get("controller_pid", upgraded.get("pid", 0)))
+                    port = int(upgraded.get("port", 0))
+                except (TypeError, ValueError):
+                    return value
+                token = upgraded.get("token")
+                if pid < 1 or port < 1 or not isinstance(token, str) or len(token) < 32:
+                    return value
+                upgraded.update({
+                    "profile_id": profile_id,
+                    "controller_pid": pid,
+                    "controller_started_at": upgraded.get("controller_started_at") or datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
+                    "status": upgraded.get("status", "running"),
+                    "legacy_controller": True,
+                })
+            upgraded["protocol_version"] = 1
+            version = 1
+        elif version == 1:
+            upgraded["engine"] = "direct" if upgraded.get("engine") == "direct" else "playwright"
+            upgraded["protocol_version"] = 2
+            version = 2
+    if upgraded == value:
+        return upgraded
+    backup_path = path.with_name(f"{path.name}.v{value.get('protocol_version', 0)}.bak")
     try:
+        if not backup_path.exists():
+            _atomic_private_bytes(backup_path, json.dumps(value).encode("utf-8"))
         _atomic_private_json(path, upgraded)
     except OSError:
-        pass
+        return value
     return upgraded
 
 
@@ -359,6 +388,10 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
             if clean_stale:
                 _unlink_quietly(path)
             return "stale"
+        state_version = state.get("protocol_version", 0)
+        if type(state_version) is int and state_version > RUNNING_STATE_PROTOCOL_VERSION:
+            return "stale"
+        state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
         if state.get("engine") == "direct":
             if not _valid_direct_state(state, Path(data_dir).parent.name):
                 if clean_stale:
@@ -375,7 +408,6 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
             if clean_stale:
                 _unlink_quietly(path)
             return "stale"
-        state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
         if not state or not _valid_state(state, Path(data_dir).parent.name):
             if clean_stale:
                 _unlink_quietly(path)
@@ -436,6 +468,7 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
     if not state:
         return path.exists()
     profile_id = Path(data_dir).parent.name
+    state = _upgrade_legacy_state(path, state, profile_id)
     if state.get("engine") == "direct":
         if not _valid_direct_state(state, profile_id):
             return True
@@ -445,27 +478,6 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
             pid == 0 and _alive(launcher_pid)
         )
     upgraded = dict(state)
-    if "protocol_version" not in upgraded:
-        try:
-            legacy_pid = int(upgraded.get("pid", 0))
-            legacy_port = int(upgraded.get("port", 0))
-            modified_at = path.stat().st_mtime
-        except (OSError, TypeError, ValueError):
-            return True
-        legacy_token = upgraded.get("token")
-        if legacy_pid < 1 or legacy_port < 1 or not isinstance(legacy_token, str):
-            return True
-        upgraded.update(
-            {
-                "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
-                "profile_id": profile_id,
-                "controller_pid": legacy_pid,
-                "controller_started_at": datetime.fromtimestamp(
-                    modified_at, timezone.utc
-                ).isoformat(),
-                "legacy_controller": True,
-            }
-        )
     if not _valid_state(upgraded, profile_id):
         return True
     controller_pid = int(upgraded.get("controller_pid", -1))
@@ -559,6 +571,7 @@ def start_direct_chrome(
 
     started_at = _utc_now()
     initial = {
+        "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
         "profile_id": Path(data_dir).parent.name,
         "pid": 0,
         "launcher_pid": os.getpid(),
@@ -622,6 +635,7 @@ def start_direct_chrome(
         _write_error(err, "process_identity_unavailable", message)
         raise BrowserLaunchError(message, "process_identity_unavailable")
     state = {
+        "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
         "profile_id": initial["profile_id"],
         "pid": process.pid,
         "launcher_pid": initial["launcher_pid"],
@@ -681,6 +695,7 @@ def start_controller(
     token = uuid4().hex
     initial = {
         "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+        "engine": "playwright",
         "profile_id": Path(data_dir).parent.name,
         "controller_pid": 0,
         "controller_started_at": _utc_now(),
@@ -769,6 +784,8 @@ def start_controller(
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
     path = state_path(data_dir, runtime_dir)
     initial_state = _read_state(path)
+    if initial_state:
+        initial_state = _upgrade_legacy_state(path, initial_state, Path(data_dir).parent.name)
     if initial_state and initial_state.get("engine") == "direct":
         if not _valid_direct_state(initial_state, Path(data_dir).parent.name):
             raise ProfileRunningError(
@@ -1101,6 +1118,7 @@ def _controller(
                     path,
                     {
                         "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+                        "engine": "playwright",
                         "profile_id": Path(data_dir).parent.name,
                         "controller_pid": os.getpid(),
                         "pid": os.getpid(),
