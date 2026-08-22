@@ -493,7 +493,7 @@ ProfileDock/
 
 ### Metadata document format
 
-`profiles.json` contains a versioned metadata document:
+`profiles.json` contains a strictly validated, versioned metadata document. Version 1 requires the `engine` field for every profile:
 
 ```json
 {
@@ -505,7 +505,8 @@ ProfileDock/
       "created_at": "2024-01-15T10:30:00+00:00",
       "data_dir": "/path/to/profiles/abc123/browser-data",
       "last_launched_at": null,
-      "engine": "direct"
+      "engine": "direct",
+      "launch_config": null
     }
   ]
 }
@@ -514,8 +515,8 @@ ProfileDock/
 The metadata document includes:
 
 - `schema_version`: Version of the metadata format (currently 1)
-- `profiles`: Array of profile objects with required fields: `id`, `name`, `created_at`, `data_dir`
-- Optional fields: `last_launched_at` (ISO-8601 timestamp) and `engine` (`direct` or `playwright`)
+- `profiles`: Array of profile objects with required keys: `id`, `name`, `created_at`, `data_dir`, `last_launched_at`, `engine`, and `launch_config`
+- Nullable values remain explicit: `last_launched_at`, `engine`, and `launch_config` may be `null`
 
 ### Metadata migration
 
@@ -562,7 +563,9 @@ Metadata writes use cross-process locking, validated destinations, a previous-ve
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
 
 
-`running.json` exists while a launch is tracked. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, process creation time, launch PID, browser channel, start time, and status. State writes are atomic. Verifiably stale files can be cleaned automatically, while malformed or ambiguous state requires manual review.
+`running.json` exists while a launch is tracked. Protocol version 2 uses an explicit `engine` discriminator. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, process creation time, launch PID, browser channel, start time, and status. State writes are atomic. Verifiably stale files can be cleaned automatically, while malformed or ambiguous state requires manual review.
+
+The complete schema definitions, historical migrations, rollback behavior, and compatibility policy are documented in [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md).
 
 Runtime state, logs, backups, metadata, and browser data are separated. Runtime files are never written inside `browser-data`.
 
@@ -661,11 +664,21 @@ ProfileDock adheres to a strict, reproducible dependency policy designed for max
 
 ## JSON output format
 
-All JSON output from `--json` flags is stable and safe for scripting:
+All `--json` commands return a versioned envelope with exactly `output_version`, `command`, and `data`. Check `output_version` before consuming the command-specific `data` payload:
+
+```json
+{
+  "output_version": 1,
+  "command": "list",
+  "data": []
+}
+```
+
+The examples below show only the value inside `data`. See [FORMAT_COMPATIBILITY.md](FORMAT_COMPATIBILITY.md) for the compatibility contract.
 
 **`list --json`:**
 
-Always returns an array of profile objects:
+The `data` field is always an array of profile objects:
 
 ```json
 [
