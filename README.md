@@ -2,6 +2,8 @@
 
 ProfileDock is a lightweight command-line tool for managing isolated, persistent Chromium profiles. Every profile receives a separate browser data directory, so cookies, sessions, local storage, cache, login state, and browsing data do not leak into another ProfileDock profile.
 
+For the complete security assumptions, protections, and limitations, see [THREAT_MODEL.md](THREAT_MODEL.md).
+
 Current release: `0.14.0`
 
 ## Features
@@ -360,13 +362,13 @@ Performs comprehensive diagnostic checks across the environment and profile stor
 - **`system_chrome_executable`**: Detects a Chrome, Chromium, or Brave executable for direct mode.
 - **`browser_availability`**: Aggregate check verifying that at least one usable browser engine is present.
 - **`runtime_permissions`**: Checks read/write permissions on the `runtime/` directory.
-- **`stale_running_state`**: Detects leftover `running.json` state files from terminated processes.
+- **`stale_running_state`**: Detects verifiably stale `running.json` files and reports malformed or ambiguous state for manual review.
 - **`orphan_profile_directories`**: Identifies folders in `profiles/` that are not listed in metadata.
 - **`version_consistency`**: Verifies that the runtime version matches installed package metadata.
 
 **Repair capabilities (`--repair`):**
 
-- Cleans up stale runtime `running.json` files automatically for both `direct` and `playwright` engines.
+- Cleans up only runtime state that is verifiably stale. Malformed or ambiguous state is preserved because automatically deleting it could hide an active browser.
 - Cleans up incomplete temporary migration and restore directories (`.temp_restore_*`, `.temp_migrating_*`, `.m-*`, `.quarantine_*`).
 - Recovers valid metadata from `profiles.json.bak` if `profiles.json` is missing or corrupted.
 - Automatically migrates legacy bare-array format metadata to versioned schema.
@@ -555,12 +557,12 @@ Metadata writes use cross-process locking, validated destinations, a previous-ve
 
 **Process security & PID reuse protection**: For direct engine profiles, ProfileDock tracks process creation timestamps and verifies process identity before issuing shutdown signals, preventing accidental termination of unrelated processes if the operating system recycles PIDs.
 
-**IPC transport security**: Playwright controller communication uses owner-scoped loopback sockets and named channels with bounded message sizes, connection timeouts, and constant-time token comparison (`hmac.compare_digest`), preventing token leaks, replay, or malformed command attacks.
+**IPC transport security**: Playwright controller communication uses loopback sockets, bounded message sizes, connection timeouts, a per-launch bearer token, and constant-time token comparison (`hmac.compare_digest`). The protocol accepts only authenticated availability and close commands; it does not protect against a same-account attacker who can read runtime state.
 
 `profiles.json` contains profile metadata only. Chromium stores cookies, local storage, cache, sessions, and login state inside `browser-data`.
 
 
-`running.json` exists while a launch is tracked. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, launch PID, browser channel, start time, and status. State writes are atomic, and stale files are cleaned automatically.
+`running.json` exists while a launch is tracked. Playwright state contains the profile ID, controller PID, start time, loopback port, status, and a random authentication token; the controller accepts a close request only when its token matches. Direct-mode state contains the profile ID, tracked browser PID, process creation time, launch PID, browser channel, start time, and status. State writes are atomic. Verifiably stale files can be cleaned automatically, while malformed or ambiguous state requires manual review.
 
 Runtime state, logs, backups, metadata, and browser data are separated. Runtime files are never written inside `browser-data`.
 
