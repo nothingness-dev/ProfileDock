@@ -169,6 +169,19 @@ def test_restore_security_link_rejected(tmp_path):
         restore_backup_archive(malicious_archive, dst_paths)
 
 
+def test_restore_rejects_excessive_archive_member_count(tmp_path):
+    archive_file = tmp_path / "too-many-members.tar.gz"
+    with tarfile.open(archive_file, "w:gz") as tar:
+        manifest = json.dumps({"format_version": 1, "profiles": []}).encode("utf-8")
+        manifest_member = tarfile.TarInfo("backup_manifest.json")
+        manifest_member.size = len(manifest)
+        tar.addfile(manifest_member, io.BytesIO(manifest))
+        tar.addfile(tarfile.TarInfo("extra-directory"))
+    with patch("profiledock.restore.MAX_ARCHIVE_MEMBERS", 1):
+        with pytest.raises(DecompressionSecurityError, match="more members"):
+            restore_backup_archive(archive_file, make_paths(tmp_path / "destination"))
+
+
 def test_restore_security_checksum_mismatch_fails(tmp_path):
     src_paths = make_paths(tmp_path / "src")
     p_data = src_paths.profiles_dir / "p1" / "browser-data"

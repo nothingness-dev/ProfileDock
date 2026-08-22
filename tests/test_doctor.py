@@ -238,8 +238,8 @@ def test_check_stale_running_state_direct(tmp_path):
     with patch("profiledock.process_manager._alive", return_value=False):
         chk, stale_files = check_stale_running_state(tmp_path)
         assert chk.status == STATUS_WARNING
-        assert len(stale_files) == 1
-        assert stale_files[0] == running_json
+        assert "ambiguous" in chk.summary
+        assert stale_files == []
 
 
 
@@ -252,8 +252,8 @@ def test_check_stale_running_state(tmp_path):
 
     chk, stale_files = check_stale_running_state(tmp_path)
     assert chk.status == STATUS_WARNING
-    assert len(stale_files) == 1
-    assert stale_files[0] == running_json
+    assert "ambiguous" in chk.summary
+    assert stale_files == []
 
 
 def test_check_orphan_directories(tmp_path):
@@ -286,8 +286,8 @@ def test_repair_environment_stale_files(tmp_path):
     running_json.write_text(json.dumps({"pid": 999999, "port": 0}), encoding="utf-8")
 
     repairs = repair_environment(tmp_path)
-    assert len(repairs) >= 1
-    assert not running_json.exists()
+    assert repairs == []
+    assert running_json.exists()
 
 
 def test_repair_environment_stale_direct_files(tmp_path):
@@ -302,8 +302,8 @@ def test_repair_environment_stale_direct_files(tmp_path):
 
     with patch("profiledock.process_manager._alive", return_value=False):
         repairs = repair_environment(tmp_path)
-        assert len(repairs) >= 1
-        assert not running_json.exists()
+        assert repairs == []
+        assert running_json.exists()
 
 
 

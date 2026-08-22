@@ -121,6 +121,39 @@ def test_mutation_check_uses_playwright_controller_availability(tmp_path):
         assert is_active_for_mutation(str(data_dir))
 
 
+def test_mutation_check_fails_closed_for_corrupt_runtime_state(tmp_path):
+    data_dir = tmp_path / "corrupt" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_path(str(data_dir)).write_text("not-json", encoding="utf-8")
+    assert is_active_for_mutation(str(data_dir))
+
+
+def test_direct_close_never_signals_state_without_process_identity(tmp_path):
+    from profiledock.process_manager import ProfileRunningError, close_controller
+
+    data_dir = tmp_path / "direct-unverified" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state_path(str(data_dir)).write_text(
+        json.dumps(
+            {
+                "profile_id": "direct-unverified",
+                "pid": 12345,
+                "launcher_pid": os.getpid(),
+                "engine": "direct",
+                "tabs": 1,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("profiledock.process_manager._alive", return_value=True), patch(
+        "profiledock.process_manager.subprocess.run"
+    ) as signal_process:
+        with pytest.raises(ProfileRunningError, match="unverified process"):
+            close_controller(str(data_dir))
+    signal_process.assert_not_called()
+
+
 def test_direct_close_detects_pid_reuse(tmp_path):
     from profiledock.process_manager import (
         ProfileRunningError,
@@ -293,14 +326,18 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
     class DummyProcess:
         pid = 12345
 
-    with patch("profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()):
+    with patch(
+        "profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()
+    ), patch("profiledock.process_manager._get_process_create_time", return_value=100.0):
         state = start_direct_chrome(str(data_dir), tabs=2, executable_path=dummy_chrome)
         assert state["pid"] == 12345
         assert state["engine"] == "direct"
         assert state["tabs"] == 2
         assert state["channel"] == "chrome"
 
-    with patch("profiledock.process_manager._alive", return_value=True):
+    with patch("profiledock.process_manager._alive", return_value=True), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=100.0
+    ):
         assert get_status(str(data_dir)) == "running"
         assert is_running(str(data_dir))
 
@@ -310,6 +347,8 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
     with patch(
         "profiledock.process_manager._alive",
         side_effect=[True, True, True, False, False],
+    ), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=100.0
     ), patch("subprocess.run"):
         close_controller(str(data_dir), timeout=0)
         assert not (data_dir.parent / "running.json").exists()
@@ -341,6 +380,7 @@ def test_direct_chrome_close_failure_preserves_state(tmp_path):
                 "profile_id": "profile-direct",
                 "pid": 12345,
                 "launcher_pid": os.getpid(),
+                "process_create_time": 100.0,
                 "engine": "direct",
                 "tabs": 1,
                 "channel": "chrome",
@@ -352,8 +392,8 @@ def test_direct_chrome_close_failure_preserves_state(tmp_path):
     )
 
     with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager.subprocess.run"
-    ):
+        "profiledock.process_manager._get_process_create_time", return_value=100.0
+    ), patch("profiledock.process_manager.subprocess.run"):
         with pytest.raises(BrowserLaunchError, match="did not close"):
             close_controller(str(data_dir), timeout=0)
     assert state_file.exists()
@@ -392,12 +432,33 @@ def test_direct_launch_state_failure_stops_browser(tmp_path):
     with patch("profiledock.process_manager.subprocess.Popen", return_value=process), patch(
         "profiledock.process_manager._atomic_private_json",
         side_effect=OSError("state unavailable"),
+    ), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=100.0
     ), patch("profiledock.process_manager._stop_process") as stop_process:
         with pytest.raises(BrowserLaunchError, match="state unavailable"):
             start_direct_chrome(str(data_dir), 1, executable_path=executable)
 
     stop_process.assert_called_once_with(process)
     assert not (data_dir.parent / "running.json").exists()
+
+
+def test_direct_launch_stops_browser_when_identity_cannot_be_verified(tmp_path):
+    from profiledock.process_manager import BrowserLaunchError, start_direct_chrome
+
+    data_dir = tmp_path / "profile-unverified" / "browser-data"
+    data_dir.mkdir(parents=True)
+    executable = tmp_path / "chrome.exe"
+    executable.write_text("browser", encoding="utf-8")
+    process = type("Process", (), {"pid": 12345})()
+    with patch(
+        "profiledock.process_manager.subprocess.Popen", return_value=process
+    ), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=None
+    ), patch("profiledock.process_manager._stop_process") as stop_process:
+        with pytest.raises(BrowserLaunchError, match="verify the launched browser"):
+            start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
+    stop_process.assert_called_once_with(process)
+    assert not state_path(str(data_dir)).exists()
 
 
 def test_direct_launch_maps_urls_and_window_size(tmp_path):
@@ -414,7 +475,9 @@ def test_direct_launch_maps_urls_and_window_size(tmp_path):
         captured_args.extend(args)
         return type("Process", (), {"pid": 12345})()
 
-    with patch("profiledock.process_manager.subprocess.Popen", side_effect=mock_popen):
+    with patch(
+        "profiledock.process_manager.subprocess.Popen", side_effect=mock_popen
+    ), patch("profiledock.process_manager._get_process_create_time", return_value=100.0):
         start_direct_chrome(
             str(data_dir),
             tabs=3,
@@ -462,7 +525,11 @@ def test_start_direct_chrome_operates_without_playwright(tmp_path):
 
     with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
         process = type("Process", (), {"pid": 54321})()
-        with patch("profiledock.process_manager.subprocess.Popen", return_value=process):
+        with patch(
+            "profiledock.process_manager.subprocess.Popen", return_value=process
+        ), patch(
+            "profiledock.process_manager._get_process_create_time", return_value=100.0
+        ):
             state = start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
             assert state["pid"] == 54321
             assert state["engine"] == "direct"
