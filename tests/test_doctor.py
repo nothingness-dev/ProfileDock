@@ -524,12 +524,16 @@ def test_repair_reattach_orphans(tmp_path):
 def test_repair_incomplete_operations_cleanup(tmp_path):
     layout = paths(tmp_path)
     stale_temp = layout.profiles_dir / ".temp_restore_abc123"
+    stale_deletion = layout.profiles_dir / ".deleting-abc123-deadbeef"
     stale_temp.mkdir(parents=True)
+    stale_deletion.mkdir(parents=True)
     (stale_temp / "partial.txt").write_text("data", encoding="utf-8")
+    (stale_deletion / "browser-data").mkdir()
 
     repairs = repair_environment(tmp_path)
     assert any(r.id == "repair_incomplete_operations" for r in repairs)
     assert not stale_temp.exists()
+    assert not stale_deletion.exists()
 
 
 def test_repair_recreate_missing_directories(tmp_path):

@@ -154,6 +154,16 @@ class TestUnsupportedFutureSchema:
         with pytest.raises(MetadataCorruptedError, match="unsupported metadata schema version"):
             load_metadata(metadata_path)
 
+    def test_refuse_writing_future_schema_version(self, metadata_path: Path, profiles_dir: Path) -> None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        with pytest.raises(StorageError, match="refusing to write unsupported"):
+            save_metadata(
+                MetadataDocument(schema_version=METADATA_SCHEMA_VERSION + 1, profiles=[]),
+                metadata_path,
+                profiles_dir,
+            )
+        assert not metadata_path.exists()
+
 
 class TestDuplicateIDs:
     def test_reject_duplicate_ids(self, temp_dir: Path, profiles_dir: Path, metadata_path: Path) -> None:

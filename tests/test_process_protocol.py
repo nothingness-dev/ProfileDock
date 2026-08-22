@@ -13,10 +13,38 @@ from profiledock.process_manager import (
     _valid_state,
     _wait_for_close,
     _write_all,
+    close_controller,
     get_status,
     is_active_for_mutation,
+    ProfileRunningError,
+    RUNNING_STATE_PROTOCOL_VERSION,
     state_path,
 )
+
+
+def test_close_preserves_malformed_runtime_state(tmp_path):
+    data_dir = tmp_path / "profile-a" / "browser-data"
+    data_dir.mkdir(parents=True)
+    path = state_path(str(data_dir))
+    path.write_text("not-json", encoding="utf-8")
+    with pytest.raises(ProfileRunningError, match="ambiguous state"):
+        close_controller(str(data_dir))
+    assert path.read_text(encoding="utf-8") == "not-json"
+
+
+def test_close_preserves_unsupported_future_runtime_state(tmp_path):
+    data_dir = tmp_path / "profile-a" / "browser-data"
+    data_dir.mkdir(parents=True)
+    path = state_path(str(data_dir))
+    value = {
+        "protocol_version": RUNNING_STATE_PROTOCOL_VERSION + 1,
+        "engine": "playwright",
+        "profile_id": "profile-a",
+    }
+    path.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(ProfileRunningError, match="invalid"):
+        close_controller(str(data_dir))
+    assert json.loads(path.read_text(encoding="utf-8")) == value
 
 
 class Connection:
@@ -87,6 +115,8 @@ def test_mutation_check_uses_direct_pid_identity(tmp_path):
                 "process_create_time": 10.0,
                 "engine": "direct",
                 "tabs": 1,
+                "channel": "chromium",
+                "status": "running",
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
         ),
@@ -154,6 +184,36 @@ def test_direct_close_never_signals_state_without_process_identity(tmp_path):
     signal_process.assert_not_called()
 
 
+def test_direct_close_preserves_state_when_live_process_identity_is_unavailable(tmp_path):
+    data_dir = tmp_path / "direct-unavailable" / "browser-data"
+    data_dir.mkdir(parents=True)
+    path = state_path(str(data_dir))
+    path.write_text(
+        json.dumps(
+            {
+                "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
+                "profile_id": "direct-unavailable",
+                "pid": 12345,
+                "launcher_pid": os.getpid(),
+                "process_create_time": 100.0,
+                "engine": "direct",
+                "tabs": 1,
+                "channel": "chrome",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "status": "running",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch("profiledock.process_manager._alive", return_value=True), patch(
+        "profiledock.process_manager._get_process_create_time", return_value=None
+    ), patch("profiledock.process_manager.subprocess.run") as signal_process:
+        with pytest.raises(ProfileRunningError, match="could not be verified"):
+            close_controller(str(data_dir))
+    signal_process.assert_not_called()
+    assert path.exists()
+
+
 def test_direct_close_detects_pid_reuse(tmp_path):
     from profiledock.process_manager import (
         ProfileRunningError,
@@ -213,7 +273,7 @@ def test_legacy_live_state_is_upgraded(tmp_path):
     assert state["legacy_controller"] is True
 
 
-def test_state_for_another_profile_is_stale(tmp_path):
+def test_state_for_another_profile_is_preserved_as_error(tmp_path):
     data_dir = tmp_path / "profile-a" / "browser-data"
     data_dir.mkdir(parents=True)
     path = state_path(str(data_dir))
@@ -230,7 +290,8 @@ def test_state_for_another_profile_is_stale(tmp_path):
         ),
         encoding="utf-8",
     )
-    assert get_status(str(data_dir), clean_stale=False) == "stale"
+    assert get_status(str(data_dir), clean_stale=False) == "error"
+    assert path.exists()
 
 
 def test_private_state_write_retries_transient_replace_failure(tmp_path):
@@ -251,13 +312,14 @@ def test_private_state_write_retries_transient_replace_failure(tmp_path):
     assert attempts == 3
 
 
-def test_stale_cleanup_tolerates_unlink_failure(tmp_path):
+def test_malformed_state_is_preserved_without_unlink_attempt(tmp_path):
     data_dir = tmp_path / "profile-a" / "browser-data"
     data_dir.mkdir(parents=True)
     path = state_path(str(data_dir))
     path.write_text("corrupted", encoding="utf-8")
-    with patch.object(Path, "unlink", side_effect=PermissionError("locked")):
-        assert get_status(str(data_dir)) == "stale"
+    with patch.object(Path, "unlink", side_effect=AssertionError("unlink attempted")):
+        assert get_status(str(data_dir)) == "error"
+    assert path.exists()
 
 
 def test_private_write_all_handles_partial_writes():
@@ -346,7 +408,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
 
     with patch(
         "profiledock.process_manager._alive",
-        side_effect=[True, True, True, False, False],
+        side_effect=[True, True, True, True, False, False],
     ), patch(
         "profiledock.process_manager._get_process_create_time", return_value=100.0
     ), patch("subprocess.run"):
@@ -354,7 +416,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
         assert not (data_dir.parent / "running.json").exists()
 
 
-def test_direct_chrome_stale_detection(tmp_path):
+def test_incomplete_direct_state_is_preserved_as_error(tmp_path):
     data_dir = tmp_path / "profile-direct-stale" / "browser-data"
     data_dir.mkdir(parents=True)
     state_file = data_dir.parent / "running.json"
@@ -364,8 +426,8 @@ def test_direct_chrome_stale_detection(tmp_path):
     )
 
     with patch("profiledock.process_manager._alive", return_value=False):
-        assert get_status(str(data_dir), clean_stale=True) == "stale"
-        assert not state_file.exists()
+        assert get_status(str(data_dir), clean_stale=True) == "error"
+        assert state_file.exists()
 
 
 def test_direct_chrome_close_failure_preserves_state(tmp_path):
@@ -417,7 +479,8 @@ def test_direct_state_rejects_invalid_pid(tmp_path):
         ),
         encoding="utf-8",
     )
-    assert get_status(str(data_dir), clean_stale=False) == "stale"
+    assert get_status(str(data_dir), clean_stale=False) == "error"
+    assert state_file.exists()
 
 
 def test_direct_launch_state_failure_stops_browser(tmp_path):

@@ -1,8 +1,14 @@
 import json
 import os
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from profiledock.process_manager import get_status, is_running, state_path
+
+
+class FixedUuid:
+    def __init__(self, value):
+        self.hex = value
 
 
 def test_create_list_delete(manager):
@@ -15,6 +21,20 @@ def test_create_list_delete(manager):
     assert not __import__("pathlib").Path(profile.data_dir).parent.exists()
 
 
+def test_create_retries_profile_id_collision_without_touching_existing_directory(manager):
+    existing = manager.profiles_dir / "deadbeef"
+    existing.mkdir()
+    marker = existing / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    with patch(
+        "profiledock.profile_manager.uuid.uuid4",
+        side_effect=[FixedUuid("deadbeef00000000"), FixedUuid("cafebabe00000000")],
+    ):
+        profile = manager.create("Collision Safe")
+    assert profile.id == "cafebabe"
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
 def test_delete_removes_metadata_when_profile_directory_is_missing(manager):
     profile = manager.create("Missing")
     __import__("shutil").rmtree(__import__("pathlib").Path(profile.data_dir).parent)
@@ -22,13 +42,13 @@ def test_delete_removes_metadata_when_profile_directory_is_missing(manager):
     assert manager.list_profiles() == []
 
 
-def test_running_state_stale_file_is_cleaned(manager):
+def test_malformed_running_state_is_preserved(manager):
     profile = manager.create("Personal")
     path = state_path(profile.data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"pid": 999999, "port": 1}', encoding="utf-8")
-    assert not is_running(profile.data_dir)
-    assert not path.exists()
+    assert is_running(profile.data_dir)
+    assert path.exists()
 
 
 def test_get_status_states(manager):
@@ -45,6 +65,8 @@ def test_get_status_states(manager):
         "launcher_pid": os.getpid(),
         "port": 0,
         "token": "x" * 32,
+        "tabs": 1,
+        "status": "starting",
     }
     path.write_text(json.dumps(starting), encoding="utf-8")
     assert get_status(profile.data_dir, clean_stale=False) == "starting"

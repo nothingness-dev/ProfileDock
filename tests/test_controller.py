@@ -145,7 +145,7 @@ def test_duplicate_launch_is_rejected(controller_env):
         start_controller(str(data_dir), 1, headless=True)
 
 
-def test_stale_running_state_is_cleaned(controller_env):
+def test_malformed_running_state_blocks_launch_and_is_preserved(controller_env):
     manager, profile, data_dir, owned_pids = controller_env
     path = state_path(str(data_dir))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,8 +153,10 @@ def test_stale_running_state_is_cleaned(controller_env):
         json.dumps({"pid": 999999, "port": 12345, "token": "x", "tabs": 1}),
         encoding="utf-8",
     )
-    assert not is_running(str(data_dir))
-    assert not path.exists()
+    assert is_running(str(data_dir))
+    assert path.exists()
+    with pytest.raises(ProfileRunningError):
+        start_controller(str(data_dir), 1, headless=True)
 
 
 def test_close_exits_controller_and_removes_state(controller_env):

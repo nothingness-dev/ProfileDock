@@ -110,8 +110,10 @@ def test_resolve_empty_string(manager):
     manager.create("Test")
     try:
         manager.resolve("")
-    except (AmbiguousProfileError, ProfileNotFoundError):
-        pass
+    except ProfileNotFoundError as exc:
+        assert "empty identifier" in str(exc)
+    else:
+        assert False, "expected ProfileNotFoundError"
 
 
 def test_resolve_used_by_delete(manager):
