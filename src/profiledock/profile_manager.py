@@ -59,6 +59,8 @@ class ProfileManager:
         raise ProfileNotFoundError(f"profile not found: {profile_id}")
 
     def resolve(self, identifier: str) -> Profile:
+        if not isinstance(identifier, str) or not identifier:
+            raise ProfileNotFoundError("profile not found: empty identifier")
         profiles = self.list_profiles()
         for profile in profiles:
             if profile.id == identifier:
@@ -87,18 +89,29 @@ class ProfileManager:
             raise ValueError("profile name cannot be empty")
         if engine is not None and engine not in {"direct", "playwright"}:
             raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
-        profile_id = uuid.uuid4().hex[:8]
-        profile_dir = self.profiles_dir / profile_id
-        profile_dir.mkdir(mode=0o700, exist_ok=False)
-        profile_dir.chmod(0o700)
-        data_dir = profile_dir / "browser-data"
-        data_dir.mkdir(mode=0o700)
-        data_dir.chmod(0o700)
-        profile = Profile(profile_id, name, utc_now(), str(data_dir), engine=engine)
+        profile_id = ""
+        profile_dir = self.profiles_dir
+        for _ in range(16):
+            candidate_id = uuid.uuid4().hex[:8]
+            candidate_dir = self.profiles_dir / candidate_id
+            try:
+                candidate_dir.mkdir(mode=0o700, exist_ok=False)
+            except FileExistsError:
+                continue
+            profile_id = candidate_id
+            profile_dir = candidate_dir
+            break
+        if not profile_id:
+            raise StorageError("could not allocate a unique profile ID")
         try:
+            profile_dir.chmod(0o700)
+            data_dir = profile_dir / "browser-data"
+            data_dir.mkdir(mode=0o700)
+            data_dir.chmod(0o700)
+            profile = Profile(profile_id, name, utc_now(), str(data_dir), engine=engine)
             add_profile_atomic(profile, self.profiles_file, self.profiles_dir, self.backup_file)
         except Exception:
-            shutil.rmtree(data_dir.parent, ignore_errors=True)
+            shutil.rmtree(profile_dir, ignore_errors=True)
             raise
         return profile
 

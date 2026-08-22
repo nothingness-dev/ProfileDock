@@ -1,1 +1,1 @@
--e .[test,playwright]
+-e .

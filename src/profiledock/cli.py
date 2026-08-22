@@ -546,7 +546,7 @@ def launch(
             browser_path=target_browser,
             details={
                 "tabs": target_tabs,
-                "urls": target_urls,
+                "url_count": len(target_urls),
                 "window_width": width,
                 "window_height": height,
             },

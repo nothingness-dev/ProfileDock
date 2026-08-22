@@ -445,7 +445,9 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
         status = get_status(
             str(data_dir), clean_stale=False, runtime_dir=running_json.parent
         )
-        if status == "stale":
+        if status == "error":
+            ambiguous_files.append(running_json)
+        elif status == "stale":
             if is_active_for_mutation(str(data_dir), runtime_dir=running_json.parent):
                 ambiguous_files.append(running_json)
             else:
@@ -625,7 +627,13 @@ def repair_environment(
         try:
             with metadata_lock(paths.profiles_file):
                 stale_temp_dirs: List[Path] = []
-                for pattern in (".m-*", ".temp_restore_*", ".temp_migrating_*", ".quarantine_*"):
+                for pattern in (
+                    ".m-*",
+                    ".temp_restore_*",
+                    ".temp_migrating_*",
+                    ".quarantine_*",
+                    ".deleting-*",
+                ):
                     stale_temp_dirs.extend(profiles_dir.glob(pattern))
                 cleaned_temps = 0
                 for temp_path in stale_temp_dirs:
@@ -641,7 +649,7 @@ def repair_environment(
                         DiagnosticCheck(
                             id="repair_incomplete_operations",
                             status=STATUS_OK,
-                            summary=f"Cleaned up {cleaned_temps} incomplete migration/restore temporary directory(ies).",
+                            summary=f"Cleaned up {cleaned_temps} incomplete operation directory(ies).",
                         )
                     )
         except MetadataLockedError:

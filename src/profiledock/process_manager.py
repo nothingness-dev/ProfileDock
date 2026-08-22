@@ -126,11 +126,25 @@ def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> boo
         or value["protocol_version"] != RUNNING_STATE_PROTOCOL_VERSION
     ):
         return False
-    if profile_id is not None and value.get("profile_id") != profile_id:
+    if not isinstance(value.get("profile_id"), str) or not value["profile_id"]:
+        return False
+    if profile_id is not None and value["profile_id"] != profile_id:
         return False
     if not isinstance(value.get("token"), str) or len(value["token"]) < 32:
         return False
-    if type(value.get("controller_pid")) is not int or type(value.get("port")) is not int:
+    if type(value.get("controller_pid")) is not int or value["controller_pid"] < 0:
+        return False
+    if type(value.get("port")) is not int or not 0 <= value["port"] <= 65535:
+        return False
+    if type(value.get("tabs")) is not int or value["tabs"] < 1:
+        return False
+    if value.get("status") not in {"starting", "running", "closing"}:
+        return False
+    if "launcher_pid" in value and (
+        type(value["launcher_pid"]) is not int or value["launcher_pid"] < 0
+    ):
+        return False
+    if "closing" in value and type(value["closing"]) is not bool:
         return False
     if not isinstance(value.get("controller_started_at"), str):
         return False
@@ -154,7 +168,15 @@ def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
         return False
     if type(value.get("pid")) is not int or type(value.get("launcher_pid")) is not int:
         return False
+    if value["pid"] < 0 or value["launcher_pid"] < 1:
+        return False
     if type(value.get("tabs")) is not int or value["tabs"] < 1:
+        return False
+    if not isinstance(value.get("channel"), str) or not value["channel"]:
+        return False
+    if value.get("status") not in {"starting", "running", "closing"}:
+        return False
+    if "closing" in value and type(value["closing"]) is not bool:
         return False
     pid = value["pid"]
     process_create_time = value.get("process_create_time")
@@ -319,14 +341,18 @@ def _get_process_create_time(pid: int) -> Optional[float]:
     return None
 
 
-def _is_matching_process(pid: int, expected_start_time: Optional[float]) -> bool:
+def _is_matching_process(
+    pid: int,
+    expected_start_time: Optional[float],
+    require_verification: bool = False,
+) -> bool:
     if pid < 1 or not _alive(pid):
         return False
     if expected_start_time is None:
         return True
     actual_start_time = _get_process_create_time(pid)
     if actual_start_time is None:
-        return True
+        return not require_verification
     return abs(actual_start_time - expected_start_time) < 2.0
 
 
@@ -385,18 +411,14 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
     if path.exists():
         state = _read_state(path)
         if not state or not isinstance(state, dict):
-            if clean_stale:
-                _unlink_quietly(path)
-            return "stale"
+            return "error"
         state_version = state.get("protocol_version", 0)
         if type(state_version) is int and state_version > RUNNING_STATE_PROTOCOL_VERSION:
-            return "stale"
+            return "error"
         state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
         if state.get("engine") == "direct":
             if not _valid_direct_state(state, Path(data_dir).parent.name):
-                if clean_stale:
-                    _unlink_quietly(path)
-                return "stale"
+                return "error"
             pid = state["pid"]
             if pid > 0 and _is_matching_process(pid, state.get("process_create_time")):
                 if state.get("closing"):
@@ -409,9 +431,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                 _unlink_quietly(path)
             return "stale"
         if not state or not _valid_state(state, Path(data_dir).parent.name):
-            if clean_stale:
-                _unlink_quietly(path)
-            return "stale"
+            return "error"
         if state.get("closing"):
             pid = int(state.get("controller_pid", -1))
             if pid > 0 and _alive(pid):
@@ -443,7 +463,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
 
 
 def is_running(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
-    return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in ("starting", "running", "closing")
+    return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in ("starting", "running", "closing", "error")
 
 
 def _controller_available(state: Dict[str, Any]) -> bool:
@@ -784,6 +804,10 @@ def start_controller(
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
     path = state_path(data_dir, runtime_dir)
     initial_state = _read_state(path)
+    if path.exists() and not initial_state:
+        raise ProfileRunningError(
+            "profile running state is invalid; refusing to remove ambiguous state"
+        )
     if initial_state:
         initial_state = _upgrade_legacy_state(path, initial_state, Path(data_dir).parent.name)
     if initial_state and initial_state.get("engine") == "direct":
@@ -792,15 +816,18 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                 "profile running state is invalid; refusing to signal an unverified process"
             )
         initial_pid = int(initial_state.get("pid", -1))
-        if initial_pid > 0 and _alive(initial_pid) and not _is_matching_process(
-            initial_pid, initial_state.get("process_create_time")
-        ):
-            _unlink_quietly(path)
-            raise ProfileRunningError(
-                "profile process is not running (PID was reused by another process)"
-            )
+        if initial_pid > 0 and _alive(initial_pid):
+            actual_create_time = _get_process_create_time(initial_pid)
+            if actual_create_time is None:
+                raise ProfileRunningError(
+                    "profile process identity could not be verified; refusing to signal it"
+                )
+            if abs(actual_create_time - initial_state["process_create_time"]) >= 2.0:
+                _unlink_quietly(path)
+                raise ProfileRunningError(
+                    "profile process is not running (PID was reused by another process)"
+                )
     if not is_running(data_dir, runtime_dir):
-        _unlink_quietly(path)
         raise ProfileRunningError("profile is not running")
     state = _read_state(path)
     if not state:
@@ -816,9 +843,10 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         pid = int(state.get("pid", -1))
         expected_create_time = state.get("process_create_time")
         if pid > 0 and _alive(pid):
-            if not _is_matching_process(pid, expected_create_time):
-                _unlink_quietly(path)
-                raise ProfileRunningError("profile process is not running (PID was reused by another process)")
+            if not _is_matching_process(pid, expected_create_time, require_verification=True):
+                raise ProfileRunningError(
+                    "profile process identity could not be verified; refusing to signal it"
+                )
             if sys.platform == "win32":
                 subprocess.run(
                     ["taskkill", "/PID", str(pid), "/T"],
@@ -859,13 +887,14 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
 
 
     state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
+    if not _valid_state(state, Path(data_dir).parent.name):
+        raise ProfileRunningError(
+            "profile running state is invalid; refusing unauthenticated controller access"
+        )
     port = int(state.get("port", 0))
     if not port:
         raise BrowserLaunchError("profile controller is not ready")
     token = state.get("token", "")
-    if not _valid_state(state, Path(data_dir).parent.name):
-        _unlink_quietly(path)
-        raise ProfileRunningError("profile is not running")
     state["closing"] = True
     state["status"] = "closing"
     try:

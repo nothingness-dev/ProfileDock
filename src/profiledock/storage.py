@@ -308,6 +308,10 @@ def save_metadata(
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
 ) -> None:
+    if doc.schema_version != METADATA_SCHEMA_VERSION:
+        raise StorageError(
+            f"refusing to write unsupported metadata schema version: {doc.schema_version}"
+        )
     path = Path(path)
     profile_root = Path(profile_root)
     root = _validate_metadata_paths(path, profile_root, backup_path)
