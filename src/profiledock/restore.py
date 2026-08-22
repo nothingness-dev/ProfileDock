@@ -25,6 +25,7 @@ from .version import __version__
 MAX_MEMBER_SIZE_BYTES = 5 * 1024 * 1024 * 1024
 MAX_TOTAL_EXTRACT_BYTES = 20 * 1024 * 1024 * 1024
 MAX_MANIFEST_SIZE_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 100000
 
 
 class RestoreError(Exception):
@@ -247,6 +248,10 @@ def restore_backup_archive(
             archive_profile_names.add(pname)
 
         members = tar.getmembers()
+        if len(members) > MAX_ARCHIVE_MEMBERS:
+            raise DecompressionSecurityError(
+                "archive contains more members than the allowed maximum"
+            )
         member_names = [member.name for member in members]
         if len(member_names) != len(set(member_names)):
             raise InvalidArchiveError("archive contains duplicate member names")

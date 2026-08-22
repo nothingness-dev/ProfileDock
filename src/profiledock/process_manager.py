@@ -138,6 +138,10 @@ def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
         return False
     if type(value.get("tabs")) is not int or value["tabs"] < 1:
         return False
+    pid = value["pid"]
+    process_create_time = value.get("process_create_time")
+    if pid > 0 and not isinstance(process_create_time, (int, float)):
+        return False
     if not isinstance(value.get("started_at"), str):
         return False
     try:
@@ -430,11 +434,11 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
     path = state_path(data_dir, runtime_dir)
     state = _read_state(path)
     if not state:
-        return False
+        return path.exists()
     profile_id = Path(data_dir).parent.name
     if state.get("engine") == "direct":
         if not _valid_direct_state(state, profile_id):
-            return False
+            return True
         pid = int(state.get("pid", -1))
         launcher_pid = int(state.get("launcher_pid", -1))
         return _is_matching_process(pid, state.get("process_create_time")) or (
@@ -447,10 +451,10 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
             legacy_port = int(upgraded.get("port", 0))
             modified_at = path.stat().st_mtime
         except (OSError, TypeError, ValueError):
-            return False
+            return True
         legacy_token = upgraded.get("token")
         if legacy_pid < 1 or legacy_port < 1 or not isinstance(legacy_token, str):
-            return False
+            return True
         upgraded.update(
             {
                 "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
@@ -463,7 +467,7 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
             }
         )
     if not _valid_state(upgraded, profile_id):
-        return False
+        return True
     controller_pid = int(upgraded.get("controller_pid", -1))
     launcher_pid = int(upgraded.get("launcher_pid", -1))
     return _alive(controller_pid) or _controller_available(upgraded) or (
@@ -609,6 +613,14 @@ def start_direct_chrome(
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
 
     proc_create_time = _get_process_create_time(process.pid)
+    if proc_create_time is None:
+        try:
+            _stop_process(process)
+        finally:
+            _unlink_quietly(path)
+        message = "could not verify the launched browser process identity"
+        _write_error(err, "process_identity_unavailable", message)
+        raise BrowserLaunchError(message, "process_identity_unavailable")
     state = {
         "profile_id": initial["profile_id"],
         "pid": process.pid,
@@ -758,6 +770,10 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
     path = state_path(data_dir, runtime_dir)
     initial_state = _read_state(path)
     if initial_state and initial_state.get("engine") == "direct":
+        if not _valid_direct_state(initial_state, Path(data_dir).parent.name):
+            raise ProfileRunningError(
+                "profile running state is invalid; refusing to signal an unverified process"
+            )
         initial_pid = int(initial_state.get("pid", -1))
         if initial_pid > 0 and _alive(initial_pid) and not _is_matching_process(
             initial_pid, initial_state.get("process_create_time")

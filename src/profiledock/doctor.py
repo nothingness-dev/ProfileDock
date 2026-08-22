@@ -439,14 +439,28 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
         )
 
     stale_files: List[Path] = []
+    ambiguous_files: List[Path] = []
     for running_json in runtime_dir.glob("*/running.json"):
         data_dir = paths.profiles_dir / running_json.parent.name / "browser-data"
-        if not is_active_for_mutation(
-            str(data_dir), runtime_dir=running_json.parent
-        ) and get_status(
+        status = get_status(
             str(data_dir), clean_stale=False, runtime_dir=running_json.parent
-        ) == "stale":
-            stale_files.append(running_json)
+        )
+        if status == "stale":
+            if is_active_for_mutation(str(data_dir), runtime_dir=running_json.parent):
+                ambiguous_files.append(running_json)
+            else:
+                stale_files.append(running_json)
+
+    if ambiguous_files:
+        return (
+            DiagnosticCheck(
+                id=check_id,
+                status=STATUS_WARNING,
+                summary=f"Found {len(ambiguous_files)} ambiguous running.json file(s) that cannot be verified safely.",
+                action="Review the runtime state manually and confirm no browser process is active before removing it.",
+            ),
+            stale_files,
+        )
 
     if not stale_files:
         return (
