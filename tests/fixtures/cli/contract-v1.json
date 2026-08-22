@@ -1,0 +1,67 @@
+{
+  "contract_version": 1,
+  "program": "profiledock",
+  "global_options": {
+    "data_root": ["--data-root"],
+    "verbose": ["--verbose", "-v"],
+    "log_level": ["--log-level"],
+    "non_interactive": ["--non-interactive"],
+    "version": ["--version", "-V"]
+  },
+  "commands": {
+    "create": {"arguments": ["name"], "options": {"engine": ["--engine", "-e"]}},
+    "list": {"arguments": [], "options": {"json_output": ["--json"]}},
+    "show": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
+    "rename": {"arguments": ["profile_id", "new_name"], "options": {}},
+    "set-engine": {"arguments": ["profile_id", "engine"], "options": {}},
+    "status": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
+    "launch": {"arguments": ["profile_id"], "options": {"tabs": ["--tabs", "-t"], "engine": ["--engine", "-e"], "browser": ["--browser", "-b"], "url": ["--url", "-u"]}},
+    "close": {"arguments": ["profile_id"], "options": {}},
+    "delete": {"arguments": ["profile_id"], "options": {"yes": ["--yes", "-y"]}},
+    "doctor": {"arguments": [], "options": {"repair": ["--repair"], "reattach_orphans": ["--reattach-orphans"], "recreate_missing": ["--recreate-missing"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
+    "migrate": {"arguments": [], "options": {"from_project": ["--from-project"], "remove_source": ["--remove-source"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
+    "backup": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "output": ["--output", "-o"], "force": ["--force", "-f"], "json_output": ["--json"]}},
+    "restore": {"arguments": ["archive"], "options": {"force": ["--force", "-f"], "json_output": ["--json"]}},
+    "logs": {"arguments": ["profile_id"], "options": {"last": ["--last", "-n"], "json_output": ["--json"]}},
+    "config": {
+      "arguments": [],
+      "options": {},
+      "commands": {
+        "show": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
+        "set": {"arguments": ["profile_id", "setting", "value"], "options": {}, "setting_values": ["default-tabs", "engine", "browser", "window-size"]},
+        "add-url": {"arguments": ["profile_id", "url"], "options": {}},
+        "remove-url": {"arguments": ["profile_id", "url"], "options": {}},
+        "reset": {"arguments": ["profile_id"], "options": {}}
+      }
+    }
+  },
+  "exit_codes": {"success": 0, "user_error": 1, "usage_error": 2},
+  "streams": {"human_success": "stdout", "json_success": "stdout", "errors": "stderr", "json_failure_reports": "stderr", "prompts": "stdout"},
+  "json": {
+    "output_version": 1,
+    "envelope_fields": ["output_version", "command", "data"],
+    "commands": ["list", "show", "status", "config show", "doctor", "migrate", "backup", "restore", "logs"],
+    "profile_engine": "effective engine after launch-config, profile, environment, and default precedence"
+  },
+  "engine": {
+    "values": ["direct", "playwright"],
+    "launch_precedence": ["launch --engine", "launch_config.engine", "profile.engine", "PROFILEDOCK_DEFAULT_ENGINE", "direct"],
+    "create_option": ["--engine", "-e"],
+    "launch_option": ["--engine", "-e"],
+    "config_setting": "engine"
+  },
+  "profile_resolution": ["exact case-sensitive id", "unique case-sensitive id prefix", "exact case-sensitive name"],
+  "data_root_precedence": ["--data-root", "PROFILEDOCK_DATA_ROOT", "platform default"],
+  "confirmation": {
+    "delete": "--yes",
+    "migrate_remove_source": "--yes",
+    "doctor_destructive_repair": "--yes",
+    "decline_exit_code": 1
+  },
+  "non_interactive": {
+    "sources": ["--non-interactive", "PROFILEDOCK_NON_INTERACTIVE"],
+    "missing_confirmation": "exit 1 with confirmation_required",
+    "missing_launch_tabs": "exit 1 with invalid_input"
+  },
+  "error_categories": ["ambiguous_profile", "browser_launch_failed", "confirmation_required", "corrupted_data", "invalid_input", "not_found", "profile_active", "security_violation", "storage_error"]
+}

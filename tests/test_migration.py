@@ -691,7 +691,8 @@ def test_migrate_json_failure_is_machine_readable(tmp_path):
         ["--data-root", str(destination), "migrate", "--from-project", str(source), "--json"],
     )
     assert result.exit_code == EXIT_USER_ERROR
-    report = json.loads(result.output)
+    assert result.stdout == ""
+    report = json.loads(result.stderr)
     assert report["output_version"] == 1
     report = report["data"]
     assert report["migrated"] == []
@@ -765,7 +766,8 @@ def test_json_remove_source_requires_yes_without_prompt_text(tmp_path):
         ],
     )
     assert result.exit_code == EXIT_USER_ERROR
-    report = json.loads(result.output)
+    assert result.stdout == ""
+    report = json.loads(result.stderr)
     assert report["output_version"] == 1
     report = report["data"]
     assert "requires --yes" in report["failed"][0]["message"]

@@ -75,7 +75,7 @@ def test_launch_browser_error_shown_concisely(tmp_path):
 
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "Error:" in result.output
+    assert "Error [browser_launch_failed]:" in result.output
     assert "Playwright Chromium" in result.output
 
 
@@ -88,7 +88,7 @@ def test_launch_profile_not_found_shown_concisely(tmp_path):
 
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "Error: profile not found: missing" in result.output
+    assert "Error [not_found]: profile not found: missing" in result.output
 
 
 def test_launch_running_error_shown_concisely(tmp_path):
@@ -130,7 +130,7 @@ def test_launch_running_error_shown_concisely(tmp_path):
 
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "Error: profile is already running" in result.output
+    assert "Error [profile_active]: profile is already running" in result.output
 
 
 def test_launch_succeeds_when_timestamp_update_fails(tmp_path):
@@ -192,7 +192,7 @@ def test_close_browser_error_shown_concisely(tmp_path):
 
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "Error: profile is not running" in result.output
+    assert "Error [browser_launch_failed]: profile is not running" in result.output
 
 
 def test_delete_profile_not_found_shown_concisely(tmp_path):
@@ -204,7 +204,7 @@ def test_delete_profile_not_found_shown_concisely(tmp_path):
 
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    assert "Error: profile not found: missing" in result.output
+    assert "Error [not_found]: profile not found: missing" in result.output
 
 
 def test_list_table_format():
@@ -330,7 +330,7 @@ def test_rename_command():
 def test_rename_empty_name_fails():
     result = runner.invoke(app, ["rename", "abc123", "   "])
     assert result.exit_code == 1
-    assert "Error: profile name cannot be empty" in result.output
+    assert "Error [invalid_input]: profile name cannot be empty" in result.output
 
 
 def test_status_all_profiles():
@@ -592,7 +592,7 @@ def test_errors_go_to_stderr():
         result = runner.invoke(app, ["show", "missing"])
 
     assert result.exit_code == EXIT_USER_ERROR
-    assert "Error:" in result.stderr
+    assert "Error [not_found]:" in result.stderr
 
 
 def test_create_with_engine_flag():
