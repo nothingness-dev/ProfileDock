@@ -4,7 +4,7 @@ ProfileDock is a lightweight command-line tool for managing isolated, persistent
 
 For the complete security assumptions, protections, and limitations, see [THREAT_MODEL.md](THREAT_MODEL.md).
 
-Current release: `0.14.0`
+Current release: `0.14.1`
 
 ## Features
 
@@ -986,7 +986,7 @@ The default application-data roots are `%LOCALAPPDATA%\ProfileDock` on Windows, 
 
 ## Versioning
 
-ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.14.0`.
+ProfileDock follows Semantic Versioning. Stable releases use annotated Git tags such as `v0.14.1`.
 
 ## License
 
