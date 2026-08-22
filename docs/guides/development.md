@@ -3,7 +3,7 @@
 ## Development environment
 
 ```bash
-python scripts/setup_project.py --dev --with-playwright
+python scripts/setup_project.py --dev --with-playwright --test
 ```
 
 Or install manually:

@@ -48,7 +48,6 @@ Activate the virtual environment, update the repository by your normal version-c
 
 ```bash
 pip install -r requirements.txt
-pip install -e .
 profiledock --version
 profiledock doctor
 ```

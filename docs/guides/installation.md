@@ -17,7 +17,7 @@ From the repository root, run:
 python scripts/setup_project.py
 ```
 
-The setup script creates `.venv`, installs `requirements.txt`, installs ProfileDock in editable mode, and asks whether to install Playwright Chromium when possible.
+The setup script creates `.venv`, upgrades pip, and installs the minimal editable runtime from `requirements.txt`. It does not download a browser or run tests unless requested.
 
 Useful setup options:
 
@@ -25,9 +25,10 @@ Useful setup options:
 python scripts/setup_project.py --dev
 python scripts/setup_project.py --with-playwright
 python scripts/setup_project.py --dev --with-playwright
+python scripts/setup_project.py --dev --with-playwright --test
 ```
 
-`--dev` installs `requirements-dev.lock`. `--with-playwright` installs Playwright browser support without relying on an interactive answer.
+`--dev` installs `requirements-dev.lock`. `--with-playwright` installs the Playwright extra and Chromium. `--test` installs the test extra when necessary and runs pytest after setup. The options are non-interactive and may be combined.
 
 ## Manual setup on Windows PowerShell
 
@@ -36,7 +37,6 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install -e .
 ```
 
 For development:
@@ -61,7 +61,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install -e .
 ```
 
 For development:
