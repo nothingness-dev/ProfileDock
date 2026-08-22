@@ -49,7 +49,7 @@ Commands that support `--json` emit output version 1:
 
 Consumers must check `output_version` before reading `data` and reject versions they do not support. Human-readable output is not a stable machine interface.
 
-The complete planned 1.0 command, option, exit-code, stream, confirmation, resolution, and deprecation guarantees are defined in [CLI_CONTRACT.md](CLI_CONTRACT.md). Golden fixtures enforce both the Typer command surface and JSON payloads.
+The complete planned 1.0 command, option, exit-code, stream, confirmation, resolution, and deprecation guarantees are defined in the [CLI contract](cli-contract.md). Golden fixtures enforce both the Typer command surface and JSON payloads.
 
 ## Support policy
 
