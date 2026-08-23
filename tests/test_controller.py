@@ -393,7 +393,7 @@ def test_list_shows_stopped_after_manual_closure(controller_env):
     from typer.testing import CliRunner
     from profiledock.cli import app
 
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     manager, profile, data_dir, owned_pids = controller_env
     state = _start(data_dir, owned_pids, tabs=1)
     pid = state["pid"]

@@ -12,7 +12,7 @@ from profiledock.storage import StorageError
 from profiledock.version import __version__
 
 
-runner = CliRunner(mix_stderr=False)
+runner = CliRunner()
 
 
 def test_help_does_not_create_data_root(tmp_path):

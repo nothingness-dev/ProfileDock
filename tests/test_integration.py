@@ -54,7 +54,7 @@ def test_full_acceptance_lifecycle_dual_engine(tmp_path):
     from profiledock.data_root import DataPaths
     from profiledock.storage import load_metadata
 
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     data_root = tmp_path / "app_data"
 
     res_create_dir = runner.invoke(app, ["--data-root", str(data_root), "create", "DirectAcc", "--engine", "direct"])

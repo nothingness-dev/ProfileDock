@@ -20,7 +20,7 @@ from profiledock.models import Profile, MetadataDocument
 from profiledock.process_manager import close_controller, is_running, start_controller
 from profiledock.storage import load_metadata, save_metadata
 
-runner = CliRunner(mix_stderr=False)
+runner = CliRunner()
 
 
 def make_paths(root: Path) -> DataPaths:

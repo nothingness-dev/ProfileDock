@@ -19,7 +19,7 @@ from profiledock.data_root import DataPaths
 from profiledock.models import Profile, MetadataDocument
 from profiledock.storage import save_metadata
 
-runner = CliRunner(mix_stderr=False)
+runner = CliRunner()
 
 
 def make_paths(root: Path) -> DataPaths:
