@@ -49,10 +49,11 @@ from .restore import (
     restore_backup_archive,
 )
 from .storage import StorageError
+from .terminal import fail_mark, is_stdout_tty, ok_mark, warn_mark
 from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
 
-app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
+app = typer.Typer(add_completion=True, help="Manage isolated persistent Chromium profiles.")
 config_app = typer.Typer(help="Manage launch configuration presets for a profile.")
 app.add_typer(config_app, name="config")
 
@@ -135,10 +136,26 @@ def runtime_path(profile: Profile) -> Path:
     return manager().runtime_path(profile.id)
 
 
-def fail(message: str, code: int = EXIT_USER_ERROR, category: Optional[str] = None) -> NoReturn:
+def fail(
+    message: str,
+    code: int = EXIT_USER_ERROR,
+    category: Optional[str] = None,
+    hint: Optional[str] = None,
+) -> NoReturn:
     selected_category = category or error_category(message)
     typer.echo(f"Error [{selected_category}]: {message}", err=True)
+    if hint:
+        typer.echo(f"Next steps: {hint}", err=True)
     raise typer.Exit(code)
+
+
+_HINTS = {
+    "not_found": "run 'profiledock list' to see existing profiles",
+    "ambiguous_profile": "use the full profile ID from 'profiledock list'",
+    "profile_active": "close the profile first with 'profiledock close <name>'",
+    "confirmation_required": "rerun with --yes, or drop --non-interactive",
+    "browser_launch_failed": "check browser installation with 'profiledock doctor'",
+}
 
 
 def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
@@ -156,7 +173,7 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
         category = "storage_error"
     else:
         category = error_category(str(error))
-    fail(str(error), code=code, category=category)
+    fail(str(error), code=code, category=category, hint=_HINTS.get(category))
 
 
 def emit_json(command: str, data: object, err: bool = False) -> None:
@@ -254,8 +271,9 @@ def _render_table(rows: list[list[str]]) -> str:
 
 
 @app.command()
+@app.command()
 def create(
-    name: str,
+    name: str = typer.Argument(..., help="Display name for the new profile."),
     engine: Optional[str] = typer.Option(
         None,
         "--engine",
@@ -263,6 +281,11 @@ def create(
         help="Default engine for profile: 'direct' (default) or 'playwright'",
     ),
 ) -> None:
+    """Create a new isolated browser profile.
+
+    Each profile gets its own persistent Chromium user-data directory, so
+    cookies, sessions, and login state never leak between profiles.
+    """
     if engine is not None:
         clean_engine = engine.strip().lower()
         if clean_engine not in ("direct", "playwright"):
@@ -279,6 +302,7 @@ def create(
 def list_profiles(
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
+    """List all profiles with ID, name, engine, and runtime status."""
     try:
         profiles = manager().list_profiles()
     except StorageError as exc:
@@ -303,9 +327,14 @@ def list_profiles(
 
 @app.command()
 def show(
-    profile_id: str,
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
+    """Show detailed information about one profile.
+
+    Includes identity, effective engine, status, timestamps, data directory,
+    disk usage, and the stored launch configuration when present.
+    """
     try:
         profile = manager().resolve(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
@@ -329,15 +358,25 @@ def show(
 
 
 @app.command()
-def rename(profile_id: str, new_name: str) -> None:
+def rename(
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    new_name: str = typer.Argument(..., help="New display name for the profile."),
+) -> None:
+    """Rename a profile without touching its data.
+
+    The profile ID, browser-data directory, and running session are unchanged.
+    """
     clean_name = new_name.strip()
     if not clean_name:
         fail("profile name cannot be empty")
     try:
+        old_name = manager().resolve(profile_id).name
         profile = manager().rename(profile_id, clean_name)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Renamed profile to '{profile.name}' ({profile.id})")
+    if old_name != profile.name:
+        typer.echo(f"  {old_name} -> {profile.name}")
 
 
 @config_app.command("show")
@@ -345,6 +384,10 @@ def config_show(
     profile_id: str = typer.Argument(..., help="Profile identifier."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
+    """Show a profile's stored launch preset.
+
+    Values left as None are inherited from the profile or defaults at launch time.
+    """
     try:
         profile = manager().resolve(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
@@ -373,23 +416,35 @@ def config_set(
     setting: str = typer.Argument(..., help="Setting name (default-tabs, engine, browser, window-size)."),
     value: str = typer.Argument(..., help="Setting value."),
 ) -> None:
+    """Store one launch-preset value for a profile.
+
+    Explicit launch flags override presets for a single launch.
+    """
     clean_setting = setting.strip().lower()
     clean_val = value.strip()
     profile_manager = manager()
 
     try:
         profile = profile_manager.resolve(profile_id)
+        old_cfg = getattr(profile, "launch_config", None)
+
+        def _old(field: str) -> str:
+            value = getattr(old_cfg, field, None) if old_cfg else None
+            return "(unset)" if value is None else str(value)
+
         if clean_setting == "default-tabs":
             if not clean_val.isdigit() or int(clean_val) < 1:
                 fail("default-tabs must be a positive integer >= 1")
             profile_manager.update_launch_config(profile_id, default_tabs=int(clean_val))
             typer.echo(f"Set default-tabs to {clean_val} for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {_old('default_tabs')} -> {clean_val}")
         elif clean_setting == "engine":
             val_eng = clean_val.lower()
             if val_eng not in ("direct", "playwright"):
                 fail("engine must be 'direct' or 'playwright'")
             profile_manager.update_launch_config(profile_id, engine=val_eng)
             typer.echo(f"Set engine to '{val_eng}' for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {_old('engine')} -> {val_eng}")
         elif clean_setting == "browser":
             effective_engine = resolve_engine(None, profile)
             candidate = Path(clean_val).expanduser()
@@ -397,6 +452,7 @@ def config_set(
             validate_browser(stored_browser, effective_engine, require_executable=True)
             profile_manager.update_launch_config(profile_id, browser=stored_browser)
             typer.echo(f"Set browser to '{stored_browser}' for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {_old('browser')} -> {stored_browser}")
         elif clean_setting == "window-size":
             parts = clean_val.lower().split("x")
             if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
@@ -406,6 +462,12 @@ def config_set(
                 fail("width and height must be at least 100")
             profile_manager.update_launch_config(profile_id, window_width=w, window_height=h)
             typer.echo(f"Set window-size to {w}x{h} for profile '{profile.name}' ({profile.id})")
+            old_size = (
+                f"{old_cfg.window_width}x{old_cfg.window_height}"
+                if old_cfg and old_cfg.window_width
+                else "(unset)"
+            )
+            typer.echo(f"  {old_size} -> {w}x{h}")
         else:
             fail(f"unknown setting '{setting}' (valid: default-tabs, engine, browser, window-size)")
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
@@ -417,6 +479,7 @@ def config_add_url(
     profile_id: str = typer.Argument(..., help="Profile identifier."),
     url: str = typer.Argument(..., help="URL to add."),
 ) -> None:
+    """Validate and append a start URL to the launch preset (no duplicates)."""
     try:
         profile = manager().add_start_url(profile_id, url)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
@@ -427,8 +490,9 @@ def config_add_url(
 @config_app.command("remove-url")
 def config_remove_url(
     profile_id: str = typer.Argument(..., help="Profile identifier."),
-    url: str = typer.Argument(..., help="URL to remove."),
+    url: str = typer.Argument(..., help="URL to remove; must match the stored normalized value."),
 ) -> None:
+    """Remove one start URL from the launch preset."""
     try:
         profile = manager().remove_start_url(profile_id, url)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
@@ -440,6 +504,7 @@ def config_remove_url(
 def config_reset(
     profile_id: str = typer.Argument(..., help="Profile identifier."),
 ) -> None:
+    """Clear the complete launch preset, restoring inherited defaults."""
     try:
         profile = manager().reset_launch_config(profile_id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
@@ -449,17 +514,24 @@ def config_reset(
 
 @app.command("set-engine")
 def set_engine(
-    profile_id: str,
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
     engine: str = typer.Argument(..., help="Engine to use: 'direct' or 'playwright'"),
 ) -> None:
+    """Set the profile-level default engine.
+
+    A stored launch-config engine (config set) still overrides this value.
+    """
     clean_engine = engine.strip().lower()
     if clean_engine not in ("direct", "playwright"):
         fail("engine must be 'direct' or 'playwright'")
     try:
+        old_engine = manager().resolve(profile_id).engine
         profile = manager().set_engine(profile_id, clean_engine)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Set engine to '{clean_engine}' for profile '{profile.name}' ({profile.id})")
+    if old_engine != clean_engine:
+        typer.echo(f"  {old_engine or '(unset)'} -> {clean_engine}")
 
 
 @app.command()
@@ -471,6 +543,11 @@ def status(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
+    """Report runtime status of one profile or all profiles.
+
+    Status values: stopped, starting, running, closing, stale, error.
+    With --watch, refreshes continuously until Ctrl+C.
+    """
     if watch and interval <= 0:
         fail("interval must be greater than 0")
 
@@ -521,9 +598,15 @@ def status(
         else:
             import time
 
+            interactive = is_stdout_tty()
+            first_frame = True
             while True:
                 if not json_output:
-                    typer.echo("\033[2J\033[H", nl=False)
+                    if interactive:
+                        typer.echo("\033[2J\033[H", nl=False)
+                    elif not first_frame:
+                        typer.echo()
+                first_frame = False
                 _render_once()
                 time.sleep(interval)
     except KeyboardInterrupt:
@@ -532,29 +615,42 @@ def status(
         fail_exception(exc)
 
 
-@app.command()
+@app.command(
+    epilog="""Examples:\n
+  profiledock launch Personal --tabs 3\n
+  profiledock launch Work -t 2 -u https://example.com\n
+  profiledock launch Work --tabs 4 --engine playwright --browser chromium"""
+)
 def launch(
-    profile_id: str,
-    tabs: Optional[int] = typer.Option(None, "--tabs", "-t", help="Number of tabs to open."),
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    tabs: Optional[int] = typer.Option(
+        None, "--tabs", "-t", help="Number of tabs to open (at least 1). Prompts if no preset exists."
+    ),
     engine: Optional[str] = typer.Option(
         None,
         "--engine",
         "-e",
-        help="Override engine: 'direct' or 'playwright'",
+        help="One-launch engine override: 'direct' or 'playwright'",
     ),
     browser: Optional[str] = typer.Option(
         None,
         "--browser",
         "-b",
-        help="Override browser channel/executable.",
+        help="Browser name (chrome, chromium, brave) or executable path for this launch.",
     ),
     url: Optional[list[str]] = typer.Option(
         None,
         "--url",
         "-u",
-        help="Start URL(s) to open.",
+        help="Start URL for one tab; repeat for multiple pages. Overrides stored start URLs.",
     ),
 ) -> None:
+    """Launch a profile's browser with its persistent data.
+
+    Login is always manual. Relaunching the same profile reuses its saved
+    cookies, sessions, and history. A duplicate launch is refused while the
+    profile is already running.
+    """
     corr_id = generate_correlation_id()
     paths = selected_paths()
     try:
@@ -681,7 +777,14 @@ def launch(
 
 
 @app.command()
-def close(profile_id: str) -> None:
+def close(
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+) -> None:
+    """Close a running profile's browser cleanly.
+
+    Requests graceful shutdown and removes runtime state afterwards.
+    Safe to run on stale state; refuses ambiguous or unverified processes.
+    """
     try:
         profile = manager().resolve(profile_id)
         close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
@@ -696,10 +799,21 @@ def close(profile_id: str) -> None:
     typer.echo(f"Closed '{profile.name}'.")
 
 
-@app.command()
+@app.command(
+    epilog="""Examples:\n
+  profiledock delete OldProfile\n
+  profiledock delete OldProfile --yes\n
+  Back up first if the data matters: profiledock backup OldProfile -o old.tar.gz"""
+)
 def delete(
-    profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation.")
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
 ) -> None:
+    """Delete a profile and permanently remove its browser data.
+
+    Running profiles must be closed first. Deletion is permanent unless an
+    independent backup archive exists.
+    """
     try:
         profile = manager().resolve(profile_id)
         if is_running(profile.data_dir, runtime_path(profile)):
@@ -712,7 +826,12 @@ def delete(
     typer.echo(f"Deleted '{profile.name}'.")
 
 
-@app.command()
+@app.command(
+    epilog="""Examples:\n
+  profiledock doctor\n
+  profiledock doctor --json\n
+  profiledock doctor --repair --reattach-orphans --yes"""
+)
 def doctor(
     repair: bool = typer.Option(False, "--repair", help="Perform safe repairs where possible."),
     reattach_orphans: bool = typer.Option(
@@ -733,6 +852,12 @@ def doctor(
     ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
+    """Check installation and data health; repair safe issues with --repair.
+
+    Verifies Python compatibility, data-root writability, metadata integrity,
+    browser availability, runtime state, orphan directories, and version
+    consistency. Run this after crashes or forced termination.
+    """
     paths = selected_paths()
     root = paths.root
 
@@ -779,9 +904,10 @@ def doctor(
         for r in repairs:
             typer.echo(f"  [repaired] {r.summary}")
         typer.echo("")
-    table = [["CHECK", "STATUS", "SUMMARY"]]
+    table = [["", "CHECK", "STATUS", "SUMMARY"]]
     for c in checks:
-        table.append([c.id, c.status.upper(), c.summary])
+        mark = {"ok": ok_mark(), "warning": warn_mark(), "failed": fail_mark()}.get(c.status, "")
+        table.append([mark, c.id, c.status.upper(), c.summary])
     typer.echo(_render_table(table))
     has_actions = [c for c in checks if c.action]
     if has_actions:
@@ -792,7 +918,12 @@ def doctor(
         raise typer.Exit(EXIT_USER_ERROR)
 
 
-@app.command()
+@app.command(
+    epilog="""Examples:\n
+  profiledock migrate --from-project C:\\path\\to\\legacy\\project\n
+  profiledock migrate --from-project ./legacy --json\n
+  profiledock migrate --from-project ./legacy --remove-source --yes"""
+)
 def migrate(
     from_project: Path = typer.Option(
         ...,
@@ -816,6 +947,13 @@ def migrate(
         help="Output migration report in JSON format.",
     ),
 ) -> None:
+    """Move legacy project-local profiles into the application data root.
+
+    Copies and verifies each profile before committing metadata; incomplete
+    changes roll back automatically. The source is left untouched unless
+    --remove-source and confirmation are both supplied. Close all source
+    profiles first.
+    """
     paths = selected_paths()
     if remove_source and not yes:
         if json_output:
@@ -831,6 +969,8 @@ def migrate(
         ):
             raise typer.Abort()
 
+    if not json_output:
+        typer.echo(f"Validating and copying from '{from_project}'...")
     try:
         report = migrate_project(
             source_root=from_project,
@@ -861,9 +1001,16 @@ def migrate(
         typer.echo("Source data successfully removed.")
 
 
-@app.command()
+@app.command(
+    epilog="""Examples:\n
+  profiledock close Work\n
+  profiledock backup Work --output work.tar.gz --exclude-cache\n
+  profiledock backup --all --output full-backup.tar.gz"""
+)
 def backup(
-    profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name to backup."),
+    profile_id: Optional[str] = typer.Argument(
+        None, help="Profile ID, prefix, or name to backup. Omit when using --all."
+    ),
     all_profiles: bool = typer.Option(
         False,
         "--all",
@@ -894,6 +1041,13 @@ def backup(
         help="Output backup report in JSON format.",
     ),
 ) -> None:
+    """Create a verified .tar.gz backup of one profile or all profiles.
+
+    Every selected profile must be stopped. The archive includes metadata,
+    engine and launch configuration, file sizes, and SHA-256 checksums.
+    --exclude-cache skips recreatable browser caches to shrink the archive.
+    Existing output requires --force.
+    """
     paths = selected_paths()
     profile_manager = manager()
 
@@ -912,6 +1066,8 @@ def backup(
             profile = profile_manager.resolve(profile_id)
             profiles = [profile]
 
+        if not json_output:
+            typer.echo(f"Archiving {len(profiles)} profile(s)...")
         report = create_backup_archive(
             profiles=profiles,
             data_paths=paths,
@@ -948,14 +1104,19 @@ def backup(
         )
 
 
-@app.command()
+@app.command(
+    epilog="""Examples:\n
+  profiledock restore work.tar.gz\n
+  profiledock restore work.tar.gz --json\n
+  profiledock restore work.tar.gz --force"""
+)
 def restore(
     archive: Path = typer.Argument(..., help="Path to backup archive (.tar.gz) to restore."),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Overwrite existing profiles with conflicting IDs.",
+        help="Replace existing profiles with conflicting IDs. Never overwrites active profiles.",
     ),
     json_output: bool = typer.Option(
         False,
@@ -963,6 +1124,12 @@ def restore(
         help="Output restore report in JSON format.",
     ),
 ) -> None:
+    """Restore profiles from a verified backup archive.
+
+    The complete archive is validated (manifest, paths, sizes, checksums)
+    before anything is committed. Conflicting IDs or names are refused unless
+    --force is given; running profiles are never overwritten.
+    """
     paths = selected_paths()
 
     try:
@@ -1011,6 +1178,10 @@ def show_logs(
     last: Optional[int] = typer.Option(None, "--last", "-n", help="Show last N log entries."),
     json_output: bool = typer.Option(False, "--json", help="Output logs in JSON format."),
 ) -> None:
+    """Read structured ProfileDock logs, optionally for one profile.
+
+    Controller tokens and known secrets are redacted before storage.
+    """
     paths = selected_paths()
     prof_id = None
     if profile_id is not None:
