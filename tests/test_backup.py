@@ -225,3 +225,49 @@ def test_backup_rejects_profile_metadata_outside_data_root(tmp_path):
     )
     with pytest.raises(BackupError, match="unsafe profile path"):
         create_backup_archive([profile], paths, tmp_path / "backup.tar.gz")
+
+
+def test_backup_with_exclude_cache(tmp_path):
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "cookies.sqlite").write_text("cookie-data", encoding="utf-8")
+    cache_dir = p_data / "Default" / "Cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "data_0").write_text("cache_blob", encoding="utf-8")
+
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(p_data), engine="direct")
+
+    out_archive = tmp_path / "backup_nocache.tar.gz"
+    report = create_backup_archive([profile], paths, out_archive, exclude_cache=True)
+    assert report.total_files == 1
+
+    with tarfile.open(out_archive, "r:gz") as tar:
+        names = tar.getnames()
+        assert "profiles/p1/browser-data/cookies.sqlite" in names
+        assert not any("Cache" in n for n in names)
+
+
+def test_backup_parallel_scan_multiple_subdirectories(tmp_path):
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    for branch_idx in range(4):
+        branch = p_data / f"subfolder_{branch_idx}"
+        branch.mkdir()
+        for file_idx in range(3):
+            (branch / f"item_{file_idx}.txt").write_text(f"val {branch_idx}_{file_idx}", encoding="utf-8")
+
+    profile = Profile("p1", "MultiBranch", "2026-01-01T00:00:00+00:00", str(p_data), engine="direct")
+    out_archive = tmp_path / "backup_multibranch.tar.gz"
+    report = create_backup_archive([profile], paths, out_archive)
+    assert report.total_files == 12
+
+    with tarfile.open(out_archive, "r:gz") as tar:
+        names = tar.getnames()
+        for branch_idx in range(4):
+            for file_idx in range(3):
+                expected = f"profiles/p1/browser-data/subfolder_{branch_idx}/item_{file_idx}.txt"
+                assert expected in names
+
+

@@ -201,11 +201,11 @@ JSON success reports use stdout. JSON failure reports use stderr and leave stdou
 ## `backup`
 
 ```text
-profiledock backup PROFILE --output ARCHIVE [--force] [--json]
-profiledock backup --all --output ARCHIVE [--force] [--json]
+profiledock backup PROFILE --output ARCHIVE [--force] [--exclude-cache] [--json]
+profiledock backup --all --output ARCHIVE [--force] [--exclude-cache] [--json]
 ```
 
-Options are `--all`/`-a`, required `--output`/`-o`, `--force`/`-f`, and `--json`. Specify either one profile or `--all`, not both. Every selected profile must be stopped.
+Options are `--all`/`-a`, required `--output`/`-o`, `--force`/`-f`, `--exclude-cache`/`-C`, and `--json`. Specify either one profile or `--all`, not both. Every selected profile must be stopped. Pass `--exclude-cache`/`-C` to skip transient Chromium caches and optimize archive size.
 
 The command creates a versioned `.tar.gz` archive with metadata, engine and launch configuration, file sizes, and SHA-256 checksums. Runtime files, logs, links, junctions, and temporary files are excluded or rejected. Output is staged and verified before atomic replacement. Existing output requires `--force`.
 

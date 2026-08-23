@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import io
@@ -71,6 +72,26 @@ class BackupReport:
         }
 
 
+class _HashingFileReader:
+    """Streams data from a file handle while computing SHA-256 digest and counting bytes."""
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+        self._hasher = sha256()
+        self.bytes_read = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self._handle.read(size)
+        if chunk:
+            self._hasher.update(chunk)
+            self.bytes_read += len(chunk)
+        return chunk
+
+    @property
+    def hexdigest(self) -> str:
+        return self._hasher.hexdigest()
+
+
 def _hash_file(path: Path) -> str:
     digest = sha256()
     try:
@@ -98,16 +119,35 @@ def _is_runtime_or_log_file(rel_path_str: str) -> bool:
     return False
 
 
-def _collect_profile_files(
-    data_dir: Path,
-) -> Tuple[Dict[str, Tuple[int, str]], int]:
-    files_manifest: Dict[str, Tuple[int, str]] = {}
-    total_size = 0
+def _is_cache_file(rel_path_str: str) -> bool:
+    """Detect transient Chromium cache files and directories that can be safely excluded."""
+    parts = Path(rel_path_str).parts
+    for part in parts:
+        lower = part.lower()
+        if lower in (
+            "cache",
+            "code cache",
+            "gpucache",
+            "shadercache",
+            "grshadercache",
+            "dawncache",
+            "dawnwebgpcache",
+            "application cache",
+            "serviceworker",
+            "cachestorage",
+        ):
+            return True
+        if lower.startswith("cache_data"):
+            return True
+    return False
 
-    if not data_dir.is_dir() or _is_link(data_dir):
-        raise BackupError(f"profile data directory is missing or unsafe: {data_dir}")
 
-    for root_dir, directory_names, filenames in os.walk(data_dir, followlinks=False):
+def _scan_directory_branch(
+    sub_dir: Path, data_dir: Path, exclude_cache: bool = False
+) -> List[str]:
+    """Scans a subdirectory branch and returns relative file paths under data_dir."""
+    branch_files: List[str] = []
+    for root_dir, directory_names, filenames in os.walk(sub_dir, followlinks=False):
         root_path = Path(root_dir)
         for directory_name in list(directory_names):
             directory = root_path / directory_name
@@ -120,19 +160,53 @@ def _collect_profile_files(
             rel_path = fpath.relative_to(data_dir).as_posix()
             if _is_runtime_or_log_file(rel_path):
                 continue
-            try:
-                size = fpath.stat().st_size
-                checksum = _hash_file(fpath)
-                files_manifest[rel_path] = (size, checksum)
-                total_size += size
-            except PermissionError as exc:
-                raise FileLockedError(
-                    f"cannot read locked file '{fpath}': {exc}. "
-                    "A background browser process or application may still be holding the file open. "
-                    "Please ensure all browser processes and background apps are completely closed."
-                ) from exc
+            if exclude_cache and _is_cache_file(rel_path):
+                continue
+            branch_files.append(rel_path)
+    return branch_files
 
-    return files_manifest, total_size
+
+def _collect_profile_files(data_dir: Path, exclude_cache: bool = False) -> List[str]:
+    if not data_dir.is_dir() or _is_link(data_dir):
+        raise BackupError(f"profile data directory is missing or unsafe: {data_dir}")
+
+    sub_directories: List[Path] = []
+    root_files: List[str] = []
+
+    try:
+        for entry in os.scandir(data_dir):
+            entry_path = Path(entry.path)
+            if _is_link(entry_path):
+                raise BackupError(f"profile data contains an unsafe file: {entry_path}")
+            if entry.is_dir(follow_symlinks=False):
+                sub_directories.append(entry_path)
+            elif entry.is_file(follow_symlinks=False):
+                rel_path = entry_path.relative_to(data_dir).as_posix()
+                if not _is_runtime_or_log_file(rel_path) and not (
+                    exclude_cache and _is_cache_file(rel_path)
+                ):
+                    root_files.append(rel_path)
+            else:
+                raise BackupError(f"profile data contains an unsafe file: {entry_path}")
+    except OSError as exc:
+        raise BackupError(f"could not scan profile data directory '{data_dir}': {exc}") from exc
+
+    relative_files = list(root_files)
+
+    if len(sub_directories) <= 1:
+        for sub_dir in sub_directories:
+            relative_files.extend(_scan_directory_branch(sub_dir, data_dir, exclude_cache))
+    else:
+        max_workers = min(8, len(sub_directories))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_scan_directory_branch, sub_dir, data_dir, exclude_cache)
+                for sub_dir in sub_directories
+            ]
+            for future in as_completed(futures):
+                relative_files.extend(future.result())
+
+    return sorted(relative_files)
 
 
 def create_backup_archive(
@@ -140,6 +214,7 @@ def create_backup_archive(
     data_paths: DataPaths,
     output_file: Path,
     force: bool = False,
+    exclude_cache: bool = False,
 ) -> BackupReport:
     requested_output = Path(output_file).expanduser()
     if _is_link(requested_output):
@@ -185,9 +260,11 @@ def create_backup_archive(
         with tarfile.open(temp_archive, "w:gz") as tar:
             for p in profiles:
                 p_data_dir = Path(p.data_dir)
-                files_manifest, p_bytes = _collect_profile_files(p_data_dir)
+                rel_paths = _collect_profile_files(p_data_dir, exclude_cache=exclude_cache)
+                files_manifest: Dict[str, Tuple[int, str]] = {}
+                p_bytes = 0
 
-                for rel_path, (size, checksum) in files_manifest.items():
+                for rel_path in rel_paths:
                     fpath = p_data_dir / rel_path
                     if _is_link(fpath) or not fpath.is_file():
                         raise BackupError(f"profile data changed to an unsafe file during backup: {fpath}")
@@ -196,14 +273,26 @@ def create_backup_archive(
                     except ValueError as exc:
                         raise BackupError(f"profile data escaped during backup: {fpath}") from exc
                     arcname = f"profiles/{p.id}/browser-data/{rel_path}"
+                    tarinfo = tar.gettarinfo(str(fpath), arcname=arcname)
+                    if not tarinfo.isreg():
+                        raise BackupError(f"profile data contains an unsafe file: {fpath}")
+
                     try:
-                        tar.add(str(fpath), arcname=arcname)
+                        with fpath.open("rb") as handle:
+                            reader = _HashingFileReader(handle)
+                            tar.addfile(tarinfo, reader)
+                            checksum = reader.hexdigest
+                            size = reader.bytes_read
+                            files_manifest[rel_path] = (size, checksum)
+                            p_bytes += size
                     except PermissionError as exc:
                         raise FileLockedError(
                             f"cannot read locked file '{fpath}': {exc}. "
                             "A background browser process or application may still be holding the file open. "
                             "Please ensure all browser processes and background apps are completely closed."
                         ) from exc
+                    except OSError as exc:
+                        raise BackupError(f"cannot read profile data file '{fpath}': {exc}") from exc
 
                 profile_info = {
                     "id": p.id,

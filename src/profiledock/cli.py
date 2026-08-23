@@ -810,6 +810,12 @@ def backup(
         "-f",
         help="Overwrite existing output file.",
     ),
+    exclude_cache: bool = typer.Option(
+        False,
+        "--exclude-cache",
+        "-C",
+        help="Exclude transient browser cache directories to reduce archive size.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -838,6 +844,7 @@ def backup(
             data_paths=paths,
             output_file=output,
             force=force,
+            exclude_cache=exclude_cache,
         )
     except (
         ProfileNotFoundError,

@@ -20,7 +20,7 @@
     "delete": {"arguments": ["profile_id"], "options": {"yes": ["--yes", "-y"]}},
     "doctor": {"arguments": [], "options": {"repair": ["--repair"], "reattach_orphans": ["--reattach-orphans"], "recreate_missing": ["--recreate-missing"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
     "migrate": {"arguments": [], "options": {"from_project": ["--from-project"], "remove_source": ["--remove-source"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
-    "backup": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "output": ["--output", "-o"], "force": ["--force", "-f"], "json_output": ["--json"]}},
+    "backup": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "output": ["--output", "-o"], "force": ["--force", "-f"], "exclude_cache": ["--exclude-cache", "-C"], "json_output": ["--json"]}},
     "restore": {"arguments": ["archive"], "options": {"force": ["--force", "-f"], "json_output": ["--json"]}},
     "logs": {"arguments": ["profile_id"], "options": {"last": ["--last", "-n"], "json_output": ["--json"]}},
     "config": {
