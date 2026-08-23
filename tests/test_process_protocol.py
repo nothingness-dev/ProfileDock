@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from profiledock.process_manager import (
+    _alive,
     _atomic_private_json,
     _read_state,
     _valid_state,
@@ -20,6 +21,14 @@ from profiledock.process_manager import (
     RUNNING_STATE_PROTOCOL_VERSION,
     state_path,
 )
+
+
+def test_alive_reaps_exited_unix_child():
+    with patch("profiledock.process_manager.os.name", "posix"), patch(
+        "profiledock.process_manager.os.waitpid", return_value=(123, 0)
+    ), patch("profiledock.process_manager.os.kill") as kill:
+        assert not _alive(123)
+    kill.assert_not_called()
 
 
 def test_close_preserves_malformed_runtime_state(tmp_path):

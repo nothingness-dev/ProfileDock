@@ -357,7 +357,6 @@ def _is_matching_process(
 
 
 def _alive(pid: int) -> bool:
-
     if pid < 1:
         return False
     if sys.platform == "win32":
@@ -381,6 +380,13 @@ def _alive(pid: int) -> bool:
             return exit_code.value == 259
         finally:
             kernel32.CloseHandle(handle)
+    if os.name != "nt":
+        try:
+            wpid, _ = os.waitpid(pid, os.WNOHANG)
+            if wpid == pid:
+                return False
+        except (ChildProcessError, OSError):
+            pass
     try:
         os.kill(pid, 0)
         return True
