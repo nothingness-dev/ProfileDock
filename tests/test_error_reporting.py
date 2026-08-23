@@ -181,6 +181,7 @@ def test_playwright_import_failure_writes_category(tmp_path):
 
 
 def test_socket_initialization_failure_writes_category(tmp_path):
+    pytest.importorskip("playwright.sync_api")
     data_dir = tmp_path / "browser-data"
     data_dir.mkdir()
     state = tmp_path / "running.json"
