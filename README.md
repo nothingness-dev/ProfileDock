@@ -65,7 +65,7 @@ profiledock launch PROFILE [--tabs N]
 profiledock close PROFILE
 profiledock rename PROFILE NEW_NAME
 profiledock set-engine PROFILE ENGINE
-profiledock backup PROFILE --output ARCHIVE
+profiledock backup PROFILE --output ARCHIVE [--exclude-cache]
 profiledock restore ARCHIVE
 profiledock migrate --from-project PATH
 profiledock doctor
