@@ -119,7 +119,10 @@ def test_operational_error_uses_stderr_category_and_empty_stdout(tmp_path):
     result = runner.invoke(app, ["--data-root", str(tmp_path), "show", "missing"])
     assert result.exit_code == EXIT_USER_ERROR
     assert result.stdout == ""
-    assert result.stderr == "Error [not_found]: profile not found: missing\n"
+    assert result.stderr == (
+        "Error [not_found]: profile not found: missing\n"
+        "Next steps: run 'profiledock list' to see existing profiles\n"
+    )
 
 
 def test_usage_error_is_exit_two_and_does_not_use_operational_prefix():
