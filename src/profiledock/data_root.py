@@ -44,6 +44,7 @@ def ensure_within_root(
         relative = target_absolute.relative_to(root_absolute)
     except ValueError as exc:
         raise DataRootError(f"path escapes configured data root: {target}") from exc
+
     if any(part == ".." for part in relative.parts):
         raise DataRootError(f"path traversal is not allowed: {target}")
     if not relative.parts and not allow_root:
