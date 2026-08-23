@@ -14,6 +14,8 @@ Global options must appear before the command:
 | `--verbose`, `-v` | Enable verbose and trace logging behavior. |
 | `--log-level LEVEL` | Set the log threshold: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. |
 | `--non-interactive` | Prohibit prompts and fail when required input is missing. |
+| `--install-completion [SHELL]` | Install shell completion (bash, zsh, fish, PowerShell). |
+| `--show-completion [SHELL]` | Print shell completion script to stdout. |
 | `--version`, `-V` | Print the installed ProfileDock version and exit. |
 | `--help` | Show help. |
 
@@ -241,4 +243,8 @@ Reads structured local logs, optionally filtered by resolved profile ID. `--last
 | `1` | Operational, validation, confirmation, storage, security, profile, or browser error. |
 | `2` | CLI syntax or usage error. |
 
-Human and JSON success output use stdout. Operational errors use stderr. Errors begin `Error [category]:`. Stable categories and JSON guarantees are defined in the [CLI contract](cli-contract.md), with every payload described in the [JSON output reference](json-output.md).
+Human and JSON success output use stdout. Operational errors use stderr. Errors begin `Error [category]:`, and actionable failures add a `Next steps:` line on stderr suggesting the recovery command (for example, running `profiledock list` after an unknown profile). Stable categories and JSON guarantees are defined in the [CLI contract](cli-contract.md), with every payload described in the [JSON output reference](json-output.md).
+
+## Terminal adaptation
+
+Interactive terminals receive color and Unicode status symbols (`✓`/`!`/`✗`) on doctor checks and results; consoles or pipes that cannot render them automatically fall back to plain ASCII markers (`[ok]`/`!`/`x`). Color is disabled by `NO_COLOR`, `TERM=dumb`, non-TTY output, or `PROFILEDOCK_COLOR=never`; it can be forced in scripts with `PROFILEDOCK_COLOR=always`. Machine JSON output never contains ANSI escapes or symbols.

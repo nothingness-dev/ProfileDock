@@ -86,3 +86,13 @@ profiledock backup Work --output work-profile.tar.gz
 ```
 
 Profiles must be stopped for a consistent backup. See [Data management](data-management.md) before restoring, migrating, or deleting data.
+
+## Optional: shell completion
+
+Enable tab completion for commands and options in your shell:
+
+```bash
+profiledock --install-completion
+```
+
+Supports bash, zsh, fish, and PowerShell. Restart the shell after installing.

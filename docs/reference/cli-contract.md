@@ -8,7 +8,9 @@ The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `st
 
 The `config` commands are `show`, `set`, `add-url`, `remove-url`, and `reset`. `config set` accepts the setting names `default-tabs`, `engine`, `browser`, and `window-size`.
 
-The root options are `--data-root`, `--verbose`/`-v`, `--log-level`, `--non-interactive`, and `--version`/`-V`. The complete argument requirements and option aliases are recorded in the golden contract fixture and checked against the generated Typer application in every test run.
+The root options are `--data-root`, `--verbose`/`-v`, `--log-level`, `--non-interactive`, `--install-completion`, `--show-completion`, and `--version`/`-V`. The complete argument requirements and option aliases are recorded in the golden contract fixture and checked against the generated Typer application in every test run.
+
+Human output is terminal-aware: color and Unicode status symbols appear only on interactive terminals that support them, never in piped or redirected output, and are disabled by `NO_COLOR`. Machine JSON output is unaffected.
 
 ## Engine contract
 
