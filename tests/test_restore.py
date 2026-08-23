@@ -1,7 +1,5 @@
-from hashlib import sha256
 import io
 import json
-import os
 from pathlib import Path
 import tarfile
 from unittest.mock import patch
@@ -10,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from profiledock.backup import create_backup_archive
-from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.cli import app, EXIT_SUCCESS
 from profiledock.data_root import DataPaths
 from profiledock.models import LaunchConfig, Profile, MetadataDocument
 from profiledock.restore import (

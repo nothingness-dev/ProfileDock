@@ -1,4 +1,4 @@
-from profiledock.profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
+from profiledock.profile_manager import AmbiguousProfileError, ProfileNotFoundError
 
 
 def test_resolve_full_id(manager):

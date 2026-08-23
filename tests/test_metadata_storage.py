@@ -1,9 +1,7 @@
 import json
-import os
 import shutil
 import tempfile
 import threading
-import time
 from unittest.mock import patch
 from pathlib import Path
 from typing import Generator
@@ -17,10 +15,8 @@ from profiledock.storage import (
     add_profile_atomic,
     load_metadata,
     load_metadata_with_recovery,
-    mark_launched_atomic,
     migrate_metadata,
     remove_profile_atomic,
-    rename_profile_atomic,
     save_metadata,
     set_engine_atomic,
     _atomic_write,

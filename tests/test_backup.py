@@ -1,6 +1,4 @@
-import io
 import json
-import os
 from pathlib import Path
 import tarfile
 from unittest.mock import patch
@@ -16,7 +14,7 @@ from profiledock.backup import (
     TargetExistsError,
     create_backup_archive,
 )
-from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.cli import app, EXIT_SUCCESS
 from profiledock.data_root import DataPaths
 from profiledock.models import Profile, MetadataDocument
 from profiledock.storage import save_metadata

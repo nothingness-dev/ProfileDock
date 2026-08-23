@@ -4,12 +4,9 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
-import sys
 import tarfile
-import tempfile
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from .data_root import DataPaths, DataRootError, _is_link, ensure_within_root, validate_path_component

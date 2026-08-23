@@ -2,21 +2,17 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
-from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.cli import app, EXIT_SUCCESS
 from profiledock.data_root import DataPaths
 from profiledock.logger import (
-    generate_correlation_id,
     read_profile_logs,
     redact_sensitive_data,
     rotate_log_file,
     sanitize_url,
     write_log_entry,
 )
-from profiledock.models import Profile, MetadataDocument
-from profiledock.storage import save_metadata
 
 runner = CliRunner()
 

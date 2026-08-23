@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR, resolve_engine
 from profiledock.models import Profile
 from profiledock.process_manager import BrowserLaunchError, ProfileRunningError
-from profiledock.profile_manager import AmbiguousProfileError, ProfileNotFoundError
+from profiledock.profile_manager import ProfileNotFoundError
 from profiledock.storage import StorageError
 from profiledock.version import __version__
 

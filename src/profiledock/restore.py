@@ -1,6 +1,5 @@
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-import io
 import json
 import os
 from pathlib import Path

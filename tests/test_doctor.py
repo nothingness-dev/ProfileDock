@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -18,18 +18,13 @@ from profiledock.doctor import (
     check_metadata_backup_state,
     check_metadata_schema,
     check_orphan_directories,
-    check_playwright_chromium,
     check_playwright_package,
     check_profile_directories,
     check_python_version,
-    check_runtime_permissions,
     check_stale_running_state,
-    check_system_chrome,
-    check_version_consistency,
     repair_environment,
-    run_diagnostics,
 )
-from profiledock.models import Profile, METADATA_SCHEMA_VERSION, MetadataDocument
+from profiledock.models import Profile, MetadataDocument
 from profiledock.storage import load_metadata, save_metadata
 
 runner = CliRunner()
