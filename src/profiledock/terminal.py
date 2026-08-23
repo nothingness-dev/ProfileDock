@@ -11,12 +11,9 @@ from typing import Optional
 
 _RESET = "\033[0m"
 _STYLES = {
-    "bold": "\033[1m",
-    "dim": "\033[2m",
     "red": "\033[31m",
     "green": "\033[32m",
     "yellow": "\033[33m",
-    "cyan": "\033[36m",
 }
 
 _color_enabled: Optional[bool] = None

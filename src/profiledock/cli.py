@@ -18,6 +18,8 @@ from .cli_contract import EXIT_SUCCESS as EXIT_SUCCESS
 from .data_root import DataPaths, DataRootError, resolve_data_root
 from .doctor import (
     STATUS_FAILED,
+    STATUS_OK,
+    STATUS_WARNING,
     DiagnosticCheck,
     repair_environment,
     run_diagnostics,
@@ -906,7 +908,14 @@ def doctor(
         typer.echo("")
     table = [["", "CHECK", "STATUS", "SUMMARY"]]
     for c in checks:
-        mark = {"ok": ok_mark(), "warning": warn_mark(), "failed": fail_mark()}.get(c.status, "")
+        if c.status == STATUS_OK:
+            mark = ok_mark()
+        elif c.status == STATUS_WARNING:
+            mark = warn_mark()
+        elif c.status == STATUS_FAILED:
+            mark = fail_mark()
+        else:
+            mark = ""
         table.append([mark, c.id, c.status.upper(), c.summary])
     typer.echo(_render_table(table))
     has_actions = [c for c in checks if c.action]
