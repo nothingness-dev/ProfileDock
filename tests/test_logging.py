@@ -14,7 +14,7 @@ from profiledock.logger import (
     write_log_entry,
 )
 
-runner = CliRunner()
+runner = CliRunner(mix_stderr=False)
 
 
 def make_paths(root: Path) -> DataPaths:

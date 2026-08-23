@@ -10,7 +10,7 @@ from profiledock.cli_contract import CLI_CONTRACT_VERSION, CLI_JSON_OUTPUT_VERSI
 from profiledock.models import LaunchConfig, Profile
 
 
-runner = CliRunner()
+runner = CliRunner(mix_stderr=False)
 FIXTURES = Path(__file__).parent / "fixtures" / "cli"
 
 

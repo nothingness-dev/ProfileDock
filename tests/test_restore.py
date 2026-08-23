@@ -19,7 +19,7 @@ from profiledock.restore import (
 )
 from profiledock.storage import load_metadata, save_metadata
 
-runner = CliRunner()
+runner = CliRunner(mix_stderr=False)
 
 
 def complete_manifest(value):

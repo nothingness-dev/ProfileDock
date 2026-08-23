@@ -15,7 +15,7 @@ from profiledock.profile_manager import ProfileManager
 from profiledock.process_manager import ProfileRunningError, state_path
 from profiledock.storage import StorageError
 
-runner = CliRunner()
+runner = CliRunner(mix_stderr=False)
 
 
 def test_windows_default_path(tmp_path):

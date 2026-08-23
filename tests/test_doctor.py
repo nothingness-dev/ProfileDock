@@ -27,7 +27,7 @@ from profiledock.doctor import (
 from profiledock.models import Profile, MetadataDocument
 from profiledock.storage import load_metadata, save_metadata
 
-runner = CliRunner()
+runner = CliRunner(mix_stderr=False)
 
 
 def paths(root):

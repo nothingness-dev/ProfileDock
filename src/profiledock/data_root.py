@@ -29,6 +29,25 @@ def validate_path_component(value: str, label: str = "identifier") -> str:
     return value
 
 
+def _get_long_path(path: Path) -> Path:
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        try:
+            GetLongPathName = ctypes.windll.kernel32.GetLongPathNameW
+            GetLongPathName.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+            GetLongPathName.restype = wintypes.DWORD
+            path_str = str(path)
+            buffer = ctypes.create_unicode_buffer(32768)
+            res = GetLongPathName(path_str, buffer, 32768)
+            if res > 0:
+                return Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
+    return path
+
+
 def ensure_within_root(
     target: Path,
     root: Path,
@@ -40,26 +59,30 @@ def ensure_within_root(
     if not target_absolute.is_absolute():
         target_absolute = root_absolute / target_absolute
     target_absolute = target_absolute.absolute()
+
+    resolved_root = _get_long_path(root_absolute.resolve(strict=False))
+    resolved_target = _get_long_path(target_absolute.resolve(strict=False))
+
     try:
         relative = target_absolute.relative_to(root_absolute)
-    except ValueError as exc:
-        raise DataRootError(f"path escapes configured data root: {target}") from exc
+    except ValueError:
+        try:
+            relative = resolved_target.relative_to(resolved_root)
+        except ValueError as exc:
+            raise DataRootError(f"path escapes configured data root: {target}") from exc
+
 
     if any(part == ".." for part in relative.parts):
         raise DataRootError(f"path traversal is not allowed: {target}")
     if not relative.parts and not allow_root:
         raise DataRootError("refusing to target the configured data root")
     if reject_links:
-        if _is_link(root_absolute):
-            raise DataRootError(f"configured data root is a link or reparse point: {root}")
-        current = root_absolute
-        for part in relative.parts:
+        current = resolved_root
+        for part in resolved_target.relative_to(resolved_root).parts:
             current = current / part
             if _is_link(current):
                 raise DataRootError(f"path contains a link or reparse point: {current}")
     try:
-        resolved_root = root_absolute.resolve(strict=False)
-        resolved_target = target_absolute.resolve(strict=False)
         resolved_target.relative_to(resolved_root)
     except (OSError, RuntimeError, ValueError) as exc:
         raise DataRootError(f"resolved path escapes configured data root: {target}") from exc
