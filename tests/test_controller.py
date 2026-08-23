@@ -53,7 +53,10 @@ def _terminate_owned_tree(pid: int) -> None:
             check=False,
         )
         if result.returncode != 0 and _process_alive(pid):
-            raise RuntimeError(f"could not terminate test controller {pid}")
+            try:
+                os.kill(pid, 9)
+            except (OSError, ProcessLookupError):
+                pass
     else:
         try:
             os.kill(pid, 9)
