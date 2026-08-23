@@ -4,12 +4,16 @@ from unittest.mock import patch
 
 import pytest
 
+import profiledock.storage as storage
 from profiledock.cli import CLI_JSON_OUTPUT_VERSION
 from profiledock.models import LaunchConfig, MetadataDocument, migrate_launch_config, migrate_metadata_value
-from profiledock.process_manager import RUNNING_STATE_PROTOCOL_VERSION, _upgrade_legacy_state, _valid_direct_state, _valid_state
+from profiledock.process_manager import (
+    RUNNING_STATE_PROTOCOL_VERSION,
+    _upgrade_legacy_state,
+    _valid_direct_state,
+    _valid_state,
+)
 from profiledock.storage import migrate_metadata
-import profiledock.storage as storage
-
 
 FIXTURES = Path(__file__).parent / "fixtures" / "formats"
 
@@ -117,7 +121,12 @@ def test_cli_output_fixture_has_current_version():
 def test_backup_archive_v1_fixture_is_complete():
     value = fixture("backup-v1.json")
     assert set(value) == {
-        "format_version", "profiledock_version", "created_at", "total_profiles",
-        "total_files", "total_bytes", "profiles",
+        "format_version",
+        "profiledock_version",
+        "created_at",
+        "total_profiles",
+        "total_files",
+        "total_bytes",
+        "profiles",
     }
     assert value["format_version"] == 1

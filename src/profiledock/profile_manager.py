@@ -1,12 +1,19 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
-from .data_root import DataPaths, ensure_tree_safe, ensure_within_root, resolve_data_root, validate_path_component
+from .data_root import (
+    DataPaths,
+    ensure_tree_safe,
+    ensure_within_root,
+    resolve_data_root,
+    validate_path_component,
+)
 from .models import LaunchConfig, Profile, utc_now
 from .process_manager import ProfileRunningError, is_active_for_mutation
 from .storage import (
+    StorageError,
     add_profile_atomic,
     load_metadata,
     mark_launched_atomic,
@@ -47,7 +54,7 @@ class ProfileManager:
     def ensure_migrated(self) -> None:
         migrate_metadata(self.profiles_file, self.profiles_dir, backup_path=self.backup_file)
 
-    def list_profiles(self) -> List[Profile]:
+    def list_profiles(self) -> list[Profile]:
         self.ensure_migrated()
         doc = load_metadata(self.profiles_file)
         return doc.profiles
@@ -70,17 +77,13 @@ class ProfileManager:
             return prefix_matches[0]
         if len(prefix_matches) > 1:
             matches = ", ".join(f"{p.id} ({p.name})" for p in prefix_matches)
-            raise AmbiguousProfileError(
-                f"ambiguous profile identifier '{identifier}' matches: {matches}"
-            )
+            raise AmbiguousProfileError(f"ambiguous profile identifier '{identifier}' matches: {matches}")
         name_matches = [p for p in profiles if p.name == identifier]
         if len(name_matches) == 1:
             return name_matches[0]
         if len(name_matches) > 1:
             matches = ", ".join(f"{p.id} ({p.name})" for p in name_matches)
-            raise AmbiguousProfileError(
-                f"ambiguous profile name '{identifier}' matches: {matches}"
-            )
+            raise AmbiguousProfileError(f"ambiguous profile name '{identifier}' matches: {matches}")
         raise ProfileNotFoundError(f"profile not found: {identifier}")
 
     def create(self, name: str, engine: Optional[str] = None) -> Profile:

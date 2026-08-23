@@ -4,13 +4,12 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR, resolve_engine
+from profiledock.cli import EXIT_SUCCESS, EXIT_USER_ERROR, app, resolve_engine
 from profiledock.models import Profile
 from profiledock.process_manager import BrowserLaunchError, ProfileRunningError
 from profiledock.profile_manager import ProfileNotFoundError
 from profiledock.storage import StorageError
 from profiledock.version import __version__
-
 
 runner = CliRunner()
 
@@ -59,12 +58,11 @@ def test_launch_browser_error_shown_concisely(tmp_path):
     )
 
     def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None):
-        raise BrowserLaunchError(
-            "Playwright Chromium: not installed\nGoogle Chrome: not found"
-        )
+        raise BrowserLaunchError("Playwright Chromium: not installed\nGoogle Chrome: not found")
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.start_controller", side_effect=fake_start_controller
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.start_controller", side_effect=fake_start_controller),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -81,9 +79,7 @@ def test_launch_browser_error_shown_concisely(tmp_path):
 
 def test_launch_profile_not_found_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager:
-        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
-            "profile not found: missing"
-        )
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError("profile not found: missing")
         result = runner.invoke(app, ["launch", "missing", "--tabs", "1"])
 
     assert result.exit_code == 1
@@ -118,8 +114,9 @@ def test_launch_running_error_shown_concisely(tmp_path):
     def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None):
         raise ProfileRunningError("profile is already running")
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.start_controller", side_effect=fake_start_controller
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.start_controller", side_effect=fake_start_controller),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -141,9 +138,7 @@ def test_launch_succeeds_when_timestamp_update_fails(tmp_path):
         (),
         {"id": "abc123", "name": "Test", "data_dir": str(data_dir), "engine": "playwright"},
     )()
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.start_controller"
-    ):
+    with patch("profiledock.cli.manager") as mock_manager, patch("profiledock.cli.start_controller"):
         mock_manager.return_value.resolve.return_value = profile
         mock_manager.return_value.runtime_path.return_value = tmp_path / "runtime" / "abc123"
         mock_manager.return_value.mark_launched.side_effect = StorageError("metadata locked")
@@ -180,8 +175,9 @@ def test_close_browser_error_shown_concisely(tmp_path):
     def fake_close_controller(data_dir, timeout=15, runtime_dir=None):
         raise BrowserLaunchError("profile is not running")
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.close_controller", side_effect=fake_close_controller
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.close_controller", side_effect=fake_close_controller),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -197,9 +193,7 @@ def test_close_browser_error_shown_concisely(tmp_path):
 
 def test_delete_profile_not_found_shown_concisely(tmp_path):
     with patch("profiledock.cli.manager") as mock_manager:
-        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
-            "profile not found: missing"
-        )
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError("profile not found: missing")
         result = runner.invoke(app, ["delete", "missing", "--yes"])
 
     assert result.exit_code == 1
@@ -208,8 +202,9 @@ def test_delete_profile_not_found_shown_concisely(tmp_path):
 
 
 def test_list_table_format():
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="stopped"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -231,8 +226,9 @@ def test_list_table_format():
 def test_list_json_format():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -261,8 +257,9 @@ def test_list_json_format():
 
 
 def test_show_command():
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="stopped"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -290,8 +287,9 @@ def test_show_command():
 def test_show_json_command():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -335,8 +333,9 @@ def test_rename_empty_name_fails():
 
 
 def test_status_all_profiles():
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -356,8 +355,9 @@ def test_status_all_profiles():
 
 
 def test_status_single_profile():
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="stopped"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -372,8 +372,9 @@ def test_status_single_profile():
 def test_status_all_profiles_json():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -396,8 +397,9 @@ def test_status_all_profiles_json():
 def test_status_single_profile_json():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="error"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="error"),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -417,9 +419,11 @@ def test_status_single_profile_json():
 
 
 def test_status_watch_flag(tmp_path):
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
-    ), patch("time.sleep", side_effect=KeyboardInterrupt):
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
+        patch("time.sleep", side_effect=KeyboardInterrupt),
+    ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
                 "Profile",
@@ -439,7 +443,6 @@ def test_status_watch_invalid_interval():
     assert "interval must be greater than 0" in result.stderr
 
 
-
 def test_exit_code_success():
     with patch("profiledock.cli.manager") as mock_manager:
         mock_manager.return_value.list_profiles.return_value = []
@@ -449,9 +452,7 @@ def test_exit_code_success():
 
 def test_exit_code_user_error():
     with patch("profiledock.cli.manager") as mock_manager:
-        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
-            "profile not found: missing"
-        )
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError("profile not found: missing")
         result = runner.invoke(app, ["show", "missing"])
     assert result.exit_code == EXIT_USER_ERROR
 
@@ -464,8 +465,9 @@ def test_exit_code_empty_name():
 def test_json_list_schema():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="stopped"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -514,8 +516,9 @@ def test_json_list_schema():
 def test_json_show_schema():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
     ):
         mock_manager.return_value.resolve.return_value = type(
             "Profile",
@@ -556,8 +559,9 @@ def test_json_show_schema():
 def test_json_status_schema():
     import json
 
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="running"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="running"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -592,8 +596,9 @@ def test_json_status_schema():
 
 
 def test_human_output_goes_to_stdout():
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="stopped"
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
     ):
         mock_manager.return_value.list_profiles.return_value = [
             type(
@@ -611,9 +616,7 @@ def test_human_output_goes_to_stdout():
 
 def test_errors_go_to_stderr():
     with patch("profiledock.cli.manager") as mock_manager:
-        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError(
-            "profile not found: missing"
-        )
+        mock_manager.return_value.resolve.side_effect = ProfileNotFoundError("profile not found: missing")
         result = runner.invoke(app, ["show", "missing"])
 
     assert result.exit_code == EXIT_USER_ERROR
@@ -664,9 +667,10 @@ def test_launch_with_direct_engine(tmp_path):
         (),
         {"id": "abc123", "name": "DirectTest", "data_dir": str(data_dir), "engine": "direct"},
     )()
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.start_direct_chrome"
-    ) as mock_direct:
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.start_direct_chrome") as mock_direct,
+    ):
         mock_manager.return_value.resolve.return_value = profile
         mock_manager.return_value.runtime_path.return_value = tmp_path / "runtime" / "abc123"
         result = runner.invoke(app, ["launch", "abc123", "--tabs", "2"])
@@ -683,9 +687,10 @@ def test_launch_with_playwright_override(tmp_path):
         (),
         {"id": "abc123", "name": "OverrideTest", "data_dir": str(data_dir), "engine": "direct"},
     )()
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.start_controller"
-    ) as mock_ctrl:
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.start_controller") as mock_ctrl,
+    ):
         mock_manager.return_value.resolve.return_value = profile
         mock_manager.return_value.runtime_path.return_value = tmp_path / "runtime" / "abc123"
         result = runner.invoke(app, ["launch", "abc123", "--tabs", "1", "--engine", "playwright"])
@@ -695,7 +700,9 @@ def test_launch_with_playwright_override(tmp_path):
 
 
 def test_create_with_engine_direct_integration(tmp_path):
-    result = runner.invoke(app, ["--data-root", str(tmp_path), "create", "DirectProfile", "--engine", "direct"])
+    result = runner.invoke(
+        app, ["--data-root", str(tmp_path), "create", "DirectProfile", "--engine", "direct"]
+    )
     assert result.exit_code == 0
     assert "Created profile 'DirectProfile'" in result.output
     metadata_file = tmp_path / "metadata" / "profiles.json"
@@ -746,19 +753,28 @@ def test_resolve_engine_precedence():
 def test_config_cli_commands_and_presets(tmp_path):
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "ConfigProfile"])
 
-    res_set_tabs = runner.invoke(app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "default-tabs", "4"])
+    res_set_tabs = runner.invoke(
+        app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "default-tabs", "4"]
+    )
     assert res_set_tabs.exit_code == 0
     assert "Set default-tabs to 4" in res_set_tabs.output
 
-    res_set_engine = runner.invoke(app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "engine", "playwright"])
+    res_set_engine = runner.invoke(
+        app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "engine", "playwright"]
+    )
     assert res_set_engine.exit_code == 0
     assert "Set engine to 'playwright'" in res_set_engine.output
 
-    res_set_win = runner.invoke(app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "window-size", "1440x900"])
+    res_set_win = runner.invoke(
+        app, ["--data-root", str(tmp_path), "config", "set", "ConfigProfile", "window-size", "1440x900"]
+    )
     assert res_set_win.exit_code == 0
     assert "Set window-size to 1440x900" in res_set_win.output
 
-    res_add_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "add-url", "ConfigProfile", "https://news.ycombinator.com"])
+    res_add_url = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "config", "add-url", "ConfigProfile", "https://news.ycombinator.com"],
+    )
     assert res_add_url.exit_code == 0
 
     res_show = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile"])
@@ -766,7 +782,9 @@ def test_config_cli_commands_and_presets(tmp_path):
     assert "1440x900" in res_show.output
     assert "https://news.ycombinator.com" in res_show.output
 
-    res_show_json = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"])
+    res_show_json = runner.invoke(
+        app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"]
+    )
     assert res_show_json.exit_code == 0
     cfg_data = json.loads(res_show_json.output)
     assert cfg_data["output_version"] == 1
@@ -776,25 +794,36 @@ def test_config_cli_commands_and_presets(tmp_path):
     assert cfg_data["window_width"] == 1440
     assert cfg_data["start_urls"] == ["https://news.ycombinator.com"]
 
-    res_rem_url = runner.invoke(app, ["--data-root", str(tmp_path), "config", "remove-url", "ConfigProfile", "https://news.ycombinator.com"])
+    res_rem_url = runner.invoke(
+        app,
+        [
+            "--data-root",
+            str(tmp_path),
+            "config",
+            "remove-url",
+            "ConfigProfile",
+            "https://news.ycombinator.com",
+        ],
+    )
     assert res_rem_url.exit_code == 0
 
     res_reset = runner.invoke(app, ["--data-root", str(tmp_path), "config", "reset", "ConfigProfile"])
     assert res_reset.exit_code == 0
 
-    res_show_after = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"])
+    res_show_after = runner.invoke(
+        app, ["--data-root", str(tmp_path), "config", "show", "ConfigProfile", "--json"]
+    )
     cfg_after = json.loads(res_show_after.output)["data"]
     assert cfg_after["default_tabs"] is None
     assert cfg_after["start_urls"] == []
 
 
-
 def test_resolve_engine_rejects_invalid_environment_value():
     profile = Profile("id1", "Name", "2026-01-01T00:00:00+00:00", "/path")
-    with patch.dict(
-        os.environ, {"PROFILEDOCK_DEFAULT_ENGINE": "invalid"}
-    ), patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.get_status", return_value="stopped"
+    with (
+        patch.dict(os.environ, {"PROFILEDOCK_DEFAULT_ENGINE": "invalid"}),
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
     ):
         mock_manager.return_value.list_profiles.return_value = [profile]
         result = runner.invoke(app, ["status"])

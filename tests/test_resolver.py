@@ -22,7 +22,7 @@ def test_resolve_exact_name(manager):
 
 def test_resolve_full_id_wins_over_name(manager):
     p1 = manager.create("Work")
-    p2 = manager.create(p1.id)
+    manager.create(p1.id)
     resolved = manager.resolve(p1.id)
     assert resolved.id == p1.id
 
@@ -47,6 +47,7 @@ def test_resolve_ambiguous_prefix(manager):
 def test_resolve_ambiguous_prefix_shows_matches(manager):
     from profiledock.models import Profile, utc_now
     from profiledock.storage import add_profile_atomic
+
     data_dir1 = manager.profiles_dir / "aa111111" / "browser-data"
     data_dir1.mkdir(parents=True, exist_ok=True)
     data_dir2 = manager.profiles_dir / "aa222222" / "browser-data"

@@ -2,13 +2,14 @@ import json
 import os
 import sys
 import time as _time
-from uuid import uuid4
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator, List, Optional, Union
+from typing import IO, Any, Callable, Optional, Union
+from uuid import uuid4
 
 from .data_root import DataRootError, ensure_within_root
-from .models import LaunchConfig, MetadataDocument, METADATA_SCHEMA_VERSION, Profile, migrate_metadata_value
+from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_metadata_value
 from .validation import ValidationError, validate_metadata_document
 
 
@@ -46,7 +47,7 @@ def _validate_metadata_paths(
     return root.resolve(strict=False)
 
 
-def _lock_file(fd: Any) -> None:
+def _lock_file(fd: IO[bytes]) -> None:
     if sys.platform == "win32":
         import msvcrt
 
@@ -58,7 +59,7 @@ def _lock_file(fd: Any) -> None:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
-def _unlock_file(fd: Any) -> None:
+def _unlock_file(fd: IO[bytes]) -> None:
     if sys.platform == "win32":
         import msvcrt
 
@@ -77,9 +78,7 @@ def _unlock_file(fd: Any) -> None:
 
 
 @contextmanager
-def metadata_lock(
-    metadata_path: Union[str, Path], timeout: float = 5.0
-) -> Generator[None, None, None]:
+def metadata_lock(metadata_path: Union[str, Path], timeout: float = 5.0) -> Generator[None, None, None]:
     metadata_path = Path(metadata_path)
     root = _metadata_root(metadata_path)
     try:
@@ -100,11 +99,9 @@ def metadata_lock(
             try:
                 _lock_file(lock_fd)
                 break
-            except (OSError, IOError):
+            except OSError:
                 if _time.monotonic() >= deadline:
-                    raise MetadataLockedError(
-                        f"could not acquire metadata lock within {timeout}s"
-                    )
+                    raise MetadataLockedError(f"could not acquire metadata lock within {timeout}s") from None
                 _time.sleep(poll_interval)
                 poll_interval = min(poll_interval * 1.5, 0.05)
         yield
@@ -130,11 +127,11 @@ def _read_json_file(path: Path) -> Any:
         raise MetadataCorruptedError(f"could not read {path}: {exc}") from exc
 
 
-def _is_bare_array(data: Any) -> bool:
+def _is_bare_array(data: object) -> bool:
     return isinstance(data, list)
 
 
-def _is_versioned_document(data: Any) -> bool:
+def _is_versioned_document(data: object) -> bool:
     return isinstance(data, dict) and "schema_version" in data and "profiles" in data
 
 
@@ -233,7 +230,7 @@ def _backup_metadata(
             raise StorageError(f"could not backup {path}: {exc}") from exc
 
 
-def _load_profiles_from_bare_array(data: List[Any]) -> List[Profile]:
+def _load_profiles_from_bare_array(data: list[dict[str, Any]]) -> list[Profile]:
     return MetadataDocument.from_dict(migrate_metadata_value(data)).profiles
 
 
@@ -313,9 +310,7 @@ def save_metadata(
     backup_path: Union[str, Path, None] = None,
 ) -> None:
     if doc.schema_version != METADATA_SCHEMA_VERSION:
-        raise StorageError(
-            f"refusing to write unsupported metadata schema version: {doc.schema_version}"
-        )
+        raise StorageError(f"refusing to write unsupported metadata schema version: {doc.schema_version}")
     path = Path(path)
     profile_root = Path(profile_root)
     root = _validate_metadata_paths(path, profile_root, backup_path)
@@ -326,13 +321,13 @@ def save_metadata(
         _atomic_write(path, content, root)
 
 
-def load_profiles(path: Union[str, Path] = "profiles.json") -> List[Profile]:
+def load_profiles(path: Union[str, Path] = "profiles.json") -> list[Profile]:
     doc = load_metadata(path)
     return doc.profiles
 
 
 def save_profiles(
-    profiles: List[Profile],
+    profiles: list[Profile],
     path: Union[str, Path] = "profiles.json",
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
@@ -344,7 +339,7 @@ def save_profiles(
 def atomic_update_metadata(
     path: Union[str, Path],
     profile_root: Union[str, Path],
-    updater: Any,
+    updater: Callable[[MetadataDocument], MetadataDocument],
     backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
     path = Path(path)
@@ -372,9 +367,7 @@ def add_profile_atomic(
     def _add(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = list(doc.profiles)
         new_profiles.append(profile)
-        return MetadataDocument(
-            schema_version=doc.schema_version, profiles=new_profiles
-        )
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
 
     return atomic_update_metadata(path, profile_root, _add, backup_path)
 
@@ -387,9 +380,7 @@ def remove_profile_atomic(
 ) -> MetadataDocument:
     def _remove(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = [p for p in doc.profiles if p.id != profile_id]
-        return MetadataDocument(
-            schema_version=doc.schema_version, profiles=new_profiles
-        )
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
 
     return atomic_update_metadata(path, profile_root, _remove, backup_path)
 
@@ -418,9 +409,7 @@ def rename_profile_atomic(
                 )
             else:
                 new_profiles.append(p)
-        return MetadataDocument(
-            schema_version=doc.schema_version, profiles=new_profiles
-        )
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
 
     return atomic_update_metadata(path, profile_root, _rename, backup_path)
 
@@ -449,9 +438,7 @@ def mark_launched_atomic(
                 )
             else:
                 new_profiles.append(p)
-        return MetadataDocument(
-            schema_version=doc.schema_version, profiles=new_profiles
-        )
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
 
     return atomic_update_metadata(path, profile_root, _mark, backup_path)
 
@@ -480,9 +467,7 @@ def set_engine_atomic(
                 )
             else:
                 new_profiles.append(p)
-        return MetadataDocument(
-            schema_version=doc.schema_version, profiles=new_profiles
-        )
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
 
     return atomic_update_metadata(path, profile_root, _set, backup_path)
 
@@ -511,8 +496,6 @@ def set_launch_config_atomic(
                 )
             else:
                 new_profiles.append(p)
-        return MetadataDocument(
-            schema_version=doc.schema_version, profiles=new_profiles
-        )
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
 
     return atomic_update_metadata(path, profile_root, _update_cfg, backup_path)

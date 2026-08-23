@@ -1,16 +1,16 @@
 import io
 import json
-from pathlib import Path
 import tarfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from profiledock.backup import create_backup_archive
-from profiledock.cli import app, EXIT_SUCCESS
+from profiledock.cli import EXIT_SUCCESS, app
 from profiledock.data_root import DataPaths
-from profiledock.models import LaunchConfig, Profile, MetadataDocument
+from profiledock.models import LaunchConfig, MetadataDocument, Profile
 from profiledock.restore import (
     DecompressionSecurityError,
     InvalidArchiveError,
@@ -29,7 +29,9 @@ def complete_manifest(value):
         profile.setdefault("engine", None)
         profile.setdefault("launch_config", None)
         profile.setdefault("file_count", len(profile.get("files", {})))
-        profile.setdefault("total_bytes", sum(item.get("size", 0) for item in profile.get("files", {}).values()))
+        profile.setdefault(
+            "total_bytes", sum(item.get("size", 0) for item in profile.get("files", {}).values())
+        )
     value.setdefault("profiledock_version", "test")
     value.setdefault("created_at", "2026-01-01T00:00:00+00:00")
     value.setdefault("total_profiles", len(profiles))
@@ -78,8 +80,12 @@ def test_restore_single_and_multiple_profiles(tmp_path):
     report = restore_backup_archive(archive_file, dst_paths)
 
     assert report.total_restored == 2
-    assert (dst_paths.profiles_dir / "p1" / "browser-data" / "Cookies").read_text(encoding="utf-8") == "cookie_payload"
-    assert (dst_paths.profiles_dir / "p2" / "browser-data" / "History").read_text(encoding="utf-8") == "history_payload"
+    assert (dst_paths.profiles_dir / "p1" / "browser-data" / "Cookies").read_text(
+        encoding="utf-8"
+    ) == "cookie_payload"
+    assert (dst_paths.profiles_dir / "p2" / "browser-data" / "History").read_text(
+        encoding="utf-8"
+    ) == "history_payload"
 
     loaded_doc = load_metadata(dst_paths.profiles_file)
     assert len(loaded_doc.profiles) == 2
@@ -201,7 +207,6 @@ def test_restore_security_checksum_mismatch_fails(tmp_path):
     p_data = src_paths.profiles_dir / "p1" / "browser-data"
     p_data.mkdir(parents=True)
     (p_data / "data.txt").write_text("content", encoding="utf-8")
-    p1 = Profile("p1", "DirectWork", "2026-01-01T00:00:00+00:00", str(p_data), engine="direct")
 
     archive_file = tmp_path / "backup_tampered.tar.gz"
 
@@ -248,7 +253,9 @@ def test_restore_conflict_handling_and_force(tmp_path):
     (dst_p1_data / "file.txt").write_text("existing_data", encoding="utf-8")
 
     dst_p = Profile("p1", "DifferentName", "2026-01-01T00:00:00+00:00", str(dst_p1_data), engine="playwright")
-    save_metadata(MetadataDocument(schema_version=1, profiles=[dst_p]), dst_paths.profiles_file, dst_paths.profiles_dir)
+    save_metadata(
+        MetadataDocument(schema_version=1, profiles=[dst_p]), dst_paths.profiles_file, dst_paths.profiles_dir
+    )
 
     with pytest.raises(RestoreConflictError, match="conflict: profile ID 'p1' already exists"):
         restore_backup_archive(archive_file, dst_paths, overwrite=False)

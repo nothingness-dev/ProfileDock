@@ -1,9 +1,8 @@
-from datetime import datetime
-from pathlib import Path
 import os
 import re
-from typing import List, Optional, Set
-
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 from urllib.parse import urlparse
 
 from .data_root import _is_link
@@ -118,24 +117,21 @@ def validate_required_fields(profile: Profile) -> None:
     if profile.last_launched_at:
         validate_timestamp(profile.last_launched_at, "last_launched_at")
     if profile.engine is not None and profile.engine not in {"direct", "playwright"}:
-        raise ValidationError(
-            f"invalid engine '{profile.engine}', must be 'direct' or 'playwright'"
-        )
+        raise ValidationError(f"invalid engine '{profile.engine}', must be 'direct' or 'playwright'")
     if profile.launch_config is not None:
         validate_launch_config(profile.launch_config, profile.engine)
 
 
-
-def validate_duplicate_ids(profiles: List[Profile]) -> None:
-    seen_ids: Set[str] = set()
+def validate_duplicate_ids(profiles: list[Profile]) -> None:
+    seen_ids: set[str] = set()
     for profile in profiles:
         if profile.id in seen_ids:
             raise ValidationError(f"duplicate profile id: {profile.id}")
         seen_ids.add(profile.id)
 
 
-def validate_duplicate_directories(profiles: List[Profile]) -> None:
-    seen_dirs: Set[str] = set()
+def validate_duplicate_directories(profiles: list[Profile]) -> None:
+    seen_dirs: set[str] = set()
     for profile in profiles:
         normalized = os.path.normcase(str(Path(profile.data_dir).resolve()))
         if normalized in seen_dirs:
@@ -151,10 +147,10 @@ def validate_path_safety(data_dir: str, profile_root: Path) -> None:
         raise ValidationError(f"cannot resolve data directory path: {data_dir}: {exc}") from exc
     try:
         resolved.relative_to(profile_root.resolve())
-    except ValueError:
+    except ValueError as exc:
         raise ValidationError(
             f"data directory must be under profile root ({profile_root}): {data_dir}"
-        )
+        ) from exc
     root_absolute = profile_root.absolute()
     path_absolute = data_path.absolute()
     try:
@@ -170,7 +166,7 @@ def validate_path_safety(data_dir: str, profile_root: Path) -> None:
             raise ValidationError(f"path contains symlink at {current}: {data_dir}")
 
 
-def validate_metadata_document(profiles: List[Profile], profile_root: Path) -> None:
+def validate_metadata_document(profiles: list[Profile], profile_root: Path) -> None:
     for profile in profiles:
         validate_required_fields(profile)
     validate_duplicate_ids(profiles)

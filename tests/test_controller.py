@@ -204,9 +204,7 @@ def test_persistent_state_survives_controller_cycles(controller_env):
         cookies = context.cookies("https://example.com")
         context.close()
     assert any(
-        cookie["name"] == "profiledock-controller"
-        and cookie["value"] == "persisted"
-        for cookie in cookies
+        cookie["name"] == "profiledock-controller" and cookie["value"] == "persisted" for cookie in cookies
     )
 
 
@@ -239,7 +237,7 @@ def test_start_controller_preserves_native_exit_diagnostic(controller_env):
     def mock_popen(command, **kwargs):
         if "--controller" in command:
             idx = command.index("--controller")
-            new_cmd = [sys.executable, str(script)] + command[idx:]
+            new_cmd = [sys.executable, str(script), *command[idx:]]
             return original_popen(new_cmd, **kwargs)
         return original_popen(command, **kwargs)
 
@@ -391,6 +389,7 @@ def test_controller_wait_stops_when_context_closes():
 
 def test_list_shows_stopped_after_manual_closure(controller_env):
     from typer.testing import CliRunner
+
     from profiledock.cli import app
 
     runner = CliRunner()
@@ -400,8 +399,9 @@ def test_list_shows_stopped_after_manual_closure(controller_env):
     _terminate_owned_tree(pid)
     owned_pids.discard(pid)
     is_running(str(data_dir))
-    with patch("profiledock.cli.manager") as mock_manager, patch(
-        "profiledock.cli.runtime_path", return_value=state_path(str(data_dir)).parent
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.runtime_path", return_value=state_path(str(data_dir)).parent),
     ):
         mock_manager.return_value.list_profiles.return_value = [profile]
         result = runner.invoke(app, ["list"])

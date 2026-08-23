@@ -1,8 +1,8 @@
 import json
-from pathlib import Path
 import os
 import stat
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -11,8 +11,8 @@ from typer.testing import CliRunner
 from profiledock.cli import app
 from profiledock.data_root import DataRootError, platform_data_root, resolve_data_root
 from profiledock.models import Profile
-from profiledock.profile_manager import ProfileManager
 from profiledock.process_manager import ProfileRunningError, state_path
+from profiledock.profile_manager import ProfileManager
 from profiledock.storage import StorageError
 
 runner = CliRunner()
@@ -79,7 +79,18 @@ def test_layout_directories_are_separate(tmp_path):
     assert result.runtime_dir.is_dir()
     assert result.logs_dir.is_dir()
     assert result.backups_dir.is_dir()
-    assert len({result.metadata_dir, result.profiles_dir, result.runtime_dir, result.logs_dir, result.backups_dir}) == 5
+    assert (
+        len(
+            {
+                result.metadata_dir,
+                result.profiles_dir,
+                result.runtime_dir,
+                result.logs_dir,
+                result.backups_dir,
+            }
+        )
+        == 5
+    )
 
 
 def test_rejects_filesystem_root():

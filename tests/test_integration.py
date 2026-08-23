@@ -1,5 +1,5 @@
-from pathlib import Path
 import time
+from pathlib import Path
 
 import pytest
 
@@ -21,7 +21,16 @@ def test_persistent_context_preserves_state_and_tab_count(tmp_path):
             while len(context.pages) < 3:
                 context.new_page()
             assert len(context.pages) == 3
-            context.add_cookies([{"name": "profiledock", "value": "persisted", "url": "https://example.com", "expires": time.time() + 3600}])
+            context.add_cookies(
+                [
+                    {
+                        "name": "profiledock",
+                        "value": "persisted",
+                        "url": "https://example.com",
+                        "expires": time.time() + 3600,
+                    }
+                ]
+            )
             context.close()
 
             context, _ = _launch_context(pw, str(data_dir), True)
@@ -50,6 +59,7 @@ def test_closed_real_context_is_not_alive(tmp_path):
 
 def test_full_acceptance_lifecycle_dual_engine(tmp_path):
     from typer.testing import CliRunner
+
     from profiledock.cli import app
     from profiledock.data_root import DataPaths
     from profiledock.storage import load_metadata
@@ -57,11 +67,15 @@ def test_full_acceptance_lifecycle_dual_engine(tmp_path):
     runner = CliRunner()
     data_root = tmp_path / "app_data"
 
-    res_create_dir = runner.invoke(app, ["--data-root", str(data_root), "create", "DirectAcc", "--engine", "direct"])
+    res_create_dir = runner.invoke(
+        app, ["--data-root", str(data_root), "create", "DirectAcc", "--engine", "direct"]
+    )
     assert res_create_dir.exit_code == 0
     assert "Created profile 'DirectAcc'" in res_create_dir.output
 
-    res_create_pw = runner.invoke(app, ["--data-root", str(data_root), "create", "PlaywrightAcc", "--engine", "playwright"])
+    res_create_pw = runner.invoke(
+        app, ["--data-root", str(data_root), "create", "PlaywrightAcc", "--engine", "playwright"]
+    )
     assert res_create_pw.exit_code == 0
     assert "Created profile 'PlaywrightAcc'" in res_create_pw.output
 
@@ -77,7 +91,9 @@ def test_full_acceptance_lifecycle_dual_engine(tmp_path):
     (p_pw_data / "storage.json").write_text("playwright-storage-state", encoding="utf-8")
 
     backup_file = tmp_path / "dual_acc_backup.tar.gz"
-    res_backup = runner.invoke(app, ["--data-root", str(data_root), "backup", "--all", "--output", str(backup_file), "--json"])
+    res_backup = runner.invoke(
+        app, ["--data-root", str(data_root), "backup", "--all", "--output", str(backup_file), "--json"]
+    )
     assert res_backup.exit_code == 0
     assert backup_file.exists()
 
@@ -98,5 +114,9 @@ def test_full_acceptance_lifecycle_dual_engine(tmp_path):
     assert restored_map["DirectAcc"].engine == "direct"
     assert restored_map["PlaywrightAcc"].engine == "playwright"
 
-    assert (Path(restored_map["DirectAcc"].data_dir) / "cookies.sqlite").read_text(encoding="utf-8") == "direct-cookie-state"
-    assert (Path(restored_map["PlaywrightAcc"].data_dir) / "storage.json").read_text(encoding="utf-8") == "playwright-storage-state"
+    assert (Path(restored_map["DirectAcc"].data_dir) / "cookies.sqlite").read_text(
+        encoding="utf-8"
+    ) == "direct-cookie-state"
+    assert (Path(restored_map["PlaywrightAcc"].data_dir) / "storage.json").read_text(
+        encoding="utf-8"
+    ) == "playwright-storage-state"

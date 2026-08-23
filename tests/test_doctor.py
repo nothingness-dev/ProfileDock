@@ -1,17 +1,17 @@
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.cli import EXIT_SUCCESS, EXIT_USER_ERROR, app
 from profiledock.data_root import DataPaths
 from profiledock.doctor import (
-    DiagnosticCheck,
     STATUS_FAILED,
     STATUS_OK,
     STATUS_WARNING,
+    DiagnosticCheck,
     check_browser_availability,
     check_data_root_writable,
     check_direct_chrome,
@@ -24,7 +24,7 @@ from profiledock.doctor import (
     check_stale_running_state,
     repair_environment,
 )
-from profiledock.models import Profile, MetadataDocument
+from profiledock.models import MetadataDocument, Profile
 from profiledock.storage import load_metadata, save_metadata
 
 runner = CliRunner()
@@ -237,7 +237,6 @@ def test_check_stale_running_state_direct(tmp_path):
         assert stale_files == []
 
 
-
 def test_check_stale_running_state(tmp_path):
     layout = paths(tmp_path)
     p1_dir = layout.runtime_dir / "p1"
@@ -299,7 +298,6 @@ def test_repair_environment_stale_direct_files(tmp_path):
         repairs = repair_environment(tmp_path)
         assert repairs == []
         assert running_json.exists()
-
 
 
 def test_repair_environment_metadata_recovery(tmp_path):
@@ -417,9 +415,7 @@ def test_repair_recreation_rolls_back_when_later_profile_is_active(tmp_path):
     def active_state(data_dir, runtime_dir):
         return Path(data_dir) == second_data
 
-    with patch(
-        "profiledock.doctor.is_active_for_mutation", side_effect=active_state
-    ):
+    with patch("profiledock.doctor.is_active_for_mutation", side_effect=active_state):
         repairs = repair_environment(tmp_path, recreate_missing_directories=True)
     assert repairs == []
     assert not first_data.exists()
@@ -441,7 +437,9 @@ def test_doctor_cli_healthy():
 def test_doctor_cli_warning_exits_zero():
     with patch("profiledock.cli.run_diagnostics") as mock_diag:
         mock_diag.return_value = [
-            DiagnosticCheck("orphan_profile_directories", STATUS_WARNING, "Found orphan dir", action="Review manually"),
+            DiagnosticCheck(
+                "orphan_profile_directories", STATUS_WARNING, "Found orphan dir", action="Review manually"
+            ),
         ]
         result = runner.invoke(app, ["doctor"])
     assert result.exit_code == EXIT_SUCCESS
@@ -464,7 +462,9 @@ def test_doctor_cli_json():
     with patch("profiledock.cli.run_diagnostics") as mock_diag:
         mock_diag.return_value = [
             DiagnosticCheck("python_version", STATUS_OK, "Python version ok"),
-            DiagnosticCheck("orphan_profile_directories", STATUS_WARNING, "Found orphan dir", action="Review manually"),
+            DiagnosticCheck(
+                "orphan_profile_directories", STATUS_WARNING, "Found orphan dir", action="Review manually"
+            ),
         ]
         result = runner.invoke(app, ["doctor", "--json"])
     assert result.exit_code == EXIT_SUCCESS
@@ -482,9 +482,14 @@ def test_doctor_cli_json():
 
 
 def test_doctor_cli_repair():
-    with patch("profiledock.cli.repair_environment") as mock_repair, patch("profiledock.cli.run_diagnostics") as mock_diag:
+    with (
+        patch("profiledock.cli.repair_environment") as mock_repair,
+        patch("profiledock.cli.run_diagnostics") as mock_diag,
+    ):
         mock_repair.return_value = [
-            DiagnosticCheck("repair_stale_running_state", STATUS_OK, "Cleaned up 1 stale running.json file(s)."),
+            DiagnosticCheck(
+                "repair_stale_running_state", STATUS_OK, "Cleaned up 1 stale running.json file(s)."
+            ),
         ]
         mock_diag.return_value = [
             DiagnosticCheck("stale_running_state", STATUS_OK, "No stale running-state files detected."),

@@ -1,21 +1,28 @@
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 METADATA_SCHEMA_VERSION = 1
 _SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1})
 LAUNCH_CONFIG_SCHEMA_VERSION = 1
-_LAUNCH_CONFIG_FIELDS = frozenset({
-    "schema_version", "default_tabs", "start_urls", "engine", "browser",
-    "window_width", "window_height",
-})
+_LAUNCH_CONFIG_FIELDS = frozenset(
+    {
+        "schema_version",
+        "default_tabs",
+        "start_urls",
+        "engine",
+        "browser",
+        "window_width",
+        "window_height",
+    }
+)
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def migrate_launch_config(value: Dict[str, Any]) -> Dict[str, Any]:
+def migrate_launch_config(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("launch config must be a JSON object")
     migrated = dict(value)
@@ -36,7 +43,7 @@ def migrate_launch_config(value: Dict[str, Any]) -> Dict[str, Any]:
     return migrated
 
 
-def migrate_metadata_value(value: Any) -> Dict[str, Any]:
+def migrate_metadata_value(value: Any) -> dict[str, Any]:
     if isinstance(value, list):
         value = {"schema_version": 1, "profiles": value}
     if not isinstance(value, dict):
@@ -65,13 +72,13 @@ def migrate_metadata_value(value: Any) -> Dict[str, Any]:
 @dataclass
 class LaunchConfig:
     default_tabs: Optional[int] = None
-    start_urls: List[str] = field(default_factory=list)
+    start_urls: list[str] = field(default_factory=list)
     engine: Optional[str] = None
     browser: Optional[str] = None
     window_width: Optional[int] = None
     window_height: Optional[int] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": LAUNCH_CONFIG_SCHEMA_VERSION,
             "default_tabs": self.default_tabs,
@@ -83,7 +90,7 @@ class LaunchConfig:
         }
 
     @classmethod
-    def from_dict(cls, value: Dict[str, Any]) -> "LaunchConfig":
+    def from_dict(cls, value: dict[str, Any]) -> "LaunchConfig":
         if not isinstance(value, dict):
             raise ValueError("launch config must be a JSON object")
         unknown = set(value) - _LAUNCH_CONFIG_FIELDS
@@ -142,20 +149,27 @@ class Profile:
     engine: Optional[str] = None
     launch_config: Optional[LaunchConfig] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         if self.launch_config is not None:
             data["launch_config"] = self.launch_config.to_dict()
         return data
 
     @classmethod
-    def from_dict(cls, value: Dict[str, Any]) -> "Profile":
+    def from_dict(cls, value: dict[str, Any]) -> "Profile":
         if not isinstance(value, dict):
             raise ValueError("profile metadata must be a JSON object")
-        fields = frozenset({
-            "id", "name", "created_at", "data_dir", "last_launched_at",
-            "engine", "launch_config",
-        })
+        fields = frozenset(
+            {
+                "id",
+                "name",
+                "created_at",
+                "data_dir",
+                "last_launched_at",
+                "engine",
+                "launch_config",
+            }
+        )
         unknown = set(value) - fields
         if unknown:
             raise ValueError(f"profile metadata has unknown fields: {', '.join(sorted(unknown))}")
@@ -184,19 +198,20 @@ class Profile:
             launch_config=launch_config,
         )
 
+
 @dataclass
 class MetadataDocument:
     schema_version: int
-    profiles: List[Profile] = field(default_factory=list)
+    profiles: list[Profile] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "profiles": [p.to_dict() for p in self.profiles],
         }
 
     @classmethod
-    def from_dict(cls, value: Dict[str, Any]) -> "MetadataDocument":
+    def from_dict(cls, value: dict[str, Any]) -> "MetadataDocument":
         if not isinstance(value, dict):
             raise ValueError("metadata must be a JSON object")
         if set(value) != {"schema_version", "profiles"}:

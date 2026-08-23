@@ -11,12 +11,12 @@ import pytest
 
 from profiledock.process_manager import (
     _MAX_ERROR_BYTES,
+    BrowserLaunchError,
     _alive,
     _controller,
     _launch_context,
     _read_error,
     _write_error,
-    BrowserLaunchError,
     error_path,
     start_controller,
 )
@@ -110,7 +110,7 @@ def test_write_error_empty_message(tmp_path):
 
 def test_write_error_special_characters(tmp_path):
     err = tmp_path / "controller.error"
-    msg = "Line1\nLine2\tTabbed\\Backslash\"Quoted"
+    msg = 'Line1\nLine2\tTabbed\\Backslash"Quoted'
     _write_error(err, "test", msg)
     result = _read_error(err)
     assert result["message"] == msg

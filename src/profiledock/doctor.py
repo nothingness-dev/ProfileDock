@@ -1,14 +1,14 @@
-from dataclasses import dataclass
 import importlib.metadata
 import json
 import os
-from pathlib import Path
 import shutil
 import sys
-from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Optional
 
-from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value, utc_now
 from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
+from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value, utc_now
 from .process_manager import _system_browser_executable, get_status, is_active_for_mutation
 from .storage import (
     MetadataCorruptedError,
@@ -38,7 +38,7 @@ class DiagnosticCheck:
     summary: str
     action: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = {
             "id": self.id,
             "status": self.status,
@@ -184,7 +184,7 @@ def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
         )
 
 
-def check_profile_directories(root: Path) -> Tuple[DiagnosticCheck, DiagnosticCheck]:
+def check_profile_directories(root: Path) -> tuple[DiagnosticCheck, DiagnosticCheck]:
     existence_id = "profile_directories_exist"
     paths_id = "profile_paths_under_data_root"
     paths = DataPaths.from_root(root)
@@ -218,8 +218,8 @@ def check_profile_directories(root: Path) -> Tuple[DiagnosticCheck, DiagnosticCh
             ),
         )
 
-    missing_dirs: List[str] = []
-    invalid_paths: List[str] = []
+    missing_dirs: list[str] = []
+    invalid_paths: list[str] = []
     profiles_root = paths.profiles_dir.resolve()
 
     for p in doc.profiles:
@@ -267,6 +267,7 @@ def check_playwright_package() -> DiagnosticCheck:
     check_id = "playwright_package"
     try:
         import playwright
+
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
@@ -285,6 +286,7 @@ def check_playwright_chromium() -> DiagnosticCheck:
     check_id = "playwright_chromium"
     try:
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             exec_path = p.chromium.executable_path
             if exec_path and Path(exec_path).exists():
@@ -329,6 +331,7 @@ def check_system_chrome() -> DiagnosticCheck:
     check_id = "system_chrome"
     try:
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             try:
                 browser = p.chromium.launch(channel="chrome", headless=True)
@@ -347,6 +350,7 @@ def check_system_chrome() -> DiagnosticCheck:
     if executable is not None:
         try:
             from playwright.sync_api import sync_playwright
+
             with sync_playwright() as p:
                 browser = p.chromium.launch(executable_path=str(executable), headless=True)
                 browser.close()
@@ -397,6 +401,7 @@ def check_browser_availability(
         action="Install Playwright Chromium, Google Chrome, Chromium, or Brave.",
     )
 
+
 def check_runtime_permissions(root: Path) -> DiagnosticCheck:
     check_id = "runtime_permissions"
     runtime_dir = DataPaths.from_root(root).runtime_dir
@@ -424,7 +429,7 @@ def check_runtime_permissions(root: Path) -> DiagnosticCheck:
         )
 
 
-def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
+def check_stale_running_state(root: Path) -> tuple[DiagnosticCheck, list[Path]]:
     check_id = "stale_running_state"
     paths = DataPaths.from_root(root)
     runtime_dir = paths.runtime_dir
@@ -438,13 +443,11 @@ def check_stale_running_state(root: Path) -> Tuple[DiagnosticCheck, List[Path]]:
             [],
         )
 
-    stale_files: List[Path] = []
-    ambiguous_files: List[Path] = []
+    stale_files: list[Path] = []
+    ambiguous_files: list[Path] = []
     for running_json in runtime_dir.glob("*/running.json"):
         data_dir = paths.profiles_dir / running_json.parent.name / "browser-data"
-        status = get_status(
-            str(data_dir), clean_stale=False, runtime_dir=running_json.parent
-        )
+        status = get_status(str(data_dir), clean_stale=False, runtime_dir=running_json.parent)
         if status == "error":
             ambiguous_files.append(running_json)
         elif status == "stale":
@@ -497,7 +500,7 @@ def check_orphan_directories(root: Path) -> DiagnosticCheck:
             summary="No orphan profile directories found.",
         )
 
-    known_ids: Set[str] = set()
+    known_ids: set[str] = set()
     if profiles_file.exists():
         try:
             doc = load_metadata(profiles_file)
@@ -510,7 +513,7 @@ def check_orphan_directories(root: Path) -> DiagnosticCheck:
                 action="Repair or restore profiles.json before reviewing orphan directories.",
             )
 
-    orphans: List[str] = []
+    orphans: list[str] = []
     for item in profiles_dir.iterdir():
         if item.is_dir() and item.name not in known_ids:
             orphans.append(item.name)
@@ -555,8 +558,8 @@ def check_version_consistency() -> DiagnosticCheck:
         )
 
 
-def run_diagnostics(root: Path) -> List[DiagnosticCheck]:
-    checks: List[DiagnosticCheck] = []
+def run_diagnostics(root: Path) -> list[DiagnosticCheck]:
+    checks: list[DiagnosticCheck] = []
 
     checks.append(check_python_version())
     checks.append(check_data_root_writable(root))
@@ -589,18 +592,16 @@ def repair_environment(
     root: Path,
     reattach_orphans: bool = False,
     recreate_missing_directories: bool = False,
-) -> List[DiagnosticCheck]:
-    repairs: List[DiagnosticCheck] = []
+) -> list[DiagnosticCheck]:
+    repairs: list[DiagnosticCheck] = []
 
     paths = DataPaths.from_root(root)
     profiles_dir = paths.profiles_dir
     runtime_dir = paths.runtime_dir
 
-    def profiles_are_stopped(profiles: List[Profile]) -> bool:
+    def profiles_are_stopped(profiles: list[Profile]) -> bool:
         return all(
-            not is_active_for_mutation(
-                profile.data_dir, paths.runtime_dir / profile.id
-            )
+            not is_active_for_mutation(profile.data_dir, paths.runtime_dir / profile.id)
             for profile in profiles
         )
 
@@ -626,7 +627,7 @@ def repair_environment(
     if profiles_dir.exists():
         try:
             with metadata_lock(paths.profiles_file):
-                stale_temp_dirs: List[Path] = []
+                stale_temp_dirs: list[Path] = []
                 for pattern in (
                     ".m-*",
                     ".temp_restore_*",
@@ -674,9 +675,7 @@ def repair_environment(
                     raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
                     _backup_metadata(profiles_file, backup_file, paths.root)
-                    doc = MetadataDocument(
-                        schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
-                    )
+                    doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
                     _atomic_write(
                         profiles_file,
                         json.dumps(doc.to_dict(), indent=2) + "\n",
@@ -726,9 +725,7 @@ def repair_environment(
                 if not profiles_are_stopped(profiles):
                     raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
-                    doc = MetadataDocument(
-                        schema_version=METADATA_SCHEMA_VERSION, profiles=profiles
-                    )
+                    doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
                     _atomic_write(
                         profiles_file,
                         json.dumps(doc.to_dict(), indent=2) + "\n",
@@ -750,7 +747,7 @@ def repair_environment(
             validate_metadata_document(doc.profiles, profiles_dir)
             if recreate_missing_directories:
                 recreated_count = 0
-                recreated_paths: List[Path] = []
+                recreated_paths: list[Path] = []
                 try:
                     for p in doc.profiles:
                         p_data_path = Path(p.data_dir)
@@ -758,7 +755,9 @@ def repair_environment(
                             if is_active_for_mutation(p.data_dir, paths.runtime_dir / p.id):
                                 raise StorageError("cannot recreate data for an active profile")
                             ensure_within_root(p_data_path, paths.root)
-                            rollback_path = p_data_path.parent if not p_data_path.parent.exists() else p_data_path
+                            rollback_path = (
+                                p_data_path.parent if not p_data_path.parent.exists() else p_data_path
+                            )
                             p_data_path.mkdir(parents=True, mode=0o700, exist_ok=False)
                             recreated_paths.append(rollback_path)
                             recreated_count += 1
@@ -780,17 +779,20 @@ def repair_environment(
             if reattach_orphans and profiles_dir.exists():
                 known_ids = {p.id for p in doc.profiles}
                 known_names = {p.name for p in doc.profiles}
-                reattached_profiles: List[Profile] = []
+                reattached_profiles: list[Profile] = []
                 for entry in sorted(profiles_dir.iterdir()):
-                    if entry.is_dir() and not _is_link(entry) and not entry.name.startswith(".") and entry.name not in known_ids:
+                    if (
+                        entry.is_dir()
+                        and not _is_link(entry)
+                        and not entry.name.startswith(".")
+                        and entry.name not in known_ids
+                    ):
                         validate_path_component(entry.name, "profile id")
                         ensure_within_root(entry, paths.root)
                         data_dir_path = entry / "browser-data"
                         if data_dir_path.is_dir():
                             ensure_tree_safe(data_dir_path, paths.root)
-                            if is_active_for_mutation(
-                                str(data_dir_path), paths.runtime_dir / entry.name
-                            ):
+                            if is_active_for_mutation(str(data_dir_path), paths.runtime_dir / entry.name):
                                 raise StorageError("cannot reattach an active profile")
                             base_name = f"Recovered-{entry.name}"
                             candidate_name = base_name

@@ -2,34 +2,27 @@ import json
 import os
 from contextvars import ContextVar
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, NoReturn, Optional
 
 import typer
 
 from .backup import (
     BackupError,
-    BackupReport,
     FileLockedError,
     ProfileNotStoppedError,
     TargetExistsError,
     create_backup_archive,
 )
-from .restore import (
-    DecompressionSecurityError,
-    InvalidArchiveError,
-    RestoreConflictError,
-    RestoreError,
-    RestoreReport,
-    restore_backup_archive,
-)
+from .cli_contract import CLI_JSON_OUTPUT_VERSION, EXIT_USER_ERROR, error_category
+from .cli_contract import EXIT_SUCCESS as EXIT_SUCCESS
+from .data_root import DataPaths, DataRootError, resolve_data_root
 from .doctor import (
-    DiagnosticCheck,
     STATUS_FAILED,
-    STATUS_OK,
-    STATUS_WARNING,
+    DiagnosticCheck,
     repair_environment,
     run_diagnostics,
 )
+from .logger import generate_correlation_id, read_profile_logs, write_log_entry
 from .migration import (
     ConflictError,
     MigrationError,
@@ -37,8 +30,6 @@ from .migration import (
     failure_report,
     migrate_project,
 )
-from .data_root import DataPaths, DataRootError, resolve_data_root
-from .logger import generate_correlation_id, read_profile_logs, write_log_entry
 from .models import LaunchConfig, Profile
 from .process_manager import (
     BrowserLaunchError,
@@ -50,10 +41,16 @@ from .process_manager import (
     start_direct_chrome,
 )
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
+from .restore import (
+    DecompressionSecurityError,
+    InvalidArchiveError,
+    RestoreConflictError,
+    RestoreError,
+    restore_backup_archive,
+)
 from .storage import StorageError
 from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
-from .cli_contract import CLI_JSON_OUTPUT_VERSION, EXIT_SUCCESS, EXIT_USER_ERROR, error_category
 
 app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
 config_app = typer.Typer(help="Manage launch configuration presets for a profile.")
@@ -115,7 +112,6 @@ def main(
         fail_exception(exc)
 
 
-
 def selected_paths() -> DataPaths:
     paths = _paths.get()
     if paths is None:
@@ -139,7 +135,7 @@ def runtime_path(profile: Profile) -> Path:
     return manager().runtime_path(profile.id)
 
 
-def fail(message: str, code: int = EXIT_USER_ERROR, category: Optional[str] = None) -> None:
+def fail(message: str, code: int = EXIT_USER_ERROR, category: Optional[str] = None) -> NoReturn:
     selected_category = category or error_category(message)
     typer.echo(f"Error [{selected_category}]: {message}", err=True)
     raise typer.Exit(code)
@@ -164,7 +160,10 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
 
 
 def emit_json(command: str, data: object, err: bool = False) -> None:
-    typer.echo(json.dumps({"output_version": CLI_JSON_OUTPUT_VERSION, "command": command, "data": data}, indent=2), err=err)
+    typer.echo(
+        json.dumps({"output_version": CLI_JSON_OUTPUT_VERSION, "command": command, "data": data}, indent=2),
+        err=err,
+    )
 
 
 def confirm(message: str) -> bool:
@@ -179,14 +178,15 @@ def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
         if clean not in ("direct", "playwright"):
             fail("engine must be 'direct' or 'playwright'")
         return clean
+    # getattr keeps duck-typed profile stand-ins (tests) working without the attribute.
     launch_config = getattr(profile, "launch_config", None)
     if launch_config and launch_config.engine:
-        return launch_config.engine
+        return str(launch_config.engine)
     profile_engine = getattr(profile, "engine", None)
     if profile_engine:
         if profile_engine not in ("direct", "playwright"):
             fail("stored profile engine must be 'direct' or 'playwright'")
-        return profile_engine
+        return str(profile_engine)
     env_value = os.environ.get("PROFILEDOCK_DEFAULT_ENGINE", "").strip()
     if env_value:
         env_engine = env_value.lower()
@@ -196,7 +196,7 @@ def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
     return "direct"
 
 
-def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
+def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict[str, Any]:
     data = {
         "id": profile.id,
         "name": profile.name,
@@ -211,7 +211,6 @@ def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
     if status is not None:
         data["status"] = status
     return data
-
 
 
 def _compute_profile_size(data_dir_str: str) -> Optional[int]:
@@ -243,7 +242,7 @@ def _format_size_bytes(num_bytes: Optional[int]) -> str:
     return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 
-def _render_table(rows: List[List[str]]) -> str:
+def _render_table(rows: list[list[str]]) -> str:
     if not rows:
         return ""
     col_widths = [max(len(row[col]) for row in rows) for col in range(len(rows[0]))]
@@ -359,7 +358,10 @@ def config_show(
         ["Default Tabs:", str(cfg.default_tabs) if cfg.default_tabs is not None else "None"],
         ["Engine:", cfg.engine or "None (inherits profile/default)"],
         ["Browser:", cfg.browser or "None (auto-detect)"],
-        ["Window Size:", f"{cfg.window_width}x{cfg.window_height}" if cfg.window_width and cfg.window_height else "None"],
+        [
+            "Window Size:",
+            f"{cfg.window_width}x{cfg.window_height}" if cfg.window_width and cfg.window_height else "None",
+        ],
         ["Start URLs:", ", ".join(cfg.start_urls) if cfg.start_urls else "None"],
     ]
     typer.echo(_render_table(rows))
@@ -464,7 +466,9 @@ def set_engine(
 def status(
     profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Continuously poll and display live status."),
-    interval: float = typer.Option(1.0, "--interval", "-i", help="Poll interval in seconds when using --watch."),
+    interval: float = typer.Option(
+        1.0, "--interval", "-i", help="Poll interval in seconds when using --watch."
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
     if watch and interval <= 0:
@@ -516,6 +520,7 @@ def status(
             _render_once()
         else:
             import time
+
             while True:
                 if not json_output:
                     typer.echo("\033[2J\033[H", nl=False)
@@ -543,7 +548,7 @@ def launch(
         "-b",
         help="Override browser channel/executable.",
     ),
-    url: Optional[List[str]] = typer.Option(
+    url: Optional[list[str]] = typer.Option(
         None,
         "--url",
         "-u",
@@ -578,7 +583,9 @@ def launch(
         target_browser = browser if browser is not None else (cfg.browser if cfg else None)
         if target_browser is not None:
             candidate = Path(target_browser).expanduser()
-            target_browser = str(candidate.resolve()) if candidate.is_file() else target_browser.strip().lower()
+            target_browser = (
+                str(candidate.resolve()) if candidate.is_file() else target_browser.strip().lower()
+            )
             validate_browser(target_browser, active_engine, require_executable=True)
         width = cfg.window_width if cfg else None
         height = cfg.window_height if cfg else None
@@ -605,7 +612,7 @@ def launch(
 
         if active_engine == "direct":
             exec_path = Path(target_browser) if target_browser and Path(target_browser).is_file() else None
-            direct_options = {"runtime_dir": runtime_path(profile)}
+            direct_options: dict[str, Any] = {"runtime_dir": runtime_path(profile)}
             if exec_path is not None:
                 direct_options["executable_path"] = exec_path
             elif target_browser is not None:
@@ -627,7 +634,7 @@ def launch(
                 result="success",
             )
         else:
-            controller_options = {"runtime_dir": runtime_path(profile)}
+            controller_options: dict[str, Any] = {"runtime_dir": runtime_path(profile)}
             if target_browser is not None:
                 controller_options["browser_channel"] = target_browser
             if target_urls:
@@ -673,19 +680,26 @@ def launch(
     typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {target_tabs} tab(s).")
 
 
-
 @app.command()
 def close(profile_id: str) -> None:
     try:
         profile = manager().resolve(profile_id)
         close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ProfileRunningError, BrowserLaunchError) as exc:
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileRunningError,
+        BrowserLaunchError,
+    ) as exc:
         fail_exception(exc)
     typer.echo(f"Closed '{profile.name}'.")
 
 
 @app.command()
-def delete(profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation.")) -> None:
+def delete(
+    profile_id: str, yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation.")
+) -> None:
     try:
         profile = manager().resolve(profile_id)
         if is_running(profile.data_dir, runtime_path(profile)):
@@ -725,15 +739,23 @@ def doctor(
     if (reattach_orphans or recreate_missing) and not repair:
         fail("--reattach-orphans and --recreate-missing require --repair flag")
 
-    if recreate_missing and not yes and not json_output:
-        if not confirm("Recreate missing empty profile browser-data directories?"):
-            raise typer.Abort()
+    if (
+        recreate_missing
+        and not yes
+        and not json_output
+        and not confirm("Recreate missing empty profile browser-data directories?")
+    ):
+        raise typer.Abort()
 
-    if reattach_orphans and not yes and not json_output:
-        if not confirm("Reattach discovered orphan profile directories to metadata?"):
-            raise typer.Abort()
+    if (
+        reattach_orphans
+        and not yes
+        and not json_output
+        and not confirm("Reattach discovered orphan profile directories to metadata?")
+    ):
+        raise typer.Abort()
 
-    repairs: List[DiagnosticCheck] = []
+    repairs: list[DiagnosticCheck] = []
     if repair:
         repairs = repair_environment(
             root,
@@ -768,7 +790,6 @@ def doctor(
             typer.echo(f"  - {c.id}: {c.action}")
     if has_failed:
         raise typer.Exit(EXIT_USER_ERROR)
-
 
 
 @app.command()
@@ -820,7 +841,7 @@ def migrate(
         if json_output:
             report = failure_report(from_project, paths.root, str(exc))
             emit_json("migrate", report.to_dict(), err=True)
-            raise typer.Exit(EXIT_USER_ERROR)
+            raise typer.Exit(EXIT_USER_ERROR) from exc
         fail_exception(exc)
 
     if json_output:
@@ -887,6 +908,7 @@ def backup(
             if not profiles:
                 fail("no profiles found to backup")
         else:
+            assert profile_id is not None  # guarded above; narrows Optional for resolve()
             profile = profile_manager.resolve(profile_id)
             profiles = [profile]
 
@@ -915,10 +937,15 @@ def backup(
 
     typer.echo(f"Backup created successfully: {report.output_path}")
     typer.echo(f"Format version: {report.format_version} (ProfileDock {report.profiledock_version})")
-    typer.echo(f"Total profiles: {report.total_profiles} | Files: {report.total_files} | Size: {report.total_bytes} bytes")
+    typer.echo(
+        f"Total profiles: {report.total_profiles} | Files: {report.total_files}"
+        f" | Size: {report.total_bytes} bytes"
+    )
     for p in report.profiles:
         eng_label = p.engine or "default (direct)"
-        typer.echo(f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)")
+        typer.echo(
+            f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)"
+        )
 
 
 @app.command()
@@ -960,12 +987,17 @@ def restore(
 
     typer.echo(f"Restore completed from archive: {report.archive_path}")
     typer.echo(f"Format version: {report.format_version} (ProfileDock {report.profiledock_version})")
-    typer.echo(f"Total restored: {report.total_restored} | Files: {report.total_files} | Size: {report.total_bytes} bytes")
+    typer.echo(
+        f"Total restored: {report.total_restored} | Files: {report.total_files}"
+        f" | Size: {report.total_bytes} bytes"
+    )
     if report.restored:
         typer.echo("Restored profiles:")
         for p in report.restored:
             eng_label = p.engine or "default (direct)"
-            typer.echo(f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)")
+            typer.echo(
+                f"  + {p.name} ({p.id}) [engine: {eng_label}] - {p.file_count} files ({p.total_bytes} bytes)"
+            )
     if report.skipped:
         typer.echo("Skipped profiles:")
         for p in report.skipped:

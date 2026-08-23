@@ -1,14 +1,14 @@
 import json
 import os
-from pathlib import Path
 import shutil
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
-from profiledock.cli import app, EXIT_SUCCESS, EXIT_USER_ERROR
+from profiledock.cli import EXIT_SUCCESS, EXIT_USER_ERROR, app
 from profiledock.data_root import DataPaths
 from profiledock.migration import (
     ConflictError,
@@ -16,7 +16,7 @@ from profiledock.migration import (
     SourceRunningError,
     migrate_project,
 )
-from profiledock.models import Profile, MetadataDocument
+from profiledock.models import MetadataDocument, Profile
 from profiledock.process_manager import close_controller, is_running, start_controller
 from profiledock.storage import load_metadata, save_metadata
 
@@ -367,7 +367,9 @@ def test_migrate_cli_json_output(tmp_path):
     )
 
     dst_root = tmp_path / "destination"
-    result = runner.invoke(app, ["--data-root", str(dst_root), "migrate", "--from-project", str(src_root), "--json"])
+    result = runner.invoke(
+        app, ["--data-root", str(dst_root), "migrate", "--from-project", str(src_root), "--json"]
+    )
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.output)
     assert data["output_version"] == 1
@@ -855,9 +857,7 @@ def test_remove_source_rolls_back_staged_paths_on_failure(tmp_path):
         str(second_data),
     )
     source.joinpath("profiles.json").write_text(
-        json.dumps(
-            {"schema_version": 1, "profiles": [first.to_dict(), second.to_dict()]}
-        ),
+        json.dumps({"schema_version": 1, "profiles": [first.to_dict(), second.to_dict()]}),
         encoding="utf-8",
     )
     destination = make_paths(tmp_path / "destination")
@@ -965,7 +965,4 @@ def test_migrated_profile_launches_with_persistent_browser_state(tmp_path):
             destination_context.close()
     except playwright.Error as exc:
         pytest.skip(f"no supported browser found: {exc}")
-    assert any(
-        cookie["name"] == "migrated-session" and cookie["value"] == "preserved"
-        for cookie in cookies
-    )
+    assert any(cookie["name"] == "migrated-session" and cookie["value"] == "preserved" for cookie in cookies)

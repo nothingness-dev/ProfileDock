@@ -5,7 +5,6 @@ from typer.main import get_command
 
 from profiledock.cli import app
 
-
 ROOT = Path(__file__).parent.parent
 
 

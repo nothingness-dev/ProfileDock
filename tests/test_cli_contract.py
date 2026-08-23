@@ -6,9 +6,16 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from profiledock.cli import app
-from profiledock.cli_contract import CLI_CONTRACT_VERSION, CLI_JSON_OUTPUT_VERSION, ERROR_CATEGORIES, EXIT_SUCCESS, EXIT_USAGE_ERROR, EXIT_USER_ERROR, error_category
+from profiledock.cli_contract import (
+    CLI_CONTRACT_VERSION,
+    CLI_JSON_OUTPUT_VERSION,
+    ERROR_CATEGORIES,
+    EXIT_SUCCESS,
+    EXIT_USAGE_ERROR,
+    EXIT_USER_ERROR,
+    error_category,
+)
 from profiledock.models import LaunchConfig, Profile
-
 
 runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "cli"
@@ -57,7 +64,11 @@ def test_golden_command_surface_matches_typer_application():
 
 def test_contract_constants_match_golden_values():
     golden = load_fixture("contract-v1.json")
-    assert golden["exit_codes"] == {"success": EXIT_SUCCESS, "user_error": EXIT_USER_ERROR, "usage_error": EXIT_USAGE_ERROR}
+    assert golden["exit_codes"] == {
+        "success": EXIT_SUCCESS,
+        "user_error": EXIT_USER_ERROR,
+        "usage_error": EXIT_USAGE_ERROR,
+    }
     assert golden["json"]["output_version"] == CLI_JSON_OUTPUT_VERSION
     assert set(golden["error_categories"]) == ERROR_CATEGORIES
 
@@ -71,7 +82,10 @@ def test_list_json_matches_golden_and_exposes_effective_engine():
         engine="direct",
         launch_config=LaunchConfig(engine="playwright"),
     )
-    with patch("profiledock.cli.manager") as selected_manager, patch("profiledock.cli.get_status", return_value="stopped"):
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
+    ):
         selected_manager.return_value.list_profiles.return_value = [profile]
         selected_manager.return_value.runtime_path.return_value = Path("/runtime/abc123")
         result = runner.invoke(app, ["list", "--json"])
@@ -88,7 +102,11 @@ def test_show_json_matches_golden_and_is_independent_of_human_renderer():
         "/profiles/abc123/browser-data",
         engine="playwright",
     )
-    with patch("profiledock.cli.manager") as selected_manager, patch("profiledock.cli.get_status", return_value="stopped"), patch("profiledock.cli._render_table", side_effect=AssertionError("human renderer used")):
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
+        patch("profiledock.cli._render_table", side_effect=AssertionError("human renderer used")),
+    ):
         selected_manager.return_value.resolve.return_value = profile
         selected_manager.return_value.runtime_path.return_value = Path("/runtime/abc123")
         result = runner.invoke(app, ["show", "abc123", "--json"])

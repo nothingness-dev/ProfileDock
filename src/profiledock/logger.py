@@ -1,8 +1,8 @@
 import json
 import os
-from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Optional
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -39,7 +39,7 @@ def sanitize_url(url: str) -> str:
         return "[url]"
 
 
-def redact_sensitive_data(message: str, secrets: Optional[List[str]] = None) -> str:
+def redact_sensitive_data(message: str, secrets: Optional[list[str]] = None) -> str:
     if not isinstance(message, str):
         return str(message)
     redacted = message
@@ -48,14 +48,24 @@ def redact_sensitive_data(message: str, secrets: Optional[List[str]] = None) -> 
             if secret and len(secret) > 4:
                 redacted = redacted.replace(secret, _REDACTED)
 
-    redacted = re.sub(r"(token|secret|password|auth|cookie|key)=([^&\s]+)", r"\1=[redacted]", redacted, flags=re.IGNORECASE)
-    redacted = re.sub(r'("token"|"secret"|"password"|"cookie"|"auth"|"key")\s*:\s*"[^"]+"', r'\1: "[redacted]"', redacted, flags=re.IGNORECASE)
-    redacted = re.sub(r'Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*', r'Bearer [redacted]', redacted, flags=re.IGNORECASE)
+    redacted = re.sub(
+        r"(token|secret|password|auth|cookie|key)=([^&\s]+)", r"\1=[redacted]", redacted, flags=re.IGNORECASE
+    )
+    redacted = re.sub(
+        r'("token"|"secret"|"password"|"cookie"|"auth"|"key")\s*:\s*"[^"]+"',
+        r'\1: "[redacted]"',
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r"Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*", r"Bearer [redacted]", redacted, flags=re.IGNORECASE
+    )
     return redacted
 
 
-
-def rotate_log_file(log_file: Path, max_bytes: int = DEFAULT_MAX_LOG_BYTES, backup_count: int = DEFAULT_BACKUP_COUNT) -> None:
+def rotate_log_file(
+    log_file: Path, max_bytes: int = DEFAULT_MAX_LOG_BYTES, backup_count: int = DEFAULT_BACKUP_COUNT
+) -> None:
     try:
         if not log_file.exists() or log_file.stat().st_size < max_bytes:
             return
@@ -88,8 +98,8 @@ def write_log_entry(
     browser_path: Optional[str] = None,
     pid: Optional[int] = None,
     error_category: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None,
-    secrets_to_redact: Optional[List[str]] = None,
+    details: Optional[dict[str, Any]] = None,
+    secrets_to_redact: Optional[list[str]] = None,
     max_bytes: int = DEFAULT_MAX_LOG_BYTES,
     backup_count: int = DEFAULT_BACKUP_COUNT,
 ) -> None:
@@ -98,7 +108,7 @@ def write_log_entry(
         if os.name != "nt":
             log_dir.chmod(0o700)
 
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "timestamp": utc_now(),
             "level": level.upper(),
             "event": event,
@@ -121,7 +131,7 @@ def write_log_entry(
             entry["error_category"] = error_category
 
         if details:
-            cleaned_details: Dict[str, Any] = {}
+            cleaned_details: dict[str, Any] = {}
             for k, v in details.items():
                 if isinstance(v, str):
                     cleaned_details[k] = redact_sensitive_data(v, secrets_to_redact)
@@ -157,12 +167,12 @@ def read_profile_logs(
     log_dir: Path,
     profile_id: Optional[str] = None,
     last_n: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    logs: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    logs: list[dict[str, Any]] = []
     if not log_dir.exists():
         return logs
 
-    target_files: List[Path] = []
+    target_files: list[Path] = []
     if profile_id:
         p_file = log_dir / f"profile_{profile_id}.log"
         if p_file.exists():
@@ -184,7 +194,11 @@ def read_profile_logs(
                     try:
                         parsed = json.loads(clean)
                         if isinstance(parsed, dict):
-                            if profile_id and parsed.get("profile_id") and parsed.get("profile_id") != profile_id:
+                            if (
+                                profile_id
+                                and parsed.get("profile_id")
+                                and parsed.get("profile_id") != profile_id
+                            ):
                                 continue
                             logs.append(parsed)
                     except Exception:

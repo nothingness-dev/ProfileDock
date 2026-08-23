@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 import tarfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -14,9 +14,9 @@ from profiledock.backup import (
     TargetExistsError,
     create_backup_archive,
 )
-from profiledock.cli import app, EXIT_SUCCESS
+from profiledock.cli import EXIT_SUCCESS, app
 from profiledock.data_root import DataPaths
-from profiledock.models import Profile, MetadataDocument
+from profiledock.models import MetadataDocument, Profile
 from profiledock.storage import save_metadata
 
 runner = CliRunner()
@@ -155,7 +155,6 @@ def test_backup_locked_file_raises_clear_error(tmp_path):
 
 
 def test_cli_backup_single_and_json(tmp_path):
-    paths = make_paths(tmp_path)
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "Work", "--engine", "direct"])
     out_archive = tmp_path / "work_cli.tar.gz"
 
@@ -175,7 +174,6 @@ def test_cli_backup_single_and_json(tmp_path):
 
 
 def test_cli_backup_all_command(tmp_path):
-    paths = make_paths(tmp_path)
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "Work1", "--engine", "direct"])
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "Work2", "--engine", "playwright"])
     out_archive = tmp_path / "all_cli.tar.gz"
@@ -269,5 +267,3 @@ def test_backup_parallel_scan_multiple_subdirectories(tmp_path):
             for file_idx in range(3):
                 expected = f"profiles/p1/browser-data/subfolder_{branch_idx}/item_{file_idx}.txt"
                 assert expected in names
-
-

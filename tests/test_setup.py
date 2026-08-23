@@ -2,12 +2,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).parent.parent
 
 
 def test_runtime_requirements_install_only_base_project():
-    lines = [line.strip() for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert lines == ["-e ."]
 
 

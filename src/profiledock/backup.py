@@ -1,17 +1,17 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
-from hashlib import sha256
 import io
 import json
 import os
-from pathlib import Path
 import tarfile
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import IO, Any, Optional
 from uuid import uuid4
 
 from .data_root import DataPaths, DataRootError, _is_link, ensure_within_root, validate_path_component
-from .models import METADATA_SCHEMA_VERSION, Profile, utc_now
+from .models import Profile, utc_now
 from .process_manager import is_active_for_mutation
 from .version import __version__
 
@@ -44,7 +44,7 @@ class BackupProfileResult:
     total_bytes: int = 0
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -54,12 +54,12 @@ class BackupReport:
     format_version: int
     profiledock_version: str
     created_at: str
-    profiles: List[BackupProfileResult]
+    profiles: list[BackupProfileResult]
     total_profiles: int
     total_files: int
     total_bytes: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "output_path": self.output_path,
             "format_version": self.format_version,
@@ -75,7 +75,7 @@ class BackupReport:
 class _HashingFileReader:
     """Streams data from a file handle while computing SHA-256 digest and counting bytes."""
 
-    def __init__(self, handle: Any) -> None:
+    def __init__(self, handle: IO[bytes]) -> None:
         self._handle = handle
         self._hasher = sha256()
         self.bytes_read = 0
@@ -114,9 +114,7 @@ def _is_runtime_or_log_file(rel_path_str: str) -> bool:
     name = Path(rel_path_str).name
     if name in ("running.json", "controller.error", "profiles.lock"):
         return True
-    if name.endswith(".tmp"):
-        return True
-    return False
+    return name.endswith(".tmp")
 
 
 def _is_cache_file(rel_path_str: str) -> bool:
@@ -142,11 +140,9 @@ def _is_cache_file(rel_path_str: str) -> bool:
     return False
 
 
-def _scan_directory_branch(
-    sub_dir: Path, data_dir: Path, exclude_cache: bool = False
-) -> List[str]:
+def _scan_directory_branch(sub_dir: Path, data_dir: Path, exclude_cache: bool = False) -> list[str]:
     """Scans a subdirectory branch and returns relative file paths under data_dir."""
-    branch_files: List[str] = []
+    branch_files: list[str] = []
     for root_dir, directory_names, filenames in os.walk(sub_dir, followlinks=False):
         root_path = Path(root_dir)
         for directory_name in list(directory_names):
@@ -166,12 +162,12 @@ def _scan_directory_branch(
     return branch_files
 
 
-def _collect_profile_files(data_dir: Path, exclude_cache: bool = False) -> List[str]:
+def _collect_profile_files(data_dir: Path, exclude_cache: bool = False) -> list[str]:
     if not data_dir.is_dir() or _is_link(data_dir):
         raise BackupError(f"profile data directory is missing or unsafe: {data_dir}")
 
-    sub_directories: List[Path] = []
-    root_files: List[str] = []
+    sub_directories: list[Path] = []
+    root_files: list[str] = []
 
     try:
         for entry in os.scandir(data_dir):
@@ -182,9 +178,7 @@ def _collect_profile_files(data_dir: Path, exclude_cache: bool = False) -> List[
                 sub_directories.append(entry_path)
             elif entry.is_file(follow_symlinks=False):
                 rel_path = entry_path.relative_to(data_dir).as_posix()
-                if not _is_runtime_or_log_file(rel_path) and not (
-                    exclude_cache and _is_cache_file(rel_path)
-                ):
+                if not _is_runtime_or_log_file(rel_path) and not (exclude_cache and _is_cache_file(rel_path)):
                     root_files.append(rel_path)
             else:
                 raise BackupError(f"profile data contains an unsafe file: {entry_path}")
@@ -210,7 +204,7 @@ def _collect_profile_files(data_dir: Path, exclude_cache: bool = False) -> List[
 
 
 def create_backup_archive(
-    profiles: List[Profile],
+    profiles: list[Profile],
     data_paths: DataPaths,
     output_file: Path,
     force: bool = False,
@@ -221,7 +215,9 @@ def create_backup_archive(
         raise BackupError(f"backup output cannot be a link or reparse point: {requested_output}")
     out_path = requested_output.resolve()
     if out_path.exists() and not force:
-        raise TargetExistsError(f"output backup archive already exists: {out_path} (use --force to overwrite)")
+        raise TargetExistsError(
+            f"output backup archive already exists: {out_path} (use --force to overwrite)"
+        )
 
     for p in profiles:
         try:
@@ -250,8 +246,8 @@ def create_backup_archive(
     temp_archive = out_path.with_name(f".backup_tmp_{uuid4().hex[:12]}.tar.gz")
 
     created_timestamp = utc_now()
-    profile_results: List[BackupProfileResult] = []
-    manifest_profiles: List[Dict[str, Any]] = []
+    profile_results: list[BackupProfileResult] = []
+    manifest_profiles: list[dict[str, Any]] = []
 
     grand_total_files = 0
     grand_total_bytes = 0
@@ -261,7 +257,7 @@ def create_backup_archive(
             for p in profiles:
                 p_data_dir = Path(p.data_dir)
                 rel_paths = _collect_profile_files(p_data_dir, exclude_cache=exclude_cache)
-                files_manifest: Dict[str, Tuple[int, str]] = {}
+                files_manifest: dict[str, tuple[int, str]] = {}
                 p_bytes = 0
 
                 for rel_path in rel_paths:
@@ -379,7 +375,9 @@ def create_backup_archive(
                             size += len(chunk)
                             digest.update(chunk)
                     if size != file_meta["size"] or digest.hexdigest() != file_meta["sha256"]:
-                        raise BackupError(f"backup archive verification failed: checksum mismatch for {member_name}")
+                        raise BackupError(
+                            f"backup archive verification failed: checksum mismatch for {member_name}"
+                        )
 
         temp_archive.replace(out_path)
 

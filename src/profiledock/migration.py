@@ -1,21 +1,25 @@
-from dataclasses import asdict, dataclass
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import shutil
-from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, Optional
 from uuid import uuid4
 
-from .data_root import DataPaths, DataRootError, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
+from .data_root import (
+    DataPaths,
+    DataRootError,
+    _is_link,
+    ensure_tree_safe,
+    ensure_within_root,
+    validate_path_component,
+)
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value
 from .process_manager import _alive, is_active_for_mutation
 from .storage import (
     _atomic_write,
     _backup_metadata,
-    _is_bare_array,
-    _is_versioned_document,
-    _load_profiles_from_bare_array,
     load_metadata,
     metadata_lock,
 )
@@ -50,7 +54,7 @@ class MigrationProfileResult:
     status: str
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -58,12 +62,12 @@ class MigrationProfileResult:
 class MigrationReport:
     source_root: str
     destination_root: str
-    migrated: List[MigrationProfileResult]
-    skipped: List[MigrationProfileResult]
-    failed: List[MigrationProfileResult]
+    migrated: list[MigrationProfileResult]
+    skipped: list[MigrationProfileResult]
+    failed: list[MigrationProfileResult]
     source_removed: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source_root": self.source_root,
             "destination_root": self.destination_root,
@@ -93,6 +97,7 @@ def _detect_source_layout(source_root: Path) -> SourceLayout:
         raise MigrationError("source project must be a real directory")
     versioned_metadata = root / "metadata" / "profiles.json"
     legacy_metadata = root / "profiles.json"
+    runtime_dir: Optional[Path]
     if versioned_metadata.exists() and legacy_metadata.exists():
         raise MigrationError("source contains both legacy and application-data metadata")
     if versioned_metadata.exists():
@@ -110,8 +115,10 @@ def _detect_source_layout(source_root: Path) -> SourceLayout:
         raise MigrationError("source profiles.json must be a real file")
     if not profiles_dir.is_dir() or _is_link(profiles_dir):
         raise MigrationError("source profiles directory is missing or unsafe")
-    if runtime_dir is not None and runtime_dir.exists() and (
-        not runtime_dir.is_dir() or _is_link(runtime_dir)
+    if (
+        runtime_dir is not None
+        and runtime_dir.exists()
+        and (not runtime_dir.is_dir() or _is_link(runtime_dir))
     ):
         raise MigrationError("source runtime directory is unsafe")
     try:
@@ -125,14 +132,14 @@ def _detect_source_layout(source_root: Path) -> SourceLayout:
     return SourceLayout(root, metadata_file, profiles_dir, runtime_dir, backup_file)
 
 
-def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> List[Profile]:
+def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> list[Profile]:
     try:
         data = json.loads(metadata_bytes.decode("utf-8"))
         profiles = MetadataDocument.from_dict(migrate_metadata_value(data)).profiles
     except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
         raise MigrationError(f"source metadata corrupted: {exc}") from exc
     normalized = []
-    names: Set[str] = set()
+    names: set[str] = set()
     for profile in profiles:
         try:
             validate_path_component(profile.id, "profile id")
@@ -168,9 +175,7 @@ def _load_source_profiles(layout: SourceLayout, metadata_bytes: bytes) -> List[P
     for profile in normalized:
         data_dir = Path(profile.data_dir)
         if not data_dir.is_dir() or _is_link(data_dir):
-            raise MigrationError(
-                f"source profile data directory is missing or unsafe: {profile.id}"
-            )
+            raise MigrationError(f"source profile data directory is missing or unsafe: {profile.id}")
     return normalized
 
 
@@ -187,7 +192,7 @@ def _paths_overlap(first: Path, second: Path) -> bool:
         return False
 
 
-def _source_state_paths(layout: SourceLayout, profile_id: str) -> List[Path]:
+def _source_state_paths(layout: SourceLayout, profile_id: str) -> list[Path]:
     paths = [layout.profiles_dir / profile_id / "running.json"]
     if layout.runtime_dir is not None:
         paths.append(layout.runtime_dir / profile_id / "running.json")
@@ -223,9 +228,9 @@ def _hash_file(path: Path) -> str:
             digest.update(block)
 
 
-def _directory_manifest(root: Path) -> Tuple[Set[str], Dict[str, Tuple[int, str]]]:
-    directories: Set[str] = set()
-    files: Dict[str, Tuple[int, str]] = {}
+def _directory_manifest(root: Path) -> tuple[set[str], dict[str, tuple[int, str]]]:
+    directories: set[str] = set()
+    files: dict[str, tuple[int, str]] = {}
     for current, directory_names, file_names in os.walk(root, followlinks=False):
         current_path = Path(current)
         relative_current = current_path.relative_to(root)
@@ -254,7 +259,7 @@ def _identical_profile(source: Profile, destination: Profile) -> bool:
     )
 
 
-def _check_running_profiles(layout: SourceLayout, profiles: List[Profile]) -> None:
+def _check_running_profiles(layout: SourceLayout, profiles: list[Profile]) -> None:
     for profile in profiles:
         if _source_profile_running(layout, profile.id):
             raise SourceRunningError(
@@ -262,28 +267,26 @@ def _check_running_profiles(layout: SourceLayout, profiles: List[Profile]) -> No
             )
 
 
-def _validate_removal_scope(layout: SourceLayout, profiles: List[Profile]) -> None:
+def _validate_removal_scope(layout: SourceLayout, profiles: list[Profile]) -> None:
     known_ids = {profile.id for profile in profiles}
     profile_entries = {entry.name for entry in layout.profiles_dir.iterdir()}
     unknown_profiles = sorted(profile_entries - known_ids)
     if unknown_profiles:
         raise MigrationError(
-            "refusing to remove source with untracked profile entries: "
-            + ", ".join(unknown_profiles)
+            "refusing to remove source with untracked profile entries: " + ", ".join(unknown_profiles)
         )
     if layout.runtime_dir is not None and layout.runtime_dir.exists():
         runtime_entries = {entry.name for entry in layout.runtime_dir.iterdir()}
         unknown_runtime = sorted(runtime_entries - known_ids)
         if unknown_runtime:
             raise MigrationError(
-                "refusing to remove source with untracked runtime entries: "
-                + ", ".join(unknown_runtime)
+                "refusing to remove source with untracked runtime entries: " + ", ".join(unknown_runtime)
             )
 
 
-def _remove_source(layout: SourceLayout, profiles: List[Profile]) -> None:
+def _remove_source(layout: SourceLayout, profiles: list[Profile]) -> None:
     _validate_removal_scope(layout, profiles)
-    staged: List[Tuple[Path, Path, bool]] = []
+    staged: list[tuple[Path, Path, bool]] = []
     for profile in profiles:
         profile_dir = layout.profiles_dir / profile.id
         if profile_dir.exists():
@@ -317,9 +320,7 @@ def _remove_source(layout: SourceLayout, profiles: List[Profile]) -> None:
         (
             layout.metadata_file,
             ensure_within_root(
-                layout.metadata_file.with_name(
-                    f".{layout.metadata_file.name}.removing-{uuid4().hex}"
-                ),
+                layout.metadata_file.with_name(f".{layout.metadata_file.name}.removing-{uuid4().hex}"),
                 layout.root,
             ),
             False,
@@ -331,15 +332,13 @@ def _remove_source(layout: SourceLayout, profiles: List[Profile]) -> None:
             (
                 layout.backup_file,
                 ensure_within_root(
-                    layout.backup_file.with_name(
-                        f".{layout.backup_file.name}.removing-{uuid4().hex}"
-                    ),
+                    layout.backup_file.with_name(f".{layout.backup_file.name}.removing-{uuid4().hex}"),
                     layout.root,
                 ),
                 False,
             )
         )
-    moved: List[Tuple[Path, Path, bool]] = []
+    moved: list[tuple[Path, Path, bool]] = []
     try:
         for original, quarantine, is_directory in staged:
             original.replace(quarantine)
@@ -388,10 +387,7 @@ def migrate_project(
         _check_running_profiles(layout, source_profiles)
         if remove_source:
             _validate_removal_scope(layout, source_profiles)
-        manifests = {
-            profile.id: _directory_manifest(Path(profile.data_dir))
-            for profile in source_profiles
-        }
+        manifests = {profile.id: _directory_manifest(Path(profile.data_dir)) for profile in source_profiles}
     except MigrationError:
         raise
     except OSError as exc:
@@ -399,17 +395,17 @@ def migrate_project(
     destination_metadata = destination_paths.profiles_file
     destination_profiles = destination_paths.profiles_dir
     destination_backup = destination_paths.backup_file
-    migrated: List[MigrationProfileResult] = []
-    skipped: List[MigrationProfileResult] = []
+    migrated: list[MigrationProfileResult] = []
+    skipped: list[MigrationProfileResult] = []
 
     with metadata_lock(destination_metadata):
         destination_document = load_metadata(destination_metadata)
         existing_profiles = list(destination_document.profiles)
         profiles_by_id = {profile.id: profile for profile in existing_profiles}
-        profiles_by_name: Dict[str, List[Profile]] = {}
+        profiles_by_name: dict[str, list[Profile]] = {}
         for existing_profile in existing_profiles:
             profiles_by_name.setdefault(existing_profile.name, []).append(existing_profile)
-        to_migrate: List[Profile] = []
+        to_migrate: list[Profile] = []
 
         for profile in source_profiles:
             existing_by_id = profiles_by_id.get(profile.id)
@@ -452,27 +448,21 @@ def migrate_project(
                 )
             to_migrate.append(profile)
 
-        temporary_directories: List[Tuple[Path, Path]] = []
-        finalized_directories: List[Path] = []
+        temporary_directories: list[tuple[Path, Path]] = []
+        finalized_directories: list[Path] = []
         try:
             stale_temporary = list(destination_profiles.glob(".m-*"))
             for profile in to_migrate:
-                stale_temporary.extend(
-                    destination_profiles.glob(f".temp_migrating_{profile.id}_*")
-                )
+                stale_temporary.extend(destination_profiles.glob(f".temp_migrating_{profile.id}_*"))
             if stale_temporary:
                 raise ConflictError("conflict: incomplete destination migration exists")
             for profile in to_migrate:
                 validate_path_component(profile.id, "profile id")
-                final_profile = ensure_within_root(
-                    destination_profiles / profile.id, destination_root
-                )
+                final_profile = ensure_within_root(destination_profiles / profile.id, destination_root)
                 destination_runtime = ensure_within_root(
                     destination_paths.runtime_dir / profile.id, destination_root
                 )
-                if is_active_for_mutation(
-                    str(final_profile / "browser-data"), destination_runtime
-                ):
+                if is_active_for_mutation(str(final_profile / "browser-data"), destination_runtime):
                     raise ConflictError(
                         f"conflict: destination runtime state for profile '{profile.id}' is active"
                     )
@@ -488,18 +478,14 @@ def migrate_project(
                 temporary_directories.append((temporary, final_profile))
                 shutil.copytree(Path(profile.data_dir), temporary_data)
                 if _directory_manifest(temporary_data) != manifests[profile.id]:
-                    raise MigrationError(
-                        f"verification failed after copying data for {profile.id}"
-                    )
+                    raise MigrationError(f"verification failed after copying data for {profile.id}")
 
             _check_running_profiles(layout, source_profiles)
             if layout.metadata_file.read_bytes() != metadata_snapshot:
                 raise MigrationError("source metadata changed during migration")
             for profile in source_profiles:
                 if _directory_manifest(Path(profile.data_dir)) != manifests[profile.id]:
-                    raise MigrationError(
-                        f"source profile data changed during migration: {profile.id}"
-                    )
+                    raise MigrationError(f"source profile data changed during migration: {profile.id}")
 
             for temporary, final_profile in temporary_directories:
                 temporary.replace(final_profile)

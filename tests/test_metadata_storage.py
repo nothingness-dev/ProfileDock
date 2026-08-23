@@ -2,16 +2,18 @@ import json
 import shutil
 import tempfile
 import threading
-from unittest.mock import patch
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
+from unittest.mock import patch
 
 import pytest
 
-from profiledock.models import MetadataDocument, METADATA_SCHEMA_VERSION, Profile
+from profiledock.models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from profiledock.storage import (
     MetadataCorruptedError,
     StorageError,
+    _atomic_write,
+    _write_all,
     add_profile_atomic,
     load_metadata,
     load_metadata_with_recovery,
@@ -19,8 +21,6 @@ from profiledock.storage import (
     remove_profile_atomic,
     save_metadata,
     set_engine_atomic,
-    _atomic_write,
-    _write_all,
 )
 from profiledock.validation import ValidationError
 
@@ -104,7 +104,14 @@ class TestBareArrayMigration:
 
     def test_migrate_creates_backup(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
-        old_data = [{"id": "abc123", "name": "Test", "created_at": "2024-01-01T00:00:00+00:00", "data_dir": str(profiles_dir / "abc123" / "browser-data")}]
+        old_data = [
+            {
+                "id": "abc123",
+                "name": "Test",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "data_dir": str(profiles_dir / "abc123" / "browser-data"),
+            }
+        ]
         metadata_path.write_text(json.dumps(old_data), encoding="utf-8")
         migrate_metadata(metadata_path, profiles_dir)
         backup_path = metadata_path.with_suffix(".json.bak")
@@ -112,11 +119,23 @@ class TestBareArrayMigration:
         backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
         assert isinstance(backup_data, list)
 
-    def test_migrate_validates_before_writing(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+    def test_migrate_validates_before_writing(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         old_data = [
-            {"id": "abc123", "name": "Test1", "created_at": "2024-01-01T00:00:00+00:00", "data_dir": str(profiles_dir / "abc123" / "browser-data")},
-            {"id": "abc123", "name": "Test2", "created_at": "2024-01-01T00:00:00+00:00", "data_dir": str(profiles_dir / "abc123" / "browser-data2")},
+            {
+                "id": "abc123",
+                "name": "Test1",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "data_dir": str(profiles_dir / "abc123" / "browser-data"),
+            },
+            {
+                "id": "abc123",
+                "name": "Test2",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "data_dir": str(profiles_dir / "abc123" / "browser-data2"),
+            },
         ]
         metadata_path.write_text(json.dumps(old_data), encoding="utf-8")
         with pytest.raises(ValidationError, match="duplicate profile id"):
@@ -172,7 +191,9 @@ class TestDuplicateIDs:
 
 
 class TestDuplicateDirectories:
-    def test_reject_duplicate_directories(self, temp_dir: Path, profiles_dir: Path, metadata_path: Path) -> None:
+    def test_reject_duplicate_directories(
+        self, temp_dir: Path, profiles_dir: Path, metadata_path: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         data_dir = str(profiles_dir / "abc123" / "browser-data")
         p1 = _create_profile("abc123", "Test1", data_dir)
@@ -203,7 +224,9 @@ class TestCorruptedPrimaryWithValidBackup:
         with pytest.raises(MetadataCorruptedError):
             load_metadata_with_recovery(metadata_path)
 
-    def test_recover_from_separate_backup(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+    def test_recover_from_separate_backup(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         backup_path = temp_dir / "backups" / "profiles.json.bak"
         save_metadata(
@@ -223,7 +246,9 @@ class TestCorruptedPrimaryWithValidBackup:
         recovered = load_metadata_with_recovery(metadata_path, backup_path)
         assert recovered.profiles == []
 
-    def test_recovery_rejects_unsafe_backup(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+    def test_recovery_rejects_unsafe_backup(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         backup_path = temp_dir / "backups" / "profiles.json.bak"
         backup_path.parent.mkdir(parents=True)
@@ -266,7 +291,9 @@ class TestConcurrentMutations:
         doc = load_metadata(metadata_path)
         assert len(doc.profiles) == 5
 
-    def test_concurrent_remove_profiles(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+    def test_concurrent_remove_profiles(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         profiles = []
         for i in range(5):
@@ -293,7 +320,9 @@ class TestConcurrentMutations:
 
 
 class TestInterruptedWrites:
-    def test_interrupted_write_leaves_valid_document(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+    def test_interrupted_write_leaves_valid_document(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         profile = _create_profile("abc123", "Test", str(profiles_dir / "abc123" / "browser-data"))
         doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
@@ -347,10 +376,17 @@ class TestUnsafePaths:
 
 
 class TestMigrationWithTimestampValidation:
-    def test_validate_timestamps_during_migration(self, temp_dir: Path, metadata_path: Path, profiles_dir: Path) -> None:
+    def test_validate_timestamps_during_migration(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
         old_data = [
-            {"id": "abc123", "name": "Test", "created_at": "not-a-timestamp", "data_dir": str(profiles_dir / "abc123" / "browser-data")}
+            {
+                "id": "abc123",
+                "name": "Test",
+                "created_at": "not-a-timestamp",
+                "data_dir": str(profiles_dir / "abc123" / "browser-data"),
+            }
         ]
         metadata_path.write_text(json.dumps(old_data), encoding="utf-8")
         with pytest.raises(ValidationError, match="ISO-8601 timestamp"):

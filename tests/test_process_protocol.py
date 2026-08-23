@@ -8,6 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from profiledock.process_manager import (
+    RUNNING_STATE_PROTOCOL_VERSION,
+    ProfileRunningError,
     _alive,
     _atomic_private_json,
     _read_state,
@@ -17,16 +19,16 @@ from profiledock.process_manager import (
     close_controller,
     get_status,
     is_active_for_mutation,
-    ProfileRunningError,
-    RUNNING_STATE_PROTOCOL_VERSION,
     state_path,
 )
 
 
 def test_alive_reaps_exited_unix_child():
-    with patch("profiledock.process_manager.os.name", "posix"), patch(
-        "profiledock.process_manager.os.waitpid", return_value=(123, 0)
-    ), patch("profiledock.process_manager.os.kill") as kill:
+    with (
+        patch("profiledock.process_manager.os.name", "posix"),
+        patch("profiledock.process_manager.os.waitpid", return_value=(123, 0)),
+        patch("profiledock.process_manager.os.kill") as kill,
+    ):
         assert not _alive(123)
     kill.assert_not_called()
 
@@ -131,8 +133,9 @@ def test_mutation_check_uses_direct_pid_identity(tmp_path):
         ),
         encoding="utf-8",
     )
-    with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=20.0
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager._get_process_create_time", return_value=20.0),
     ):
         assert not is_active_for_mutation(str(data_dir))
 
@@ -154,8 +157,9 @@ def test_mutation_check_uses_playwright_controller_availability(tmp_path):
         ),
         encoding="utf-8",
     )
-    with patch("profiledock.process_manager._alive", return_value=False), patch(
-        "profiledock.process_manager._controller_available", return_value=True
+    with (
+        patch("profiledock.process_manager._alive", return_value=False),
+        patch("profiledock.process_manager._controller_available", return_value=True),
     ):
         assert is_active_for_mutation(str(data_dir))
 
@@ -185,9 +189,10 @@ def test_direct_close_never_signals_state_without_process_identity(tmp_path):
         ),
         encoding="utf-8",
     )
-    with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager.subprocess.run"
-    ) as signal_process:
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager.subprocess.run") as signal_process,
+    ):
         with pytest.raises(ProfileRunningError, match="unverified process"):
             close_controller(str(data_dir))
     signal_process.assert_not_called()
@@ -214,9 +219,11 @@ def test_direct_close_preserves_state_when_live_process_identity_is_unavailable(
         ),
         encoding="utf-8",
     )
-    with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=None
-    ), patch("profiledock.process_manager.subprocess.run") as signal_process:
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager._get_process_create_time", return_value=None),
+        patch("profiledock.process_manager.subprocess.run") as signal_process,
+    ):
         with pytest.raises(ProfileRunningError, match="could not be verified"):
             close_controller(str(data_dir))
     signal_process.assert_not_called()
@@ -249,14 +256,14 @@ def test_direct_close_detects_pid_reuse(tmp_path):
         encoding="utf-8",
     )
 
-    with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=999.0
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager._get_process_create_time", return_value=999.0),
     ):
         with pytest.raises(ProfileRunningError, match="PID was reused"):
             close_controller(str(data_dir), timeout=0.1)
 
     assert not state_file.exists()
-
 
 
 def test_legacy_live_state_is_upgraded(tmp_path):
@@ -388,7 +395,9 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
     data_dir.mkdir(parents=True)
 
     with patch("profiledock.process_manager._system_browser_executable", return_value=None):
-        with pytest.raises(BrowserLaunchError, match="Google Chrome, Chromium, or Brave executable not found"):
+        with pytest.raises(
+            BrowserLaunchError, match="Google Chrome, Chromium, or Brave executable not found"
+        ):
             start_direct_chrome(str(data_dir), tabs=1)
 
     dummy_chrome = tmp_path / "chrome.exe"
@@ -397,17 +406,19 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
     class DummyProcess:
         pid = 12345
 
-    with patch(
-        "profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()
-    ), patch("profiledock.process_manager._get_process_create_time", return_value=100.0):
+    with (
+        patch("profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+    ):
         state = start_direct_chrome(str(data_dir), tabs=2, executable_path=dummy_chrome)
         assert state["pid"] == 12345
         assert state["engine"] == "direct"
         assert state["tabs"] == 2
         assert state["channel"] == "chrome"
 
-    with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=100.0
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
     ):
         assert get_status(str(data_dir)) == "running"
         assert is_running(str(data_dir))
@@ -415,12 +426,14 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
         with pytest.raises(ProfileRunningError, match="profile is already running"):
             start_direct_chrome(str(data_dir), tabs=1, executable_path=dummy_chrome)
 
-    with patch(
-        "profiledock.process_manager._alive",
-        side_effect=[True, True, True, True, False, False],
-    ), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=100.0
-    ), patch("subprocess.run"):
+    with (
+        patch(
+            "profiledock.process_manager._alive",
+            side_effect=[True, True, True, True, False, False],
+        ),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+        patch("subprocess.run"),
+    ):
         close_controller(str(data_dir), timeout=0)
         assert not (data_dir.parent / "running.json").exists()
 
@@ -462,9 +475,11 @@ def test_direct_chrome_close_failure_preserves_state(tmp_path):
         encoding="utf-8",
     )
 
-    with patch("profiledock.process_manager._alive", return_value=True), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=100.0
-    ), patch("profiledock.process_manager.subprocess.run"):
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+        patch("profiledock.process_manager.subprocess.run"),
+    ):
         with pytest.raises(BrowserLaunchError, match="did not close"):
             close_controller(str(data_dir), timeout=0)
     assert state_file.exists()
@@ -501,12 +516,15 @@ def test_direct_launch_state_failure_stops_browser(tmp_path):
     executable.write_text("browser", encoding="utf-8")
     process = type("Process", (), {"pid": 12345})()
 
-    with patch("profiledock.process_manager.subprocess.Popen", return_value=process), patch(
-        "profiledock.process_manager._atomic_private_json",
-        side_effect=OSError("state unavailable"),
-    ), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=100.0
-    ), patch("profiledock.process_manager._stop_process") as stop_process:
+    with (
+        patch("profiledock.process_manager.subprocess.Popen", return_value=process),
+        patch(
+            "profiledock.process_manager._atomic_private_json",
+            side_effect=OSError("state unavailable"),
+        ),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+        patch("profiledock.process_manager._stop_process") as stop_process,
+    ):
         with pytest.raises(BrowserLaunchError, match="state unavailable"):
             start_direct_chrome(str(data_dir), 1, executable_path=executable)
 
@@ -522,11 +540,11 @@ def test_direct_launch_stops_browser_when_identity_cannot_be_verified(tmp_path):
     executable = tmp_path / "chrome.exe"
     executable.write_text("browser", encoding="utf-8")
     process = type("Process", (), {"pid": 12345})()
-    with patch(
-        "profiledock.process_manager.subprocess.Popen", return_value=process
-    ), patch(
-        "profiledock.process_manager._get_process_create_time", return_value=None
-    ), patch("profiledock.process_manager._stop_process") as stop_process:
+    with (
+        patch("profiledock.process_manager.subprocess.Popen", return_value=process),
+        patch("profiledock.process_manager._get_process_create_time", return_value=None),
+        patch("profiledock.process_manager._stop_process") as stop_process,
+    ):
         with pytest.raises(BrowserLaunchError, match="verify the launched browser"):
             start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
     stop_process.assert_called_once_with(process)
@@ -547,9 +565,10 @@ def test_direct_launch_maps_urls_and_window_size(tmp_path):
         captured_args.extend(args)
         return type("Process", (), {"pid": 12345})()
 
-    with patch(
-        "profiledock.process_manager.subprocess.Popen", side_effect=mock_popen
-    ), patch("profiledock.process_manager._get_process_create_time", return_value=100.0):
+    with (
+        patch("profiledock.process_manager.subprocess.Popen", side_effect=mock_popen),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+    ):
         start_direct_chrome(
             str(data_dir),
             tabs=3,
@@ -579,8 +598,9 @@ def test_system_browser_preference_selects_requested_family(tmp_path):
             return str(brave)
         return None
 
-    with patch("profiledock.process_manager.sys.platform", "linux"), patch(
-        "profiledock.process_manager.shutil.which", side_effect=find_browser
+    with (
+        patch("profiledock.process_manager.sys.platform", "linux"),
+        patch("profiledock.process_manager.shutil.which", side_effect=find_browser),
     ):
         assert _system_browser_executable("chrome") == chrome
         assert _system_browser_executable("brave") == brave
@@ -597,10 +617,9 @@ def test_start_direct_chrome_operates_without_playwright(tmp_path):
 
     with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
         process = type("Process", (), {"pid": 54321})()
-        with patch(
-            "profiledock.process_manager.subprocess.Popen", return_value=process
-        ), patch(
-            "profiledock.process_manager._get_process_create_time", return_value=100.0
+        with (
+            patch("profiledock.process_manager.subprocess.Popen", return_value=process),
+            patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
         ):
             state = start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
             assert state["pid"] == 54321

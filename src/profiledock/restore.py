@@ -1,25 +1,31 @@
-from dataclasses import asdict, dataclass
-from hashlib import sha256
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import tarfile
-from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, Optional
 from uuid import uuid4
 
-from .data_root import DataPaths, DataRootError, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
-from .models import LaunchConfig, METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_launch_config
+from .data_root import (
+    DataPaths,
+    DataRootError,
+    _is_link,
+    ensure_tree_safe,
+    ensure_within_root,
+    validate_path_component,
+)
+from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_launch_config
+from .process_manager import is_active_for_mutation
 from .storage import (
     _atomic_write,
     _backup_metadata,
     load_metadata,
     metadata_lock,
 )
-from .process_manager import is_active_for_mutation
 from .validation import ValidationError, validate_metadata_document, validate_required_fields
-from .version import __version__
 
 MAX_MEMBER_SIZE_BYTES = 5 * 1024 * 1024 * 1024
 MAX_TOTAL_EXTRACT_BYTES = 20 * 1024 * 1024 * 1024
@@ -53,7 +59,7 @@ class RestoreProfileResult:
     total_bytes: int = 0
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -62,13 +68,13 @@ class RestoreReport:
     archive_path: str
     format_version: int
     profiledock_version: str
-    restored: List[RestoreProfileResult]
-    skipped: List[RestoreProfileResult]
+    restored: list[RestoreProfileResult]
+    skipped: list[RestoreProfileResult]
     total_restored: int
     total_files: int
     total_bytes: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "archive_path": self.archive_path,
             "format_version": self.format_version,
@@ -112,12 +118,19 @@ def _validate_safe_member_path(member_name: str) -> Path:
     return candidate
 
 
-def _validated_archive_profile(value: Any) -> Dict[str, Any]:
+def _validated_archive_profile(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise InvalidArchiveError("manifest profile entries must be JSON objects")
     expected_fields = {
-        "id", "name", "created_at", "last_launched_at", "engine",
-        "launch_config", "file_count", "total_bytes", "files",
+        "id",
+        "name",
+        "created_at",
+        "last_launched_at",
+        "engine",
+        "launch_config",
+        "file_count",
+        "total_bytes",
+        "files",
     }
     if set(value) != expected_fields:
         raise InvalidArchiveError("manifest profile fields do not match backup format version 1")
@@ -176,7 +189,7 @@ def _validated_archive_profile(value: Any) -> Dict[str, Any]:
     return normalized
 
 
-def _existing_profile_matches_archive(profile: Profile, archive_profile: Dict[str, Any]) -> bool:
+def _existing_profile_matches_archive(profile: Profile, archive_profile: dict[str, Any]) -> bool:
     launch_config = profile.launch_config.to_dict() if profile.launch_config is not None else None
     if (
         profile.name != archive_profile["name"]
@@ -190,7 +203,7 @@ def _existing_profile_matches_archive(profile: Profile, archive_profile: Dict[st
     if not data_dir.is_dir() or _is_link(data_dir):
         return False
     expected_files = archive_profile["files"]
-    actual_paths: Set[str] = set()
+    actual_paths: set[str] = set()
     for root, directories, files in os.walk(data_dir, followlinks=False):
         root_path = Path(root)
         if any(_is_link(root_path / directory) for directory in directories):
@@ -219,15 +232,15 @@ def restore_backup_archive(
         raise InvalidArchiveError(f"backup archive file does not exist: {archive}")
 
     try:
-        tar = tarfile.open(archive, "r:gz")
+        tar = tarfile.open(archive, "r:gz")  # noqa: SIM115 - closed by the `with tar` below
     except Exception as exc:
         raise InvalidArchiveError(f"could not open backup archive: {exc}") from exc
 
     with tar:
         try:
             manifest_member = tar.getmember("backup_manifest.json")
-        except KeyError:
-            raise InvalidArchiveError("archive missing required 'backup_manifest.json'")
+        except KeyError as exc:
+            raise InvalidArchiveError("archive missing required 'backup_manifest.json'") from exc
 
         if not manifest_member.isfile() or manifest_member.size > MAX_MANIFEST_SIZE_BYTES:
             raise InvalidArchiveError("backup manifest is not a safe regular file")
@@ -246,15 +259,22 @@ def restore_backup_archive(
         if not isinstance(manifest, dict):
             raise InvalidArchiveError("backup manifest must be a JSON object")
         expected_manifest_fields = {
-            "format_version", "profiledock_version", "created_at", "total_profiles",
-            "total_files", "total_bytes", "profiles",
+            "format_version",
+            "profiledock_version",
+            "created_at",
+            "total_profiles",
+            "total_files",
+            "total_bytes",
+            "profiles",
         }
         if set(manifest) != expected_manifest_fields:
             raise InvalidArchiveError("manifest fields do not match backup format version 1")
         format_version = manifest.get("format_version")
         if type(format_version) is not int or format_version != 1:
             raise InvalidArchiveError(f"unsupported backup archive format version: {format_version}")
-        if not isinstance(manifest["profiledock_version"], str) or not isinstance(manifest["created_at"], str):
+        if not isinstance(manifest["profiledock_version"], str) or not isinstance(
+            manifest["created_at"], str
+        ):
             raise InvalidArchiveError("manifest version and creation time must be strings")
         for field in ("total_profiles", "total_files", "total_bytes"):
             if type(manifest[field]) is not int or manifest[field] < 0:
@@ -270,8 +290,8 @@ def restore_backup_archive(
         if manifest["total_bytes"] != sum(profile["total_bytes"] for profile in profiles_data):
             raise InvalidArchiveError("manifest byte total does not match profile entries")
 
-        archive_profile_ids: Set[str] = set()
-        archive_profile_names: Set[str] = set()
+        archive_profile_ids: set[str] = set()
+        archive_profile_names: set[str] = set()
 
         for prof in profiles_data:
             pid = prof["id"]
@@ -285,24 +305,26 @@ def restore_backup_archive(
 
         members = tar.getmembers()
         if len(members) > MAX_ARCHIVE_MEMBERS:
-            raise DecompressionSecurityError(
-                "archive contains more members than the allowed maximum"
-            )
+            raise DecompressionSecurityError("archive contains more members than the allowed maximum")
         member_names = [member.name for member in members]
         if len(member_names) != len(set(member_names)):
             raise InvalidArchiveError("archive contains duplicate member names")
         total_extracted_bytes = 0
-        regular_members: Set[str] = set()
+        regular_members: set[str] = set()
         for member in members:
             if member.islnk() or member.issym():
                 raise DecompressionSecurityError(f"archive member is an unsafe link: {member.name}")
             if not member.isfile() and not member.isdir():
                 raise DecompressionSecurityError(f"archive member has an unsafe type: {member.name}")
             if member.size > MAX_MEMBER_SIZE_BYTES:
-                raise DecompressionSecurityError(f"archive member exceeds maximum allowed size: {member.name}")
+                raise DecompressionSecurityError(
+                    f"archive member exceeds maximum allowed size: {member.name}"
+                )
             total_extracted_bytes += member.size
             if total_extracted_bytes > MAX_TOTAL_EXTRACT_BYTES:
-                raise DecompressionSecurityError("total archive uncompressed size exceeds maximum allowed threshold")
+                raise DecompressionSecurityError(
+                    "total archive uncompressed size exceeds maximum allowed threshold"
+                )
 
             _validate_safe_member_path(member.name)
             if member.isfile():
@@ -321,9 +343,7 @@ def restore_backup_archive(
                     raise InvalidArchiveError(f"archive member size does not match manifest: {member_name}")
         unexpected_members = regular_members - expected_members
         if unexpected_members:
-            raise InvalidArchiveError(
-                f"archive contains unlisted file: {sorted(unexpected_members)[0]}"
-            )
+            raise InvalidArchiveError(f"archive contains unlisted file: {sorted(unexpected_members)[0]}")
 
         dst_metadata = data_paths.profiles_file
         dst_profiles_dir = data_paths.profiles_dir
@@ -334,8 +354,8 @@ def restore_backup_archive(
             current_id_map = {p.id: p for p in current_doc.profiles}
             current_name_map = {p.name: p for p in current_doc.profiles}
 
-            to_restore: List[Dict[str, Any]] = []
-            skipped: List[RestoreProfileResult] = []
+            to_restore: list[dict[str, Any]] = []
+            skipped: list[RestoreProfileResult] = []
 
             for prof in profiles_data:
                 pid = prof["id"]
@@ -343,20 +363,14 @@ def restore_backup_archive(
                 pengine = prof.get("engine")
                 try:
                     validate_path_component(pid, "profile id")
-                    expected_profile_dir = ensure_within_root(
-                        dst_profiles_dir / pid, data_paths.root
-                    )
-                    expected_runtime_dir = ensure_within_root(
-                        data_paths.runtime_dir / pid, data_paths.root
-                    )
+                    expected_profile_dir = ensure_within_root(dst_profiles_dir / pid, data_paths.root)
+                    expected_runtime_dir = ensure_within_root(data_paths.runtime_dir / pid, data_paths.root)
                 except DataRootError as exc:
                     raise InvalidArchiveError(f"unsafe profile destination for '{pid}': {exc}") from exc
                 if pid not in current_id_map and is_active_for_mutation(
                     str(expected_profile_dir / "browser-data"), expected_runtime_dir
                 ):
-                    raise RestoreConflictError(
-                        f"cannot restore active profile state for '{pname}' ({pid})"
-                    )
+                    raise RestoreConflictError(f"cannot restore active profile state for '{pname}' ({pid})")
 
                 if pid in current_id_map:
                     existing = current_id_map[pid]
@@ -396,8 +410,8 @@ def restore_backup_archive(
             )
             temp_restore_root.mkdir(parents=True, mode=0o700)
 
-            restored_results: List[RestoreProfileResult] = []
-            finalized_dirs: List[Tuple[Path, Path]] = []
+            restored_results: list[RestoreProfileResult] = []
+            finalized_dirs: list[tuple[Path, Path]] = []
 
             try:
                 for prof in to_restore:
@@ -417,8 +431,10 @@ def restore_backup_archive(
                         member_path = f"profiles/{pid}/browser-data/{rel_file_path}"
                         try:
                             member = tar.getmember(member_path)
-                        except KeyError:
-                            raise InvalidArchiveError(f"archive missing member for file '{member_path}'")
+                        except KeyError as exc:
+                            raise InvalidArchiveError(
+                                f"archive missing member for file '{member_path}'"
+                            ) from exc
 
                         target_file_path = temp_browser_data / rel_file_path
                         target_file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -438,7 +454,7 @@ def restore_backup_archive(
                     ensure_within_root(target_final_prof_dir, data_paths.root)
                     finalized_dirs.append((temp_prof_dir, target_final_prof_dir))
 
-                quarantined_existing: List[Tuple[Path, Path]] = []
+                quarantined_existing: list[tuple[Path, Path]] = []
                 for _, final_dir in finalized_dirs:
                     if final_dir.exists():
                         ensure_tree_safe(final_dir, data_paths.root)
@@ -513,7 +529,7 @@ def restore_backup_archive(
                             pass
 
                 except Exception:
-                    for temp_dir, final_dir in finalized_dirs:
+                    for _temp_dir, final_dir in finalized_dirs:
                         if final_dir.exists():
                             ensure_tree_safe(final_dir, data_paths.root)
                             shutil.rmtree(final_dir, ignore_errors=False)

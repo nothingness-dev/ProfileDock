@@ -8,24 +8,62 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from subprocess import Popen
+from typing import (
+    IO,
+    TYPE_CHECKING,
+    Any,
+    Optional,
+)
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from playwright.sync_api import BrowserContext, Playwright
 
 _MAX_ERROR_BYTES = 4096
 RUNNING_STATE_PROTOCOL_VERSION = 2
 _MAX_COMMAND_BYTES = 512
-_DIRECT_STATE_FIELDS = frozenset({
-    "protocol_version", "engine", "profile_id", "pid", "launcher_pid",
-    "process_create_time", "tabs", "channel", "started_at", "status", "closing",
-})
-_PLAYWRIGHT_STATE_FIELDS = frozenset({
-    "protocol_version", "engine", "profile_id", "controller_pid",
-    "controller_started_at", "launcher_pid", "port", "token", "tabs",
-    "page_count", "channel", "status", "closing", "browser_channel",
-    "start_urls", "window_width", "window_height", "legacy_controller", "pid",
-})
+_DIRECT_STATE_FIELDS = frozenset(
+    {
+        "protocol_version",
+        "engine",
+        "profile_id",
+        "pid",
+        "launcher_pid",
+        "process_create_time",
+        "tabs",
+        "channel",
+        "started_at",
+        "status",
+        "closing",
+    }
+)
+_PLAYWRIGHT_STATE_FIELDS = frozenset(
+    {
+        "protocol_version",
+        "engine",
+        "profile_id",
+        "controller_pid",
+        "controller_started_at",
+        "launcher_pid",
+        "port",
+        "token",
+        "tabs",
+        "page_count",
+        "channel",
+        "status",
+        "closing",
+        "browser_channel",
+        "start_urls",
+        "window_width",
+        "window_height",
+        "legacy_controller",
+        "pid",
+    }
+)
 
 
 class ProfileRunningError(Exception):
@@ -116,11 +154,14 @@ def _atomic_private_bytes(path: Path, payload: bytes) -> None:
             pass
 
 
-def _atomic_private_json(path: Path, value: Dict[str, Any]) -> None:
+def _atomic_private_json(path: Path, value: dict[str, Any]) -> None:
     _atomic_private_bytes(path, json.dumps(value).encode("utf-8"))
 
 
-def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> bool:
+StateDict = dict[str, Any]
+
+
+def _valid_state(value: StateDict, profile_id: Optional[str] = None) -> bool:
     if value.get("engine") != "playwright" or set(value) - _PLAYWRIGHT_STATE_FIELDS:
         return False
     if (
@@ -142,9 +183,7 @@ def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> boo
         return False
     if value.get("status") not in {"starting", "running", "closing"}:
         return False
-    if "launcher_pid" in value and (
-        type(value["launcher_pid"]) is not int or value["launcher_pid"] < 0
-    ):
+    if "launcher_pid" in value and (type(value["launcher_pid"]) is not int or value["launcher_pid"] < 0):
         return False
     if "closing" in value and type(value["closing"]) is not bool:
         return False
@@ -154,12 +193,10 @@ def _valid_state(value: Dict[str, Any], profile_id: Optional[str] = None) -> boo
         started_at = datetime.fromisoformat(value["controller_started_at"])
     except (TypeError, ValueError):
         return False
-    if started_at.tzinfo is None or started_at.utcoffset() is None:
-        return False
-    return True
+    return started_at.tzinfo is not None and started_at.utcoffset() is not None
 
 
-def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
+def _valid_direct_state(value: StateDict, profile_id: str) -> bool:
     if (
         value.get("engine") != "direct"
         or value.get("profile_id") != profile_id
@@ -193,7 +230,7 @@ def _valid_direct_state(value: Dict[str, Any], profile_id: str) -> bool:
     return started_at.tzinfo is not None and started_at.utcoffset() is not None
 
 
-def _upgrade_legacy_state(path: Path, value: Dict[str, Any], profile_id: str) -> Dict[str, Any]:
+def _upgrade_legacy_state(path: Path, value: StateDict, profile_id: str) -> StateDict:
     version = value.get("protocol_version", 0)
     if type(version) is not int or version < 0 or version > RUNNING_STATE_PROTOCOL_VERSION:
         return value
@@ -214,13 +251,16 @@ def _upgrade_legacy_state(path: Path, value: Dict[str, Any], profile_id: str) ->
                 token = upgraded.get("token")
                 if pid < 1 or port < 1 or not isinstance(token, str) or len(token) < 32:
                     return value
-                upgraded.update({
-                    "profile_id": profile_id,
-                    "controller_pid": pid,
-                    "controller_started_at": upgraded.get("controller_started_at") or datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
-                    "status": upgraded.get("status", "running"),
-                    "legacy_controller": True,
-                })
+                upgraded.update(
+                    {
+                        "profile_id": profile_id,
+                        "controller_pid": pid,
+                        "controller_started_at": upgraded.get("controller_started_at")
+                        or datetime.fromtimestamp(modified_at, timezone.utc).isoformat(),
+                        "status": upgraded.get("status", "running"),
+                        "legacy_controller": True,
+                    }
+                )
             upgraded["protocol_version"] = 1
             version = 1
         elif version == 1:
@@ -249,7 +289,7 @@ def _write_error(
     for secret in redactions:
         if secret:
             message = message.replace(secret, "[redacted]")
-    base: Dict[str, Any] = {"error_type": error_type}
+    base: dict[str, Any] = {"error_type": error_type}
     if channel:
         base["channel"] = channel
     low = 0
@@ -270,7 +310,7 @@ def _write_error(
         pass
 
 
-def _read_error(path: Path) -> Optional[Dict[str, Any]]:
+def _read_error(path: Path) -> Optional[StateDict]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict) and "error_type" in data:
@@ -324,7 +364,7 @@ def _get_process_create_time(pid: int) -> Optional[float]:
             ):
                 return None
             time_val = (creation_time.dwHighDateTime << 32) + creation_time.dwLowDateTime
-            return (time_val - 116444736000000000) / 10000000.0
+            return float((time_val - 116444736000000000) / 10000000.0)
         finally:
             kernel32.CloseHandle(handle)
 
@@ -396,7 +436,7 @@ def _alive(pid: int) -> bool:
         return False
 
 
-def _read_state(path: Path) -> Optional[Dict[str, Any]]:
+def _read_state(path: Path) -> Optional[StateDict]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -471,10 +511,15 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
 
 
 def is_running(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
-    return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in ("starting", "running", "closing", "error")
+    return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in (
+        "starting",
+        "running",
+        "closing",
+        "error",
+    )
 
 
-def _controller_available(state: Dict[str, Any]) -> bool:
+def _controller_available(state: StateDict) -> bool:
     try:
         port = int(state.get("port", 0))
         token = state.get("token", "")
@@ -510,17 +555,18 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
         return True
     controller_pid = int(upgraded.get("controller_pid", -1))
     launcher_pid = int(upgraded.get("launcher_pid", -1))
-    return _alive(controller_pid) or _controller_available(upgraded) or (
-        controller_pid <= 0 and _alive(launcher_pid)
+    return (
+        _alive(controller_pid)
+        or _controller_available(upgraded)
+        or (controller_pid <= 0 and _alive(launcher_pid))
     )
 
 
 def _signal_posix_process_group(pid: int, sig: signal.Signals) -> None:
-    """Send signal to process group on POSIX if leader, otherwise fallback to process."""
     try:
-        pgid = os.getpgid(pid)
+        pgid = os.getpgid(pid)  # type: ignore[attr-defined]  # POSIX-only API; guarded by sys.platform callers
         if pgid == pid:
-            os.killpg(pgid, sig)
+            os.killpg(pgid, sig)  # type: ignore[attr-defined]
             return
     except (OSError, ProcessLookupError):
         pass
@@ -530,7 +576,7 @@ def _signal_posix_process_group(pid: int, sig: signal.Signals) -> None:
         pass
 
 
-def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
+def _stop_process(process: Popen[bytes], timeout: float = 5) -> None:
     if process.poll() is not None:
         return
     if sys.platform == "win32":
@@ -552,21 +598,18 @@ def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
         process.wait(timeout=timeout)
 
 
-def _stderr_message(process: subprocess.Popen[Any], token: str) -> str:
-    if process.stderr is None:
+def _stderr_message(process: Popen[bytes], token: str) -> str:
+    stderr: IO[bytes] | None = process.stderr
+    if stderr is None:
         return ""
     try:
-        output = process.stderr.read(_MAX_ERROR_BYTES)
+        output = stderr.read(_MAX_ERROR_BYTES)
     except OSError:
         return ""
-    if isinstance(output, bytes):
-        message = output.decode("utf-8", errors="replace")
-    else:
-        message = output
-    return message.replace(token, "[redacted]").strip()
+    return output.decode("utf-8", errors="replace").replace(token, "[redacted]").strip()
 
 
-def _close_stderr(process: subprocess.Popen[Any]) -> None:
+def _close_stderr(process: Popen[bytes]) -> None:
     if process.stderr is not None:
         process.stderr.close()
 
@@ -577,10 +620,10 @@ def start_direct_chrome(
     runtime_dir: Optional[Path] = None,
     executable_path: Optional[Path] = None,
     browser: Optional[str] = None,
-    start_urls: Optional[List[str]] = None,
+    start_urls: Optional[list[str]] = None,
     window_width: Optional[int] = None,
     window_height: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> StateDict:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
     if executable_path is not None and browser is not None:
@@ -651,15 +694,14 @@ def start_direct_chrome(
         args.append(f"--window-size={window_width},{window_height}")
     args.extend(urls)
 
-    popen_kwargs: Dict[str, Any] = {
+    popen_kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
     }
     if sys.platform == "win32":
-        popen_kwargs["creationflags"] = (
-            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        popen_kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
         )
     else:
         popen_kwargs["start_new_session"] = True
@@ -712,10 +754,10 @@ def start_controller(
     startup_timeout: float = 30,
     runtime_dir: Optional[Path] = None,
     browser_channel: Optional[str] = None,
-    start_urls: Optional[List[str]] = None,
+    start_urls: Optional[list[str]] = None,
     window_width: Optional[int] = None,
     window_height: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> StateDict:
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
     if (window_width is None) != (window_height is None):
@@ -788,7 +830,8 @@ def start_controller(
         poll_interval = 0.02
         while time.monotonic() < deadline:
             state = _read_state(path)
-            if state and _valid_state(state, initial["profile_id"]) and state.get("port"):
+            profile_id_value = initial["profile_id"]
+            if state and _valid_state(state, str(profile_id_value)) and state.get("port"):
                 _unlink_quietly(err)
                 _close_stderr(process)
                 return state
@@ -833,9 +876,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
     path = state_path(data_dir, runtime_dir)
     initial_state = _read_state(path)
     if path.exists() and not initial_state:
-        raise ProfileRunningError(
-            "profile running state is invalid; refusing to remove ambiguous state"
-        )
+        raise ProfileRunningError("profile running state is invalid; refusing to remove ambiguous state")
     if initial_state:
         initial_state = _upgrade_legacy_state(path, initial_state, Path(data_dir).parent.name)
     if initial_state and initial_state.get("engine") == "direct":
@@ -911,7 +952,6 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         _unlink_quietly(path)
         return
 
-
     state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
     if not _valid_state(state, Path(data_dir).parent.name):
         raise ProfileRunningError(
@@ -953,14 +993,14 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         raise ProfileRunningError("profile is not running")
 
 
-def _context_alive(context: Any) -> bool:
+def _context_alive(context: "BrowserContext") -> bool:
     try:
         return bool(context.pages)
     except Exception:
         return False
 
 
-def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
+def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str) -> None:
     while _context_alive(context):
         try:
             connection, _ = server.accept()
@@ -999,32 +1039,37 @@ def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
                 pass
 
 
-
 def _launch_context(
-    playwright: Any,
+    playwright: "Playwright",
     data_dir: str,
     headless: bool,
     channel_override: Optional[str] = None,
     window_width: Optional[int] = None,
     window_height: Optional[int] = None,
-) -> Tuple[Any, str]:
+) -> tuple["BrowserContext", str]:
     from playwright.sync_api import Error as PlaywrightError
 
-    kwargs: Dict[str, Any] = {"headless": headless}
+    kwargs: dict[str, Any] = {"headless": headless}
     if window_width is not None and window_height is not None:
         kwargs["viewport"] = {"width": window_width, "height": window_height}
         kwargs["args"] = [f"--window-size={window_width},{window_height}"]
 
     if channel_override:
         if Path(channel_override).is_file():
-            return playwright.chromium.launch_persistent_context(data_dir, executable_path=channel_override, **kwargs), channel_override
-        return playwright.chromium.launch_persistent_context(data_dir, channel=channel_override, **kwargs), channel_override
+            return playwright.chromium.launch_persistent_context(
+                data_dir, executable_path=channel_override, **kwargs
+            ), channel_override
+        return playwright.chromium.launch_persistent_context(
+            data_dir, channel=channel_override, **kwargs
+        ), channel_override
 
     try:
         return playwright.chromium.launch_persistent_context(data_dir, **kwargs), "chromium"
     except PlaywrightError as chromium_error:
         try:
-            return playwright.chromium.launch_persistent_context(data_dir, channel="chrome", **kwargs), "chrome"
+            return playwright.chromium.launch_persistent_context(
+                data_dir, channel="chrome", **kwargs
+            ), "chrome"
         except PlaywrightError as chrome_error:
             executable = _system_browser_executable()
             if executable is not None:
@@ -1036,50 +1081,39 @@ def _launch_context(
                     ), "system"
                 except PlaywrightError as system_error:
                     raise PlaywrightError(
-                        f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}\nSystem browser: {system_error}"
+                        f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}"
+                        f"\nSystem browser: {system_error}"
                     ) from chromium_error
             raise PlaywrightError(
-                f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}\nSystem browser: not found"
+                f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}"
+                f"\nSystem browser: not found"
             ) from chromium_error
 
 
-
 def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path]:
-    candidates: Dict[str, List[Path]] = {"chrome": [], "chromium": [], "brave": []}
+    candidates: dict[str, list[Path]] = {"chrome": [], "chromium": [], "brave": []}
     if sys.platform == "win32":
         for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
             base = os.environ.get(variable)
             if base:
-                candidates["chrome"].append(
-                    Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe"
-                )
+                candidates["chrome"].append(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
                 candidates["brave"].append(
                     Path(base) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe"
                 )
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
-            candidates["chromium"].append(
-                Path(local_app_data) / "Chromium" / "Application" / "chrome.exe"
-            )
+            candidates["chromium"].append(Path(local_app_data) / "Chromium" / "Application" / "chrome.exe")
         commands = {
             "chrome": ("chrome", "google-chrome", "google-chrome-stable"),
             "chromium": ("chromium", "chromium-browser"),
             "brave": ("brave", "brave-browser"),
         }
         for group, names in commands.items():
-            candidates[group].extend(
-                Path(value) for value in (shutil.which(name) for name in names) if value
-            )
+            candidates[group].extend(Path(value) for value in (shutil.which(name) for name in names) if value)
     elif sys.platform == "darwin":
-        candidates["chrome"].append(
-            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-        )
-        candidates["chromium"].append(
-            Path("/Applications/Chromium.app/Contents/MacOS/Chromium")
-        )
-        candidates["brave"].append(
-            Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")
-        )
+        candidates["chrome"].append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+        candidates["chromium"].append(Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
+        candidates["brave"].append(Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"))
     else:
         commands = {
             "chrome": ("google-chrome", "google-chrome-stable", "chrome"),
@@ -1087,9 +1121,7 @@ def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path
             "brave": ("brave-browser", "brave"),
         }
         for group, names in commands.items():
-            candidates[group].extend(
-                Path(value) for value in (shutil.which(name) for name in names) if value
-            )
+            candidates[group].extend(Path(value) for value in (shutil.which(name) for name in names) if value)
     aliases = {
         "chrome": "chrome",
         "google-chrome": "chrome",
@@ -1118,7 +1150,7 @@ def _controller(
     browser_channel: Optional[str] = None,
     window_width: Optional[int] = None,
     window_height: Optional[int] = None,
-    start_urls: Optional[List[str]] = None,
+    start_urls: Optional[list[str]] = None,
 ) -> int:
     err = path.parent / "controller.error"
     initial_state = _read_state(path) or {}
@@ -1131,7 +1163,8 @@ def _controller(
     if start_urls is None and isinstance(initial_state.get("start_urls"), list):
         start_urls = [value for value in initial_state["start_urls"] if isinstance(value, str)]
     try:
-        from playwright.sync_api import Error as PlaywrightError, sync_playwright
+        from playwright.sync_api import Error as PlaywrightError
+        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         _write_error(err, "playwright_unavailable", str(exc), redactions=(token,))
         return 2
@@ -1253,7 +1286,6 @@ def main() -> None:
             start_urls=args.url,
         )
     )
-
 
 
 if __name__ == "__main__":

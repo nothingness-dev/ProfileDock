@@ -2,9 +2,11 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Callable, Optional
 
 
 class DataRootError(ValueError):
@@ -22,29 +24,41 @@ def _is_link(path: Path) -> bool:
 
 
 def validate_path_component(value: str, label: str = "identifier") -> str:
-    if not isinstance(value, str) or re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value
-    ) is None:
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value) is None:
         raise DataRootError(f"unsafe {label}")
     return value
 
 
+_resolved_root_cache: dict[str, Path] = {}
+
+
+@lru_cache(maxsize=1)
+def _win_long_path_fn() -> Optional[Callable[..., int]]:
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        fn = ctypes.windll.kernel32.GetLongPathNameW
+        fn.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        fn.restype = wintypes.DWORD
+        return fn
+    except (AttributeError, OSError):
+        return None
+
+
 def _get_long_path(path: Path) -> Path:
     if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
+        get_long_path_name = _win_long_path_fn()
+        if get_long_path_name is not None:
+            import ctypes
 
-        try:
-            GetLongPathName = ctypes.windll.kernel32.GetLongPathNameW
-            GetLongPathName.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
-            GetLongPathName.restype = wintypes.DWORD
-            path_str = str(path)
-            buffer = ctypes.create_unicode_buffer(32768)
-            res = GetLongPathName(path_str, buffer, 32768)
-            if res > 0:
-                return Path(buffer.value)
-        except (AttributeError, OSError):
-            pass
+            try:
+                buffer = ctypes.create_unicode_buffer(32768)
+                res = get_long_path_name(str(path), buffer, 32768)
+                if res > 0:
+                    return Path(buffer.value)
+            except OSError:
+                pass
     return path
 
 
@@ -60,7 +74,17 @@ def ensure_within_root(
         target_absolute = root_absolute / target_absolute
     target_absolute = target_absolute.absolute()
 
-    resolved_root = _get_long_path(root_absolute.resolve(strict=False))
+    # The root resolves identically on every call with the same root; caching avoids
+    # repeated GetLongPathName/realpath syscalls in hot metadata paths.
+    root_key = str(root_absolute)
+    cached = _resolved_root_cache.get(root_key)
+    if cached is None:
+        resolved_root = _get_long_path(root_absolute.resolve(strict=False))
+        if len(_resolved_root_cache) >= 8:
+            _resolved_root_cache.clear()
+        _resolved_root_cache[root_key] = resolved_root
+    else:
+        resolved_root = cached
     resolved_target = _get_long_path(target_absolute.resolve(strict=False))
 
     try:
@@ -70,7 +94,6 @@ def ensure_within_root(
             relative = resolved_target.relative_to(resolved_root)
         except ValueError as exc:
             raise DataRootError(f"path escapes configured data root: {target}") from exc
-
 
     if any(part == ".." for part in relative.parts):
         raise DataRootError(f"path traversal is not allowed: {target}")
@@ -191,7 +214,11 @@ def resolve_data_root(
     selected = cli_value
     if selected is None:
         env_value = environ.get("PROFILEDOCK_DATA_ROOT")
-        selected = Path(env_value) if env_value and env_value.strip() else platform_data_root(platform, environ, home)
+        selected = (
+            Path(env_value)
+            if env_value and env_value.strip()
+            else platform_data_root(platform, environ, home)
+        )
     if not str(selected).strip():
         raise DataRootError("data root cannot be empty")
     expanded = Path(os.path.expandvars(str(selected))).expanduser()
@@ -203,7 +230,7 @@ def resolve_data_root(
     root = expanded_absolute.resolve(strict=False)
     anchor = Path(root.anchor)
     user_home = (home or Path.home()).resolve(strict=False)
-    if root == anchor or root == user_home:
+    if root in (anchor, user_home):
         raise DataRootError("data root cannot be a filesystem root or home directory")
     if root.exists() and (not root.is_dir() or _is_link(root)):
         raise DataRootError("data root must be a real directory")
