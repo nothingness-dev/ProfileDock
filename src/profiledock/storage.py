@@ -95,6 +95,7 @@ def metadata_lock(
         raw_fd = None
         os.chmod(lock_path, 0o600)
         deadline = _time.monotonic() + timeout
+        poll_interval = 0.005
         while True:
             try:
                 _lock_file(lock_fd)
@@ -104,7 +105,8 @@ def metadata_lock(
                     raise MetadataLockedError(
                         f"could not acquire metadata lock within {timeout}s"
                     )
-                _time.sleep(0.01)
+                _time.sleep(poll_interval)
+                poll_interval = min(poll_interval * 1.5, 0.05)
         yield
     finally:
         if raw_fd is not None:
@@ -144,6 +146,7 @@ def _profile_root_for_metadata(path: Path) -> Path:
 
 def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
     deadline = _time.monotonic() + timeout
+    poll_interval = 0.005
     while True:
         try:
             source.replace(target)
@@ -151,7 +154,8 @@ def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> Non
         except PermissionError:
             if _time.monotonic() >= deadline:
                 raise
-            _time.sleep(0.02)
+            _time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 0.05)
 
 
 def _write_all(fd: int, payload: bytes) -> None:

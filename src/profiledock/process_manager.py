@@ -71,6 +71,7 @@ def _utc_now() -> str:
 
 def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
     deadline = time.monotonic() + timeout
+    poll_interval = 0.005
     while True:
         try:
             source.replace(target)
@@ -78,7 +79,8 @@ def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> Non
         except PermissionError:
             if time.monotonic() >= deadline:
                 raise
-            time.sleep(0.02)
+            time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 0.05)
 
 
 def _write_all(fd: int, payload: bytes) -> None:
@@ -513,6 +515,21 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
     )
 
 
+def _signal_posix_process_group(pid: int, sig: signal.Signals) -> None:
+    """Send signal to process group on POSIX if leader, otherwise fallback to process."""
+    try:
+        pgid = os.getpgid(pid)
+        if pgid == pid:
+            os.killpg(pgid, sig)
+            return
+    except (OSError, ProcessLookupError):
+        pass
+    try:
+        os.kill(pid, sig)
+    except (OSError, ProcessLookupError):
+        pass
+
+
 def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
     if process.poll() is not None:
         return
@@ -524,11 +541,14 @@ def _stop_process(process: subprocess.Popen[Any], timeout: float = 5) -> None:
             check=False,
         )
     else:
-        process.terminate()
+        _signal_posix_process_group(process.pid, signal.SIGTERM)
     try:
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        process.kill()
+        if sys.platform != "win32":
+            _signal_posix_process_group(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
         process.wait(timeout=timeout)
 
 
@@ -765,6 +785,7 @@ def start_controller(
             stderr=subprocess.PIPE,
         )
         deadline = time.monotonic() + startup_timeout
+        poll_interval = 0.02
         while time.monotonic() < deadline:
             state = _read_state(path)
             if state and _valid_state(state, initial["profile_id"]) and state.get("port"):
@@ -773,7 +794,8 @@ def start_controller(
                 return state
             if process.poll() is not None:
                 break
-            time.sleep(0.1)
+            time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 0.1)
     except OSError as exc:
         _unlink_quietly(path)
         _write_error(err, "controller_spawn_failed", str(exc), redactions=(token,))
@@ -861,15 +883,14 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                     check=False,
                 )
             else:
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    pass
+                _signal_posix_process_group(pid, signal.SIGTERM)
             deadline = time.monotonic() + timeout
+            poll_interval = 0.02
             while time.monotonic() < deadline:
                 if not _alive(pid):
                     break
-                time.sleep(0.1)
+                time.sleep(poll_interval)
+                poll_interval = min(poll_interval * 1.5, 0.1)
             if _alive(pid):
                 if sys.platform == "win32":
                     subprocess.run(
@@ -879,13 +900,12 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                         check=False,
                     )
                 else:
-                    try:
-                        os.kill(pid, signal.SIGKILL)
-                    except (OSError, ProcessLookupError):
-                        pass
+                    _signal_posix_process_group(pid, signal.SIGKILL)
                 force_deadline = time.monotonic() + min(max(timeout, 0.1), 2)
+                force_interval = 0.01
                 while time.monotonic() < force_deadline and _alive(pid):
-                    time.sleep(0.05)
+                    time.sleep(force_interval)
+                    force_interval = min(force_interval * 1.5, 0.05)
             if _alive(pid):
                 raise BrowserLaunchError("browser process did not close within the timeout")
         _unlink_quietly(path)
@@ -920,8 +940,10 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
     except OSError:
         pass
     deadline = time.monotonic() + timeout
+    poll_interval = 0.02
     while path.exists() and time.monotonic() < deadline:
-        time.sleep(0.1)
+        time.sleep(poll_interval)
+        poll_interval = min(poll_interval * 1.5, 0.1)
     if path.exists():
         if not _alive(int(state.get("controller_pid", -1))):
             _unlink_quietly(path)
@@ -942,11 +964,11 @@ def _wait_for_close(server: socket.socket, context: Any, token: str) -> None:
     while _context_alive(context):
         try:
             connection, _ = server.accept()
-        except socket.timeout:
+        except (socket.timeout, OSError):
             continue
         with connection:
-            connection.settimeout(2.0)
             try:
+                connection.settimeout(2.0)
                 command = connection.recv(_MAX_COMMAND_BYTES + 1)
             except (socket.timeout, OSError):
                 continue
