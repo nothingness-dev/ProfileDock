@@ -21,6 +21,12 @@ test = [
     "pytest>=7",
     "playwright>=1.40",
 ]
+dev = [
+    "pytest>=7",
+    "playwright>=1.40",
+    "ruff>=0.16",
+    "mypy>=1.19",
+]
 
 
 [project.scripts]
@@ -34,3 +40,53 @@ testpaths = ["tests"]
 markers = [
     "browser: end-to-end tests that launch a real Chromium or Chrome process",
 ]
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+src = ["src", "tests", "scripts"]
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes (unused imports/vars, undefined names)
+    "I",      # import sorting
+    "B",      # bugbear
+    "UP",     # pyupgrade
+    "SIM",    # simplify
+    "RUF",    # ruff-specific
+]
+ignore = [
+    # Deliberate patterns in this codebase:
+    "SIM117",  # nested with-statements around multi-resource setup read clearer apart
+    "S110",    # try-except-pass is intentional for best-effort cleanup paths
+    "SIM105",  # same best-effort cleanup pattern; contextlib.suppress would churn hot paths
+    "BLE001",  # blind except guards browser/controller teardown boundaries
+    "B008",    # typer requires function calls in parameter defaults
+    "RUF059",  # unpacked loop/control variables kept for readability
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Long f-string diagnostics and error messages exceed the limit on purpose.
+"src/profiledock/doctor.py" = ["E501"]
+"src/profiledock/migration.py" = ["E501"]
+"src/profiledock/restore.py" = ["E501"]
+"tests/*" = [
+    "B011",    # `assert False, "msg"` is the idiomatic expected-exception pattern in tests
+    "E501",
+    "RUF012",
+    "RUF013",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+files = ["src/profiledock"]
+# playwright is an optional extra; its stubs are absent in a minimal env.
+[[tool.mypy.overrides]]
+module = "playwright.*"
+ignore_missing_imports = true

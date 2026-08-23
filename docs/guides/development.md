@@ -38,6 +38,18 @@ python -m pytest -q -m browser
 
 Tests use temporary data roots and must never write into real user application-data directories. Controller tests create and terminate their own processes.
 
+### Test isolation budget
+
+The unit suite (`-m "not browser"`) targets sub-second isolation: every unit test should complete in well under 0.5 seconds of call time, keeping the full unit run around 15 seconds on developer hardware. Benchmark with:
+
+```bash
+python -m pytest -q -m "not browser" --durations=25
+```
+
+Reference numbers (Windows 11, Python 3.12): unit suite ≈14–15 s for 305 tests; median unit test <0.05 s. The only unit tests approaching the 0.5 s line are the startup-timeout process test (~0.6 s, dominated by a deliberate 0.2 s timeout plus process teardown) and a CLI round-trip test that performs 10 sequential invocations (~0.6 s total). Browser-marked tests are exempt from the budget; they launch real processes and take up to ~11 s each.
+
+If a new unit test appears above the 1 s mark in `--durations`, look for accidental sleeps, redundant metadata migrations per assertion, or filesystem work outside `tmp_path` before accepting the cost.
+
 ## Important coverage
 
 The suite covers profile lifecycle, resolver precedence, data-root platforms and precedence, metadata locking and migrations, engine selection, launch configuration, runtime protocol validation, duplicate launch detection, process identity, controller authentication, logging, doctor and repair behavior, backup and restore security, migration rollback, symlink and junction boundaries, historical format fixtures, and golden CLI contracts.
@@ -47,6 +59,18 @@ The suite covers profile lifecycle, resolver precedence, data-root platforms and
 `tests/fixtures/cli/contract-v1.json` freezes commands, arguments, options, aliases, exit codes, streams, JSON commands, engine precedence, profile resolution, data-root precedence, confirmations, non-interactive behavior, and error categories.
 
 Golden JSON outputs ensure human rendering changes cannot modify machine output accidentally. Update a golden fixture only when intentionally versioning the relevant contract and documentation.
+
+## Linting and type checking
+
+Ruff (lint and format) and mypy (strict mode) are configured in `pyproject.toml`. Both run against `src/profiledock`, `tests`, and `scripts`:
+
+```bash
+ruff check src tests scripts
+ruff format --check src tests scripts
+mypy
+```
+
+`mypy` runs in strict mode with no errors; keep it that way for new code. Ruff ignores document the codebase's deliberate patterns: best-effort try/except-pass cleanup paths, blind excepts at browser/controller teardown boundaries, and typer's call-in-default idiom. Per-file ignores cover long diagnostic strings in doctor, migration, restore, and tests.
 
 ## Project layout
 
@@ -67,6 +91,8 @@ The package keeps models, storage, profile operations, browser/process control, 
 
 ```bash
 python -m compileall -q src tests
+ruff check src tests scripts && ruff format --check src tests scripts
+mypy
 python -m pytest -q
 git diff --check
 profiledock --version
