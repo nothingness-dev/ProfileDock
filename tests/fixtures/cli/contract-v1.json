@@ -14,7 +14,7 @@
     "show": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
     "rename": {"arguments": ["profile_id", "new_name"], "options": {}},
     "set-engine": {"arguments": ["profile_id", "engine"], "options": {}},
-    "status": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
+    "status": {"arguments": ["profile_id"], "options": {"watch": ["--watch", "-w"], "interval": ["--interval", "-i"], "json_output": ["--json"]}},
     "launch": {"arguments": ["profile_id"], "options": {"tabs": ["--tabs", "-t"], "engine": ["--engine", "-e"], "browser": ["--browser", "-b"], "url": ["--url", "-u"]}},
     "close": {"arguments": ["profile_id"], "options": {}},
     "delete": {"arguments": ["profile_id"], "options": {"yes": ["--yes", "-y"]}},

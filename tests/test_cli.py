@@ -283,6 +283,7 @@ def test_show_command():
     assert "Work" in result.output
     assert "Status:" in result.output
     assert "stopped" in result.output
+    assert "Disk usage:" in result.output
     assert "Never" in result.output
 
 
@@ -413,6 +414,30 @@ def test_status_single_profile_json():
     assert data[0]["id"] == "abc123"
     assert data[0]["name"] == "Work"
     assert data[0]["status"] == "error"
+
+
+def test_status_watch_flag(tmp_path):
+    with patch("profiledock.cli.manager") as mock_manager, patch(
+        "profiledock.cli.get_status", return_value="running"
+    ), patch("time.sleep", side_effect=KeyboardInterrupt):
+        mock_manager.return_value.list_profiles.return_value = [
+            type(
+                "Profile",
+                (),
+                {"id": "abc123", "name": "Work", "data_dir": "/path/to/work"},
+            )()
+        ]
+        result = runner.invoke(app, ["status", "--watch", "--interval", "0.5"])
+    assert result.exit_code == 0
+    assert "Work" in result.output
+    assert "running" in result.output
+
+
+def test_status_watch_invalid_interval():
+    result = runner.invoke(app, ["status", "--watch", "--interval", "0"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "interval must be greater than 0" in result.stderr
+
 
 
 def test_exit_code_success():

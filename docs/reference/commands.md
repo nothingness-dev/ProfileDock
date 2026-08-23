@@ -123,8 +123,16 @@ Clears the complete launch preset and restores inherited/default launch behavior
 ## `status`
 
 ```text
-profiledock status [PROFILE] [--json]
+profiledock status [PROFILE] [--watch] [--interval SECONDS] [--json]
 ```
+
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--watch`, `-w` | Continuously poll and display live status. |
+| `--interval SECONDS`, `-i SECONDS` | Polling interval in seconds when using `--watch` (default: 1.0). |
+| `--json` | Emit versioned JSON output. |
 
 Without a selector, reports every profile. With a selector, reports one. Status values include `stopped`, `starting`, `running`, `closing`, `stale`, and `error` where applicable. JSON `data` remains an array in both forms and exposes the effective engine.
 

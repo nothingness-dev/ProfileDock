@@ -214,6 +214,35 @@ def _safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict:
 
 
 
+def _compute_profile_size(data_dir_str: str) -> Optional[int]:
+    data_dir = Path(data_dir_str)
+    if not data_dir.is_dir():
+        return None
+    total = 0
+    try:
+        for root_dir, _, filenames in os.walk(data_dir):
+            for fname in filenames:
+                try:
+                    total += (Path(root_dir) / fname).stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        return None
+    return total
+
+
+def _format_size_bytes(num_bytes: Optional[int]) -> str:
+    if num_bytes is None:
+        return "Unknown"
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    elif num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    elif num_bytes < 1024 * 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
 def _render_table(rows: List[List[str]]) -> str:
     if not rows:
         return ""
@@ -294,6 +323,7 @@ def show(
         ["Status:", status],
         ["Created at:", profile.created_at],
         ["Data directory:", profile.data_dir],
+        ["Disk usage:", _format_size_bytes(_compute_profile_size(profile.data_dir))],
         ["Last launched at:", profile.last_launched_at or "Never"],
     ]
     typer.echo(_render_table(rows))
@@ -433,9 +463,14 @@ def set_engine(
 @app.command()
 def status(
     profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name."),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Continuously poll and display live status."),
+    interval: float = typer.Option(1.0, "--interval", "-i", help="Poll interval in seconds when using --watch."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
-    try:
+    if watch and interval <= 0:
+        fail("interval must be greater than 0")
+
+    def _render_once() -> None:
         if profile_id is not None:
             profile = manager().resolve(profile_id)
             profiles = [profile]
@@ -443,37 +478,53 @@ def status(
         else:
             profiles = manager().list_profiles()
             single = False
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
-        fail_exception(exc)
-    if json_output:
-        items = []
-        for prof in profiles:
-            st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
-            items.append(
-                {
-                    "id": prof.id,
-                    "name": prof.name,
-                    "engine": resolve_engine(None, prof),
-                    "status": st,
-                }
-            )
-        emit_json("status", items)
-        return
-    if not profiles:
-        typer.echo("No profiles found.")
-        return
-    if single:
-        prof = profiles[0]
-        st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
-        eng = resolve_engine(None, prof)
-        typer.echo(f"{prof.id}\t{prof.name}\t{eng}\t{st}")
-    else:
-        table = [["ID", "NAME", "ENGINE", "STATUS"]]
-        for prof in profiles:
+
+        if json_output:
+            items = []
+            for prof in profiles:
+                st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
+                items.append(
+                    {
+                        "id": prof.id,
+                        "name": prof.name,
+                        "engine": resolve_engine(None, prof),
+                        "status": st,
+                    }
+                )
+            emit_json("status", items)
+            return
+
+        if not profiles:
+            typer.echo("No profiles found.")
+            return
+
+        if single:
+            prof = profiles[0]
             st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
             eng = resolve_engine(None, prof)
-            table.append([prof.id, prof.name, eng, st])
-        typer.echo(_render_table(table))
+            typer.echo(f"{prof.id}\t{prof.name}\t{eng}\t{st}")
+        else:
+            table = [["ID", "NAME", "ENGINE", "STATUS"]]
+            for prof in profiles:
+                st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
+                eng = resolve_engine(None, prof)
+                table.append([prof.id, prof.name, eng, st])
+            typer.echo(_render_table(table))
+
+    try:
+        if not watch:
+            _render_once()
+        else:
+            import time
+            while True:
+                if not json_output:
+                    typer.echo("\033[2J\033[H", nl=False)
+                _render_once()
+                time.sleep(interval)
+    except KeyboardInterrupt:
+        pass
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError) as exc:
+        fail_exception(exc)
 
 
 @app.command()
