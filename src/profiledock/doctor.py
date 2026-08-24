@@ -131,12 +131,44 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
             action="Restore metadata from profiles.json.bak or recreate profiles.json.",
         )
     except (MetadataCorruptedError, ValidationError, ValueError, StorageError) as exc:
+        permission_hint = _elevated_file_hint(profiles_file, exc)
+        if permission_hint is not None:
+            return DiagnosticCheck(
+                id=check_id,
+                status=STATUS_FAILED,
+                summary=f"Metadata file exists but this account cannot read it: {exc}",
+                action=permission_hint,
+            )
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_FAILED,
             summary=f"Metadata is invalid or corrupted: {exc}",
             action="Restore metadata from profiles.json.bak or run 'profiledock doctor --repair'.",
         )
+
+
+def _elevated_file_hint(path: Path, exc: Exception) -> Optional[str]:
+    """Detect files created by an elevated process that now lock out the user.
+
+    When an administrator shell runs ProfileDock, Windows assigns the created
+    files to the Administrators group; the OWNER RIGHTS ACE then excludes the
+    normal account. The signature: reading fails with Permission denied while
+    the parent directory itself remains writable.
+    """
+    message = str(exc).lower()
+    if "permission" not in message and "denied" not in message and "errno 13" not in message:
+        return None
+    try:
+        probe = path.parent / f".pd-write-probe-{os.getpid()}.tmp"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+    except OSError:
+        return None
+    return (
+        "This file was likely created by an elevated (administrator) process, so its ACL "
+        "excludes your normal account. From an ADMINISTRATOR PowerShell run: "
+        "icacls <data-root> /reset /T /C — then never run profiledock elevated again."
+    )
 
 
 def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
