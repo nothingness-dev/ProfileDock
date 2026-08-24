@@ -15,6 +15,7 @@ from .backup import (
 )
 from .cli_contract import CLI_JSON_OUTPUT_VERSION, EXIT_USER_ERROR, error_category
 from .cli_contract import EXIT_SUCCESS as EXIT_SUCCESS
+from .cli_contract import EXIT_USAGE_ERROR as EXIT_USAGE_ERROR
 from .completion import SUPPORTED_SHELLS, CompletionError
 from .completion import install as install_shell_completion
 from .completion import show as show_shell_completion
@@ -58,7 +59,11 @@ from .terminal import fail_mark, is_stdout_tty, ok_mark, warn_mark
 from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
 
-app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
+app = typer.Typer(
+    invoke_without_command=True,
+    add_completion=False,
+    help="Manage isolated persistent Chromium profiles.",
+)
 
 # add_completion=False removes Typer's installer options (replaced above) but
 # also skips registration of the runtime completion classes that answer Tab
@@ -117,6 +122,7 @@ def _show_completion_callback(ctx: typer.Context, param: Any, value: Optional[st
 
 @app.callback()
 def main(
+    context: typer.Context,
     data_root: Optional[Path] = typer.Option(
         None,
         "--data-root",
@@ -177,6 +183,28 @@ def main(
         _non_interactive.set(non_interactive or env_non_interactive in {"1", "true", "yes", "on"})
     except DataRootError as exc:
         fail_exception(exc)
+
+    if context.invoked_subcommand is None:
+        env_non_interactive = os.environ.get("PROFILEDOCK_NON_INTERACTIVE", "").strip().lower()
+        interactive_wanted = (
+            is_stdout_tty() and not non_interactive and env_non_interactive not in {"1", "true", "yes", "on"}
+        )
+        if interactive_wanted:
+            from .interactive import TEXTUAL_AVAILABLE, run_interactive
+
+            if TEXTUAL_AVAILABLE:
+                run_interactive()
+            else:
+                typer.echo(
+                    'Interactive mode requires the Textual extra: pip install "profiledock[interactive]"'
+                )
+                typer.echo()
+                typer.echo(context.get_help())
+            raise typer.Exit(EXIT_SUCCESS)
+        typer.echo("Usage: profiledock [OPTIONS] COMMAND [ARGS]...", err=True)
+        typer.echo("Try 'profiledock --help' for help.", err=True)
+        typer.echo("Error: Missing command.", err=True)
+        raise typer.Exit(EXIT_USAGE_ERROR)
 
 
 def selected_paths() -> DataPaths:
