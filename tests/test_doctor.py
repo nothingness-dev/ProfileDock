@@ -69,6 +69,26 @@ def test_check_metadata_schema_missing(tmp_path):
     assert res.status == STATUS_OK
 
 
+def test_check_metadata_schema_elevated_acl_hint(tmp_path, monkeypatch):
+    layout = paths(tmp_path)
+    profiles_file = layout.profiles_file
+    profiles_file.write_text("{}", encoding="utf-8")
+
+    real_read_text = Path.read_text
+
+    def denying_read(self, *args, **kwargs):
+        if self == profiles_file:
+            raise PermissionError(13, "Permission denied")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denying_read)
+    res = check_metadata_schema(tmp_path)
+    assert res.status == STATUS_FAILED
+    assert "cannot read it" in res.summary
+    assert "icacls" in (res.action or "")
+    assert "/reset /T /C" in (res.action or "")
+
+
 def test_check_metadata_schema_valid(tmp_path):
     layout = paths(tmp_path)
     profiles_file = layout.profiles_file
