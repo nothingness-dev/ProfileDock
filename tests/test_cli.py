@@ -49,6 +49,24 @@ def test_logs_last_must_be_positive(tmp_path):
     assert zero.exit_code == EXIT_USER_ERROR
 
 
+def test_close_on_stopped_profile_hint_is_not_circular(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "StoppedProfile"])
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "close", "StoppedProfile"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "Error [profile_active]: profile is not running" in result.output
+    assert "already stopped" in result.output
+    assert "close the profile first" not in result.output
+
+
+def test_restore_missing_archive_hint_points_at_archive_path(tmp_path):
+    missing = tmp_path / "missing.tar.gz"
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "restore", str(missing)])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "Error [not_found]" in result.output
+    assert "check the archive path" in result.output
+    assert "profiledock list" not in result.output
+
+
 def test_data_root_error_categories_follow_message(tmp_path):
     from profiledock.cli import fail_exception
     from profiledock.data_root import DataRootError

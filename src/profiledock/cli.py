@@ -858,11 +858,18 @@ def close(
     try:
         profile = manager().resolve(profile_id)
         close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
+    except ProfileRunningError as exc:
+        if "not running" in str(exc):
+            fail(
+                str(exc),
+                category="profile_active",
+                hint="the profile is already stopped; use 'profiledock status' to confirm",
+            )
+        fail_exception(exc)
     except (
         ProfileNotFoundError,
         AmbiguousProfileError,
         StorageError,
-        ProfileRunningError,
         BrowserLaunchError,
     ) as exc:
         fail_exception(exc)
@@ -1229,8 +1236,15 @@ def restore(
             data_paths=paths,
             overwrite=force,
         )
+    except InvalidArchiveError as exc:
+        if "does not exist" in str(exc):
+            fail(
+                str(exc),
+                category="not_found",
+                hint="check the archive path and try again",
+            )
+        fail_exception(exc)
     except (
-        InvalidArchiveError,
         DecompressionSecurityError,
         RestoreConflictError,
         RestoreError,
