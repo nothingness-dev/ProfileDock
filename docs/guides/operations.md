@@ -99,6 +99,16 @@ Run `profiledock doctor`. If the directory was deleted and no backup exists, `do
 
 Run `profiledock doctor --repair`. ProfileDock can recover a valid metadata backup. It will not overwrite evidence when both primary and backup are invalid.
 
+### Metadata permission denied (files created elevated)
+
+If `doctor` reports "this account cannot read it" with an `icacls` hint, the metadata files were created from an administrator terminal and their Windows ACLs exclude your normal account. Fix once from an ADMINISTRATOR PowerShell:
+
+```powershell
+icacls "$env:LOCALAPPDATA\ProfileDock" /reset /T /C
+```
+
+Then keep using ProfileDock from non-elevated terminals.
+
 ### A lock file exists
 
 `metadata/profiles.lock` is a coordination file, not proof of an active lock. ProfileDock uses an operating-system lock on the file and can reuse it safely.

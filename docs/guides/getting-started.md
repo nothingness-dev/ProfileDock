@@ -96,3 +96,13 @@ profiledock --install-completion
 ```
 
 Supports bash, zsh, fish, and PowerShell (`--install-completion <shell>` selects one explicitly). On Windows the completer is registered in the all-hosts PowerShell profile, so every host picks it up — the classic console, the VS Code integrated terminal, and ISE alike. Installation never changes your execution policy or Tab key bindings. Open a new terminal window after installing.
+
+## Optional: interactive mode
+
+Running `profiledock` with no command opens a full-screen interactive menu — pick commands with the mouse or arrow keys, fill in prompts, and see results without leaving the shell. Requires the optional Textual extra:
+
+```bash
+pip install "profiledock[interactive]"
+```
+
+Without it (or in scripts/pipes), bare `profiledock` prints the usage summary as before. Press `q` or `Esc` to exit; `--non-interactive` disables the menu entirely.

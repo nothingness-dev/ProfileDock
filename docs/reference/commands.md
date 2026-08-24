@@ -6,6 +6,8 @@
 profiledock [GLOBAL OPTIONS] COMMAND [ARGUMENTS] [OPTIONS]
 ```
 
+Running `profiledock` with no command opens an interactive full-screen menu (mouse or arrow-key selection) when stdout is a terminal, the `interactive` extra is installed (`pip install "profiledock[interactive]"`), and `--non-interactive`/`PROFILEDOCK_NON_INTERACTIVE` are not set. Otherwise it prints the usage summary with exit code 2. Press `q` or `Esc` to leave the menu.
+
 Global options must appear before the command:
 
 | Option | Meaning |
