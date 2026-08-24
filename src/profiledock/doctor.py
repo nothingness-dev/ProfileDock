@@ -9,7 +9,12 @@ from typing import Any, Optional
 
 from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value, utc_now
-from .process_manager import _system_browser_executable, get_status, is_active_for_mutation
+from .process_manager import (
+    _system_browser_executable,
+    get_status,
+    is_active_for_mutation,
+    state_file_is_unreadable,
+)
 from .storage import (
     MetadataCorruptedError,
     MetadataLockedError,
@@ -447,6 +452,11 @@ def check_stale_running_state(root: Path) -> tuple[DiagnosticCheck, list[Path]]:
     ambiguous_files: list[Path] = []
     for running_json in runtime_dir.glob("*/running.json"):
         data_dir = paths.profiles_dir / running_json.parent.name / "browser-data"
+        if state_file_is_unreadable(running_json):
+            # An unparseable state file cannot verify or protect a live process,
+            # so it is safe to clean rather than treat as ambiguous.
+            stale_files.append(running_json)
+            continue
         status = get_status(str(data_dir), clean_stale=False, runtime_dir=running_json.parent)
         if status == "error":
             ambiguous_files.append(running_json)

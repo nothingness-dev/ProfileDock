@@ -219,7 +219,9 @@ def _valid_direct_state(value: StateDict, profile_id: str) -> bool:
         return False
     pid = value["pid"]
     process_create_time = value.get("process_create_time")
-    if pid > 0 and not isinstance(process_create_time, (int, float)):
+    # None is legal on platforms without process-create-time support (macOS);
+    # identity checks degrade to PID liveness for such states.
+    if pid > 0 and process_create_time is not None and not isinstance(process_create_time, (int, float)):
         return False
     if not isinstance(value.get("started_at"), str):
         return False
@@ -453,6 +455,18 @@ def _unlink_quietly(path: Path) -> None:
         pass
 
 
+def state_file_is_unreadable(state_file: Path) -> bool:
+    """True when a running-state file exists but cannot be parsed as a JSON object.
+
+    An unparseable file cannot verify or protect a live process, so it is a safe
+    cleanup candidate; readable-but-invalid files are deliberately refused instead.
+    A missing file is not unreadable.
+    """
+    if not state_file.is_file():
+        return False
+    return not isinstance(_read_state(state_file), dict)
+
+
 def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Path] = None) -> str:
     path = state_path(data_dir, runtime_dir)
     err = error_path(data_dir, runtime_dir)
@@ -655,6 +669,10 @@ def start_direct_chrome(
     err = error_path(data_dir, runtime_dir)
     _unlink_quietly(err)
 
+    if state_file_is_unreadable(path):
+        raise ProfileRunningError(
+            "profile runtime state file is unreadable; run 'profiledock doctor --repair' to clean it up"
+        )
     if is_running(data_dir, runtime_dir=runtime_dir):
         raise ProfileRunningError("profile is already running")
 
@@ -713,15 +731,10 @@ def start_direct_chrome(
         _write_error(err, "browser_launch_failed", str(exc))
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
 
+    # Platforms without process-create-time support (e.g., macOS, where /proc
+    # does not exist) record None; identity checks then degrade to PID liveness
+    # instead of failing every launch and close.
     proc_create_time = _get_process_create_time(process.pid)
-    if proc_create_time is None:
-        try:
-            _stop_process(process)
-        finally:
-            _unlink_quietly(path)
-        message = "could not verify the launched browser process identity"
-        _write_error(err, "process_identity_unavailable", message)
-        raise BrowserLaunchError(message, "process_identity_unavailable")
     state = {
         "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
         "profile_id": initial["profile_id"],
@@ -778,6 +791,10 @@ def start_controller(
     if os.name != "nt":
         path.parent.chmod(0o700)
     _unlink_quietly(err)
+    if state_file_is_unreadable(path):
+        raise ProfileRunningError(
+            "profile runtime state file is unreadable; run 'profiledock doctor --repair' to clean it up"
+        )
     if is_running(data_dir, runtime_dir):
         raise ProfileRunningError("profile is already running")
     token = uuid4().hex
@@ -876,7 +893,10 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
     path = state_path(data_dir, runtime_dir)
     initial_state = _read_state(path)
     if path.exists() and not initial_state:
-        raise ProfileRunningError("profile running state is invalid; refusing to remove ambiguous state")
+        raise ProfileRunningError(
+            "profile running state is invalid; refusing to remove ambiguous state. "
+            "Run 'profiledock doctor --repair' to clean up unreadable state files."
+        )
     if initial_state:
         initial_state = _upgrade_legacy_state(path, initial_state, Path(data_dir).parent.name)
     if initial_state and initial_state.get("engine") == "direct":
@@ -885,13 +905,17 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                 "profile running state is invalid; refusing to signal an unverified process"
             )
         initial_pid = int(initial_state.get("pid", -1))
+        expected_create_time = initial_state.get("process_create_time")
         if initial_pid > 0 and _alive(initial_pid):
             actual_create_time = _get_process_create_time(initial_pid)
-            if actual_create_time is None:
-                raise ProfileRunningError(
-                    "profile process identity could not be verified; refusing to signal it"
-                )
-            if abs(actual_create_time - initial_state["process_create_time"]) >= 2.0:
+            # Enforce identity only when both timestamps are available; on
+            # platforms that cannot read create times, PID liveness is the
+            # strongest available check.
+            if (
+                expected_create_time is not None
+                and actual_create_time is not None
+                and abs(actual_create_time - expected_create_time) >= 2.0
+            ):
                 _unlink_quietly(path)
                 raise ProfileRunningError(
                     "profile process is not running (PID was reused by another process)"

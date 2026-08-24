@@ -22,6 +22,7 @@ from .process_manager import is_active_for_mutation
 from .storage import (
     _atomic_write,
     _backup_metadata,
+    _replace_with_retry,
     load_metadata,
     metadata_lock,
 )
@@ -47,6 +48,23 @@ class DecompressionSecurityError(RestoreError):
 
 class RestoreConflictError(RestoreError):
     pass
+
+
+def _restore_quarantines(quarantined: list[tuple[Path, Path]]) -> list[str]:
+    """Move quarantined original directories back to their canonical paths.
+
+    Contents were validated by ensure_tree_safe before quarantine, so this
+    prioritizes restoring user data over re-validation. Returns human-readable
+    descriptions of any directories that could not be restored.
+    """
+    failures: list[str] = []
+    for q_dir, final_dir in reversed(quarantined):
+        if q_dir.exists() and not final_dir.exists():
+            try:
+                _replace_with_retry(q_dir, final_dir)
+            except OSError as exc:
+                failures.append(f"could not move '{q_dir.name}' back to '{final_dir.name}': {exc}")
+    return failures
 
 
 @dataclass
@@ -455,19 +473,29 @@ def restore_backup_archive(
                     finalized_dirs.append((temp_prof_dir, target_final_prof_dir))
 
                 quarantined_existing: list[tuple[Path, Path]] = []
-                for _, final_dir in finalized_dirs:
-                    if final_dir.exists():
-                        ensure_tree_safe(final_dir, data_paths.root)
-                        q_dir = ensure_within_root(
-                            dst_profiles_dir / f".quarantine_{final_dir.name}_{uuid4().hex[:8]}",
-                            data_paths.root,
-                        )
-                        final_dir.replace(q_dir)
-                        quarantined_existing.append((q_dir, final_dir))
+                try:
+                    for _, final_dir in finalized_dirs:
+                        if final_dir.exists():
+                            ensure_tree_safe(final_dir, data_paths.root)
+                            q_dir = ensure_within_root(
+                                dst_profiles_dir / f".quarantine_{final_dir.name}_{uuid4().hex[:8]}",
+                                data_paths.root,
+                            )
+                            _replace_with_retry(final_dir, q_dir)
+                            quarantined_existing.append((q_dir, final_dir))
+                except Exception as exc:
+                    rollback_failures = _restore_quarantines(quarantined_existing)
+                    if rollback_failures:
+                        raise RestoreError(
+                            f"restore aborted while quarantining existing profiles ({exc}); "
+                            "some original data remains under hidden quarantine directories: "
+                            + "; ".join(rollback_failures)
+                        ) from exc
+                    raise
 
                 try:
                     for temp_dir, final_dir in finalized_dirs:
-                        temp_dir.replace(final_dir)
+                        _replace_with_retry(temp_dir, final_dir)
 
                     new_profiles_map = {p.id: p for p in current_doc.profiles}
                     for prof in to_restore:
@@ -528,14 +556,23 @@ def restore_backup_archive(
                         except (DataRootError, OSError):
                             pass
 
-                except Exception:
+                except Exception as exc:
+                    cleanup_failures: list[str] = []
                     for _temp_dir, final_dir in finalized_dirs:
                         if final_dir.exists():
-                            ensure_tree_safe(final_dir, data_paths.root)
-                            shutil.rmtree(final_dir, ignore_errors=False)
-                    for q_dir, final_dir in quarantined_existing:
-                        if q_dir.exists():
-                            q_dir.replace(final_dir)
+                            try:
+                                ensure_tree_safe(final_dir, data_paths.root)
+                                shutil.rmtree(final_dir, ignore_errors=False)
+                            except (DataRootError, OSError) as rmtree_exc:
+                                cleanup_failures.append(
+                                    f"could not remove partially restored '{final_dir.name}': {rmtree_exc}"
+                                )
+                    rollback_failures = _restore_quarantines(quarantined_existing)
+                    if cleanup_failures or rollback_failures:
+                        raise RestoreError(
+                            f"restore failed ({exc}); rollback issues: "
+                            + "; ".join(cleanup_failures + rollback_failures)
+                        ) from exc
                     raise
 
             finally:

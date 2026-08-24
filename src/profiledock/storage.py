@@ -21,6 +21,10 @@ class MetadataCorruptedError(StorageError):
     pass
 
 
+class MetadataUnreadableError(StorageError):
+    """The metadata file could not be read (transient I/O failure, not corruption)."""
+
+
 class MetadataLockedError(StorageError):
     pass
 
@@ -123,8 +127,10 @@ def _read_json_file(path: Path) -> Any:
     try:
         raw = path.read_text(encoding="utf-8")
         return json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise MetadataCorruptedError(f"could not read {path}: {exc}") from exc
+    except OSError as exc:
+        raise MetadataUnreadableError(f"could not read {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise MetadataCorruptedError(f"could not parse {path}: {exc}") from exc
 
 
 def _is_bare_array(data: object) -> bool:

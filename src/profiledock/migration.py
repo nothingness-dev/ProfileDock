@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
+from .backup import _is_runtime_or_log_file
 from .data_root import (
     DataPaths,
     DataRootError,
@@ -244,6 +245,11 @@ def _directory_manifest(root: Path) -> tuple[set[str], dict[str, tuple[int, str]
             if _is_link(file_path) or not file_path.is_file():
                 raise MigrationError(f"source profile contains unsafe file: {file_path}")
             relative_file = file_path.relative_to(root).as_posix()
+            # Runtime leftovers (running.json, controller.error, *.tmp) are
+            # transient state, matching backup's exclusion set; migrating them
+            # could make the destination profile appear falsely active.
+            if _is_runtime_or_log_file(relative_file):
+                continue
             files[relative_file] = (file_path.stat().st_size, _hash_file(file_path))
     return directories, files
 
@@ -476,7 +482,13 @@ def migrate_project(
                 temporary.mkdir(mode=0o700)
                 temporary_data = temporary / "browser-data"
                 temporary_directories.append((temporary, final_profile))
-                shutil.copytree(Path(profile.data_dir), temporary_data)
+                shutil.copytree(
+                    Path(profile.data_dir),
+                    temporary_data,
+                    ignore=shutil.ignore_patterns(
+                        "running.json", "controller.error", "profiles.lock", "*.tmp"
+                    ),
+                )
                 if _directory_manifest(temporary_data) != manifests[profile.id]:
                     raise MigrationError(f"verification failed after copying data for {profile.id}")
 

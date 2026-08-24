@@ -13,6 +13,7 @@ from uuid import uuid4
 from .data_root import DataPaths, DataRootError, _is_link, ensure_within_root, validate_path_component
 from .models import Profile, utc_now
 from .process_manager import is_active_for_mutation
+from .restore import MAX_MEMBER_SIZE_BYTES, MAX_TOTAL_EXTRACT_BYTES
 from .version import __version__
 
 BACKUP_ARCHIVE_SCHEMA_VERSION = 1
@@ -272,6 +273,13 @@ def create_backup_archive(
                     tarinfo = tar.gettarinfo(str(fpath), arcname=arcname)
                     if not tarinfo.isreg():
                         raise BackupError(f"profile data contains an unsafe file: {fpath}")
+                    if tarinfo.size > MAX_MEMBER_SIZE_BYTES:
+                        raise BackupError(
+                            f"file '{rel_path}' in profile '{p.name}' ({p.id}) is {tarinfo.size} bytes, "
+                            f"exceeding the per-file restore limit of {MAX_MEMBER_SIZE_BYTES} bytes; "
+                            "such an archive could never be restored. Exclude transient data with "
+                            "--exclude-cache or remove the file before backing up."
+                        )
 
                     try:
                         with fpath.open("rb") as handle:
@@ -289,6 +297,13 @@ def create_backup_archive(
                         ) from exc
                     except OSError as exc:
                         raise BackupError(f"cannot read profile data file '{fpath}': {exc}") from exc
+
+                    if grand_total_bytes + p_bytes > MAX_TOTAL_EXTRACT_BYTES:
+                        raise BackupError(
+                            f"backup exceeds the total restore limit of {MAX_TOTAL_EXTRACT_BYTES} bytes; "
+                            "an archive this large could never be restored. Exclude transient data with "
+                            "--exclude-cache or split profiles across multiple backups."
+                        )
 
                 profile_info = {
                     "id": p.id,

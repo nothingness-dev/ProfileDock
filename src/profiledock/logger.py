@@ -27,7 +27,13 @@ def sanitize_url(url: str) -> str:
         parsed = urlparse(clean)
         if not parsed.scheme or not parsed.netloc:
             return clean.split("?")[0].split("#")[0]
-        sanitized = f"{parsed.scheme}://{parsed.netloc}"
+        # Use hostname only; netloc would retain embedded credentials (user:pass@host).
+        host = parsed.hostname
+        if not host:
+            return "[url]"
+        sanitized = f"{parsed.scheme}://{host}"
+        if parsed.port:
+            sanitized += f":{parsed.port}"
         if parsed.path:
             path_parts = parsed.path.strip("/").split("/")
             if path_parts and path_parts[0]:
@@ -48,8 +54,13 @@ def redact_sensitive_data(message: str, secrets: Optional[list[str]] = None) -> 
             if secret and len(secret) > 4:
                 redacted = redacted.replace(secret, _REDACTED)
 
+    # (?<![A-Za-z]) avoids mangling words like "monkey=", while still matching
+    # snake_case secret names such as "api_key=" or "auth_token=".
     redacted = re.sub(
-        r"(token|secret|password|auth|cookie|key)=([^&\s]+)", r"\1=[redacted]", redacted, flags=re.IGNORECASE
+        r"(?<![A-Za-z])(token|secret|password|auth|cookie|key)=([^&\s]+)",
+        r"\1=[redacted]",
+        redacted,
+        flags=re.IGNORECASE,
     )
     redacted = re.sub(
         r'("token"|"secret"|"password"|"cookie"|"auth"|"key")\s*:\s*"[^"]+"',
@@ -144,7 +155,9 @@ def write_log_entry(
                     cleaned_details[k] = v
             entry["details"] = cleaned_details
 
-        payload = json.dumps(entry) + "\n"
+        # default=str keeps the entry (including ERROR events) alive when a
+        # details value is not JSON-serializable, instead of dropping it silently.
+        payload = json.dumps(entry, default=str) + "\n"
 
         target_files = [log_dir / "profiledock.log"]
         if profile_id:
