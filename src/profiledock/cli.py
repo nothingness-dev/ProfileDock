@@ -15,6 +15,9 @@ from .backup import (
 )
 from .cli_contract import CLI_JSON_OUTPUT_VERSION, EXIT_USER_ERROR, error_category
 from .cli_contract import EXIT_SUCCESS as EXIT_SUCCESS
+from .completion import SUPPORTED_SHELLS, CompletionError
+from .completion import install as install_shell_completion
+from .completion import show as show_shell_completion
 from .data_root import DataPaths, DataRootError, resolve_data_root
 from .doctor import (
     STATUS_FAILED,
@@ -55,7 +58,17 @@ from .terminal import fail_mark, is_stdout_tty, ok_mark, warn_mark
 from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
 
-app = typer.Typer(add_completion=True, help="Manage isolated persistent Chromium profiles.")
+app = typer.Typer(add_completion=False, help="Manage isolated persistent Chromium profiles.")
+
+# add_completion=False removes Typer's installer options (replaced above) but
+# also skips registration of the runtime completion classes that answer Tab
+# requests; register them here so installed completions keep working.
+try:
+    from typer._completion_classes import completion_init
+
+    completion_init()
+except ImportError:  # pragma: no cover
+    pass
 config_app = typer.Typer(help="Manage launch configuration presets for a profile.")
 app.add_typer(config_app, name="config")
 
@@ -70,6 +83,36 @@ def version_callback(value: bool) -> None:
     if value:
         typer.echo(f"profiledock {__version__}")
         raise typer.Exit()
+
+
+def _validated_shell(value: Optional[str]) -> Optional[str]:
+    requested = value.strip().lower() if value else ""
+    if requested and requested not in SUPPORTED_SHELLS:
+        raise typer.BadParameter(f"unsupported shell '{value}' (choose from {', '.join(SUPPORTED_SHELLS)})")
+    return requested or None
+
+
+def _install_completion_callback(ctx: typer.Context, param: Any, value: Optional[str]) -> None:
+    if value is None:
+        return
+    try:
+        shell, path = install_shell_completion(_validated_shell(value))
+    except CompletionError as exc:
+        fail(str(exc))
+    typer.secho(f"{shell} completion installed in {path}", fg="green")
+    typer.echo("Open a new terminal window (any host) to activate completion.")
+    raise typer.Exit()
+
+
+def _show_completion_callback(ctx: typer.Context, param: Any, value: Optional[str]) -> None:
+    if value is None:
+        return
+    try:
+        script = show_shell_completion(_validated_shell(value))
+    except CompletionError as exc:
+        fail(str(exc))
+    typer.echo(script)
+    raise typer.Exit()
 
 
 @app.callback()
@@ -101,6 +144,24 @@ def main(
         "-V",
         help="Show version and exit.",
         callback=version_callback,
+        is_eager=True,
+    ),
+    install_completion: Optional[str] = typer.Option(
+        None,
+        "--install-completion",
+        flag_value="",
+        metavar="[SHELL]",
+        help="Install shell completion (bash, zsh, fish, PowerShell).",
+        callback=_install_completion_callback,
+        is_eager=True,
+    ),
+    show_completion: Optional[str] = typer.Option(
+        None,
+        "--show-completion",
+        flag_value="",
+        metavar="[SHELL]",
+        help="Print shell completion script to stdout.",
+        callback=_show_completion_callback,
         is_eager=True,
     ),
 ) -> None:

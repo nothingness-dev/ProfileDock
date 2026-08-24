@@ -90,3 +90,7 @@ files = ["src/profiledock"]
 [[tool.mypy.overrides]]
 module = "playwright.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "shellingham.*"
+ignore_missing_imports = true

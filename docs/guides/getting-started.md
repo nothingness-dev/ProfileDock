@@ -95,4 +95,4 @@ Enable tab completion for commands and options in your shell:
 profiledock --install-completion
 ```
 
-Supports bash, zsh, fish, and PowerShell. Restart the shell after installing.
+Supports bash, zsh, fish, and PowerShell (`--install-completion <shell>` selects one explicitly). On Windows the completer is registered in the all-hosts PowerShell profile, so every host picks it up — the classic console, the VS Code integrated terminal, and ISE alike. Installation never changes your execution policy or Tab key bindings. Open a new terminal window after installing.
