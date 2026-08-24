@@ -516,6 +516,25 @@ def test_status_watch_invalid_interval():
     assert "interval must be greater than 0" in result.stderr
 
 
+def test_status_watch_rejects_json_combination(tmp_path):
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "status", "--watch", "--json"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "--watch cannot be combined with --json" in result.stderr
+
+
+def test_status_json_without_watch_emits_single_envelope(tmp_path):
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.get_status", return_value="stopped"),
+    ):
+        mock_manager.return_value.list_profiles.return_value = []
+        result = runner.invoke(app, ["--data-root", str(tmp_path), "status", "--json"])
+    assert result.exit_code == EXIT_SUCCESS
+    payload = json.loads(result.stdout)
+    assert payload["output_version"] == 1
+    assert payload["data"] == []
+
+
 def test_exit_code_success():
     with patch("profiledock.cli.manager") as mock_manager:
         mock_manager.return_value.list_profiles.return_value = []

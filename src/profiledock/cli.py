@@ -620,6 +620,10 @@ def status(
     """
     if watch and interval <= 0:
         fail("interval must be greater than 0")
+    if watch and json_output:
+        fail(
+            "--watch cannot be combined with --json; poll 'profiledock status --json' from the caller instead"
+        )
 
     def _render_once() -> None:
         if profile_id is not None:

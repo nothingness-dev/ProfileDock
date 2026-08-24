@@ -602,30 +602,33 @@ def _stop_process(process: Popen[bytes], timeout: float = 5) -> None:
         )
     else:
         _signal_posix_process_group(process.pid, signal.SIGTERM)
+    # Drain stderr while waiting so a child filling the pipe cannot deadlock
+    # the wait; communicate() also closes the pipe deterministically.
     try:
-        process.wait(timeout=timeout)
+        process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         if sys.platform != "win32":
             _signal_posix_process_group(process.pid, signal.SIGKILL)
         else:
             process.kill()
-        process.wait(timeout=timeout)
+        process.communicate(timeout=timeout)
 
 
 def _stderr_message(process: Popen[bytes], token: str) -> str:
     stderr: IO[bytes] | None = process.stderr
-    if stderr is None:
+    if stderr is None or stderr.closed:
         return ""
     try:
         output = stderr.read(_MAX_ERROR_BYTES)
-    except OSError:
+    except (OSError, ValueError):
         return ""
     return output.decode("utf-8", errors="replace").replace(token, "[redacted]").strip()
 
 
 def _close_stderr(process: Popen[bytes]) -> None:
-    if process.stderr is not None:
-        process.stderr.close()
+    stderr = process.stderr
+    if stderr is not None and not stderr.closed:
+        stderr.close()
 
 
 def start_direct_chrome(
