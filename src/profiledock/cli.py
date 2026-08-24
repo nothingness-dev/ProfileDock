@@ -165,11 +165,14 @@ def main(
         is_eager=True,
     ),
 ) -> None:
+    normalized_level = log_level.strip().upper()
+    if normalized_level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        raise typer.BadParameter("log level must be one of DEBUG, INFO, WARNING, ERROR")
     try:
         _paths.set(resolve_data_root(data_root, prepare=False))
         _paths_prepared.set(False)
         _verbose.set(verbose)
-        _log_level.set(log_level.upper())
+        _log_level.set(normalized_level)
         env_non_interactive = os.environ.get("PROFILEDOCK_NON_INTERACTIVE", "").strip().lower()
         _non_interactive.set(non_interactive or env_non_interactive in {"1", "true", "yes", "on"})
     except DataRootError as exc:
@@ -230,8 +233,13 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
         category = "profile_active"
     elif isinstance(error, BrowserLaunchError):
         category = "browser_launch_failed"
-    elif isinstance(error, (DataRootError, DecompressionSecurityError)):
+    elif isinstance(error, DecompressionSecurityError):
         category = "security_violation"
+    elif isinstance(error, DataRootError):
+        # DataRootError covers both mundane environment failures (missing
+        # LOCALAPPDATA, invalid root) and genuine path-safety refusals; let the
+        # message keywords classify it instead of blanket security_violation.
+        category = error_category(str(error))
     elif isinstance(error, (StorageError, OSError)):
         category = "storage_error"
     else:
@@ -333,7 +341,6 @@ def _render_table(rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-@app.command()
 @app.command()
 def create(
     name: str = typer.Argument(..., help="Display name for the new profile."),
@@ -927,21 +934,35 @@ def doctor(
     if (reattach_orphans or recreate_missing) and not repair:
         fail("--reattach-orphans and --recreate-missing require --repair flag")
 
-    if (
-        recreate_missing
-        and not yes
-        and not json_output
-        and not confirm("Recreate missing empty profile browser-data directories?")
-    ):
-        raise typer.Abort()
+    destructive_actions: list[tuple[str, str]] = []
+    if recreate_missing:
+        destructive_actions.append(
+            ("--recreate-missing", "Recreate missing empty profile browser-data directories?")
+        )
+    if reattach_orphans:
+        destructive_actions.append(
+            ("--reattach-orphans", "Reattach discovered orphan profile directories to metadata?")
+        )
 
-    if (
-        reattach_orphans
-        and not yes
-        and not json_output
-        and not confirm("Reattach discovered orphan profile directories to metadata?")
-    ):
-        raise typer.Abort()
+    for flag, question in destructive_actions:
+        if yes:
+            continue
+        if json_output:
+            payload = {
+                "checks": [
+                    {
+                        "id": "confirmation_required",
+                        "status": STATUS_FAILED,
+                        "summary": f"{flag} requires --yes when using --json",
+                    }
+                ],
+                "repairs": [],
+                "healthy": False,
+            }
+            emit_json("doctor", payload, err=True)
+            raise typer.Exit(EXIT_USER_ERROR)
+        if not confirm(question):
+            raise typer.Abort()
 
     repairs: list[DiagnosticCheck] = []
     if repair:
@@ -1252,6 +1273,8 @@ def show_logs(
 
     Controller tokens and known secrets are redacted before storage.
     """
+    if last is not None and last < 1:
+        fail("--last must be a positive integer")
     paths = selected_paths()
     prof_id = None
     if profile_id is not None:

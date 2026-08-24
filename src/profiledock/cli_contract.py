@@ -36,10 +36,10 @@ def error_category(message: str) -> str:
         return "profile_active"
     if "corrupt" in value or ("unsupported" in value and "version" in value):
         return "corrupted_data"
-    if "unsafe" in value or "escape" in value or "traversal" in value:
+    if "unsafe" in value or "escape" in value or "traversal" in value or "reparse point" in value:
         return "security_violation"
     if "launch" in value or ("browser" in value and "failed" in value):
         return "browser_launch_failed"
-    if "metadata" in value or "data root" in value or "could not write" in value:
+    if "metadata" in value or "data root" in value or "localappdata" in value or "could not write" in value:
         return "storage_error"
     return "invalid_input"
