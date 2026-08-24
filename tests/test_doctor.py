@@ -250,6 +250,40 @@ def test_check_stale_running_state(tmp_path):
     assert stale_files == []
 
 
+def test_check_stale_running_state_unreadable_file_is_cleanable(tmp_path):
+    layout = paths(tmp_path)
+    p1_dir = layout.runtime_dir / "p1"
+    p1_dir.mkdir(parents=True)
+    running_json = p1_dir / "running.json"
+    running_json.write_text("{broken json", encoding="utf-8")
+
+    chk, stale_files = check_stale_running_state(tmp_path)
+    assert chk.status == STATUS_WARNING
+    assert "ambiguous" not in chk.summary
+    assert stale_files == [running_json]
+
+    repairs = repair_environment(tmp_path)
+    assert any("unreadable" in r.summary or "stale" in r.summary for r in repairs)
+    assert not running_json.exists()
+
+
+def test_check_stale_running_state_future_version_file_stays_ambiguous(tmp_path):
+    layout = paths(tmp_path)
+    p1_dir = layout.runtime_dir / "p1"
+    p1_dir.mkdir(parents=True)
+    running_json = p1_dir / "running.json"
+    running_json.write_text(
+        json.dumps({"protocol_version": 999999, "engine": "direct", "profile_id": "p1"}),
+        encoding="utf-8",
+    )
+
+    chk, stale_files = check_stale_running_state(tmp_path)
+    assert chk.status == STATUS_WARNING
+    assert "ambiguous" in chk.summary
+    assert stale_files == []
+    assert running_json.exists()
+
+
 def test_check_orphan_directories(tmp_path):
     layout = paths(tmp_path)
     profiles_dir = layout.profiles_dir
@@ -498,6 +532,52 @@ def test_doctor_cli_repair():
     assert result.exit_code == EXIT_SUCCESS
     assert "Repairs performed:" in result.output
     assert "Cleaned up 1 stale running.json file(s)." in result.output
+
+
+def test_doctor_repair_json_requires_yes():
+    with patch("profiledock.cli.repair_environment") as mock_repair:
+        result = runner.invoke(app, ["doctor", "--repair", "--recreate-missing", "--json"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert mock_repair.called is False
+    stderr = result.stderr if result.stderr else ""
+    data = json.loads(stderr)
+    assert data["command"] == "doctor"
+    assert data["data"]["healthy"] is False
+    assert data["data"]["repairs"] == []
+    check = data["data"]["checks"][0]
+    assert check["id"] == "confirmation_required"
+    assert check["status"] == "failed"
+    assert "--recreate-missing requires --yes" in check["summary"]
+
+
+def test_doctor_reattach_json_requires_yes():
+    with patch("profiledock.cli.repair_environment") as mock_repair:
+        result = runner.invoke(app, ["doctor", "--repair", "--reattach-orphans", "--json"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert mock_repair.called is False
+    data = json.loads(result.stderr)
+    assert data["data"]["healthy"] is False
+    assert "--reattach-orphans requires --yes" in data["data"]["checks"][0]["summary"]
+
+
+def test_doctor_destructive_json_with_yes_runs_repairs():
+    with (
+        patch("profiledock.cli.repair_environment") as mock_repair,
+        patch("profiledock.cli.run_diagnostics") as mock_diag,
+    ):
+        mock_repair.return_value = []
+        mock_diag.return_value = [DiagnosticCheck("python_version", STATUS_OK, "ok")]
+        result = runner.invoke(app, ["doctor", "--repair", "--recreate-missing", "--json", "--yes"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert mock_repair.called is True
+
+
+def test_doctor_destructive_declined_aborts():
+    with patch("profiledock.cli.repair_environment") as mock_repair:
+        result = runner.invoke(app, ["doctor", "--repair", "--recreate-missing"], input="n\n")
+    assert result.exit_code == EXIT_USER_ERROR
+    assert mock_repair.called is False
+    assert "Recreate missing" in result.output
 
 
 def test_repair_reattach_orphans(tmp_path):

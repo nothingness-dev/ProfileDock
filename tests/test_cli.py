@@ -2,6 +2,8 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from profiledock.cli import EXIT_SUCCESS, EXIT_USER_ERROR, app, resolve_engine
@@ -25,6 +27,59 @@ def test_version_flag():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert __version__ in result.output
+
+
+def test_invalid_log_level_fails_with_usage_error():
+    from profiledock.cli_contract import EXIT_USAGE_ERROR
+
+    result = runner.invoke(app, ["--log-level", "BOGUS", "list"])
+    assert result.exit_code == EXIT_USAGE_ERROR
+    assert "DEBUG, INFO, WARNING, ERROR" in result.output
+
+    ok = runner.invoke(app, ["--data-root", "unused", "--log-level", "warning", "--help"])
+    assert ok.exit_code == 0
+
+
+def test_logs_last_must_be_positive(tmp_path):
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "logs", "--last", "-5"])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "--last must be a positive integer" in result.output
+
+    zero = runner.invoke(app, ["--data-root", str(tmp_path), "logs", "--last", "0"])
+    assert zero.exit_code == EXIT_USER_ERROR
+
+
+def test_data_root_error_categories_follow_message(tmp_path):
+    from profiledock.cli import fail_exception
+    from profiledock.data_root import DataRootError
+
+    with pytest.raises(typer.Exit) as exc_info:
+        try:
+            raise DataRootError("LOCALAPPDATA is not set")
+        except DataRootError as error:
+            fail_exception(error)
+    assert exc_info.value.exit_code == 1
+
+    import contextlib
+    import io as io_module
+
+    stderr = io_module.StringIO()
+    with pytest.raises(typer.Exit):
+        with contextlib.redirect_stderr(stderr):
+            try:
+                raise DataRootError("path traversal is not allowed: /etc")
+            except DataRootError as error:
+                fail_exception(error)
+    assert "[security_violation]" in stderr.getvalue()
+
+    stderr = io_module.StringIO()
+    with pytest.raises(typer.Exit):
+        with contextlib.redirect_stderr(stderr):
+            try:
+                raise DataRootError("data root must be a real directory")
+            except DataRootError as error:
+                fail_exception(error)
+    assert "[storage_error]" in stderr.getvalue()
 
 
 def test_version_short_flag():

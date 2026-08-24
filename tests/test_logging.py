@@ -33,6 +33,12 @@ def test_sanitize_url():
     assert sanitize_url("") == ""
 
 
+def test_sanitize_url_strips_embedded_credentials():
+    assert sanitize_url("https://admin:hunter2@example.com/dashboard") == "https://example.com/dashboard"
+    assert sanitize_url("http://user@example.com/path/deep") == "http://example.com/path/..."
+    assert "hunter2" not in sanitize_url("ftp://bob:letmein@files.example.com/drop")
+
+
 def test_redact_sensitive_data():
     raw = 'user signed in with token=abc123secret and auth="bearer_token_12345"'
     redacted = redact_sensitive_data(raw, secrets=["abc123secret"])
@@ -41,6 +47,33 @@ def test_redact_sensitive_data():
 
     bearer_raw = "Authorization: Bearer secret_access_token_xyz"
     assert "secret_access_token_xyz" not in redact_sensitive_data(bearer_raw)
+
+
+def test_redact_sensitive_data_requires_word_boundary():
+    assert redact_sensitive_data("monkey=abc donkey=xyz") == "monkey=abc donkey=xyz"
+    assert redact_sensitive_data("api_key=supersecret") == "api_key=[redacted]"
+    assert "shh" not in redact_sensitive_data("auth_token=shh password=shh")
+    assert "[redacted]" in redact_sensitive_data("token=abc")
+
+
+def test_write_log_entry_survives_unserializable_details(tmp_path):
+    log_dir = tmp_path / "logs"
+
+    class NotSerializable:
+        pass
+
+    write_log_entry(
+        log_dir=log_dir,
+        level="ERROR",
+        event="crash_event",
+        profile_id="p1",
+        details={"context": {"nested": NotSerializable()}, "note": "kept"},
+    )
+
+    logs = read_profile_logs(log_dir, profile_id="p1")
+    assert len(logs) == 1
+    assert logs[0]["event"] == "crash_event"
+    assert logs[0]["level"] == "ERROR"
 
 
 def test_write_and_read_structured_logs(tmp_path):

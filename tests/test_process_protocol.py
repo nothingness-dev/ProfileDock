@@ -43,6 +43,36 @@ def test_close_preserves_malformed_runtime_state(tmp_path):
     assert path.read_text(encoding="utf-8") == "not-json"
 
 
+def test_start_direct_chrome_reports_unreadable_state_with_repair_hint(tmp_path):
+    from profiledock.process_manager import start_direct_chrome
+
+    data_dir = tmp_path / "profile-b" / "browser-data"
+    data_dir.mkdir(parents=True)
+    path = state_path(str(data_dir))
+    path.write_text("{broken json", encoding="utf-8")
+    executable = tmp_path / "chrome.exe"
+    executable.write_text("dummy", encoding="utf-8")
+
+    with pytest.raises(ProfileRunningError, match="doctor --repair"):
+        start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
+    assert path.exists()
+
+
+def test_start_controller_reports_unreadable_state_with_repair_hint(tmp_path):
+    from profiledock.process_manager import start_controller
+
+    data_dir = tmp_path / "profile-c" / "browser-data"
+    data_dir.mkdir(parents=True)
+    runtime = tmp_path / "runtime" / "profile-c"
+    path = state_path(str(data_dir), runtime)
+    path.parent.mkdir(parents=True)
+    path.write_text("]garbage[", encoding="utf-8")
+
+    with pytest.raises(ProfileRunningError, match="doctor --repair"):
+        start_controller(str(data_dir), tabs=1, runtime_dir=runtime)
+    assert path.exists()
+
+
 def test_close_preserves_unsupported_future_runtime_state(tmp_path):
     data_dir = tmp_path / "profile-a" / "browser-data"
     data_dir.mkdir(parents=True)
@@ -532,23 +562,65 @@ def test_direct_launch_state_failure_stops_browser(tmp_path):
     assert not (data_dir.parent / "running.json").exists()
 
 
-def test_direct_launch_stops_browser_when_identity_cannot_be_verified(tmp_path):
-    from profiledock.process_manager import BrowserLaunchError, start_direct_chrome
+def test_direct_launch_survives_unavailable_process_identity(tmp_path):
+    """Platforms without create-time support (macOS) must still launch and close."""
+    from profiledock.process_manager import get_status, start_direct_chrome
 
     data_dir = tmp_path / "profile-unverified" / "browser-data"
     data_dir.mkdir(parents=True)
     executable = tmp_path / "chrome.exe"
     executable.write_text("browser", encoding="utf-8")
     process = type("Process", (), {"pid": 12345})()
+
+    signaled = {"done": False}
+
+    def fake_run(*args, **kwargs):
+        signaled["done"] = True
+        return type("Completed", (), {"returncode": 0})()
+
+    def fake_alive(pid):
+        # Alive through launch + identity checks, then "exits" once signaled.
+        return not signaled["done"]
+
     with (
         patch("profiledock.process_manager.subprocess.Popen", return_value=process),
         patch("profiledock.process_manager._get_process_create_time", return_value=None),
         patch("profiledock.process_manager._stop_process") as stop_process,
+        patch("profiledock.process_manager.subprocess.run", side_effect=fake_run),
+        patch("profiledock.process_manager._alive", side_effect=fake_alive),
     ):
-        with pytest.raises(BrowserLaunchError, match="verify the launched browser"):
-            start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
-    stop_process.assert_called_once_with(process)
-    assert not state_path(str(data_dir)).exists()
+        state = start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
+        assert state["pid"] == 12345
+        assert state["process_create_time"] is None
+        stop_process.assert_not_called()
+
+        assert get_status(str(data_dir)) == "running"
+
+        # Close must not refuse merely because create times are unavailable.
+        close_controller(str(data_dir))
+        assert not state_path(str(data_dir)).exists()
+
+
+def test_direct_close_still_detects_pid_reuse_with_matching_platform(tmp_path):
+    from profiledock.process_manager import start_direct_chrome
+
+    data_dir = tmp_path / "profile-reuse" / "browser-data"
+    data_dir.mkdir(parents=True)
+    executable = tmp_path / "chrome.exe"
+    executable.write_text("browser", encoding="utf-8")
+    process = type("Process", (), {"pid": 12345})()
+    with (
+        patch("profiledock.process_manager.subprocess.Popen", return_value=process),
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+    ):
+        start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
+
+    with (
+        patch("profiledock.process_manager._alive", return_value=True),
+        patch("profiledock.process_manager._get_process_create_time", return_value=99999.0),
+    ):
+        with pytest.raises(ProfileRunningError, match="PID was reused"):
+            close_controller(str(data_dir))
 
 
 def test_direct_launch_maps_urls_and_window_size(tmp_path):

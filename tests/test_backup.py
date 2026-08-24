@@ -267,3 +267,56 @@ def test_backup_parallel_scan_multiple_subdirectories(tmp_path):
             for file_idx in range(3):
                 expected = f"profiles/p1/browser-data/subfolder_{branch_idx}/item_{file_idx}.txt"
                 assert expected in names
+
+
+def test_backup_rejects_file_exceeding_restore_member_limit(tmp_path):
+    import profiledock.backup as backup_module
+
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "huge_blob").write_text("x" * 1024, encoding="utf-8")
+
+    profile = Profile(
+        id="p1",
+        name="BigProfile",
+        created_at="2026-01-01T00:00:00+00:00",
+        data_dir=str(p_data),
+        engine="direct",
+    )
+
+    out_archive = tmp_path / "backup_limit.tar.gz"
+    with patch.object(backup_module, "MAX_MEMBER_SIZE_BYTES", 16):
+        with pytest.raises(BackupError, match="per-file restore limit"):
+            create_backup_archive([profile], paths, out_archive)
+
+    assert not out_archive.exists()
+    leftovers = list(tmp_path.glob(".backup_tmp_*"))
+    assert leftovers == []
+
+
+def test_backup_rejects_total_exceeding_restore_total_limit(tmp_path):
+    import profiledock.backup as backup_module
+
+    paths = make_paths(tmp_path)
+    profiles = []
+    for pid in ("p1", "p2"):
+        p_data = paths.profiles_dir / pid / "browser-data"
+        p_data.mkdir(parents=True)
+        (p_data / f"{pid}.blob").write_text("y" * 64, encoding="utf-8")
+        profiles.append(
+            Profile(
+                id=pid,
+                name=pid.upper(),
+                created_at="2026-01-01T00:00:00+00:00",
+                data_dir=str(p_data),
+                engine="direct",
+            )
+        )
+
+    out_archive = tmp_path / "backup_total.tar.gz"
+    with patch.object(backup_module, "MAX_TOTAL_EXTRACT_BYTES", 100):
+        with pytest.raises(BackupError, match="total restore limit"):
+            create_backup_archive(profiles, paths, out_archive)
+
+    assert not out_archive.exists()

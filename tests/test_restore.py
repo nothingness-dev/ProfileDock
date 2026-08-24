@@ -395,3 +395,62 @@ def test_cli_restore_command_and_json(tmp_path):
     assert data["total_restored"] == 1
     assert data["restored"][0]["name"] == "Work"
     assert data["restored"][0]["engine"] == "direct"
+
+
+def test_restore_quarantine_failure_rolls_back_existing_profiles(tmp_path):
+    src_paths = make_paths(tmp_path / "src")
+    archive_profiles = []
+    for pid in ("p1", "p2"):
+        data = src_paths.profiles_dir / pid / "browser-data"
+        data.mkdir(parents=True)
+        (data / f"{pid}.txt").write_text(f"archive_{pid}", encoding="utf-8")
+        archive_profiles.append(
+            Profile(pid, f"Incoming{pid.upper()}", "2026-01-01T00:00:00+00:00", str(data), engine="direct")
+        )
+    archive_file = tmp_path / "backup.tar.gz"
+    create_backup_archive(archive_profiles, src_paths, archive_file)
+
+    dst_paths = make_paths(tmp_path / "dst")
+    existing_profiles = []
+    for pid in ("p1", "p2"):
+        data = dst_paths.profiles_dir / pid / "browser-data"
+        data.mkdir(parents=True)
+        (data / f"{pid}.txt").write_text(f"original_{pid}", encoding="utf-8")
+        existing_profiles.append(
+            Profile(
+                pid, f"Existing{pid.upper()}", "2026-01-02T00:00:00+00:00", str(data), engine="playwright"
+            )
+        )
+    save_metadata(
+        MetadataDocument(schema_version=1, profiles=existing_profiles),
+        dst_paths.profiles_file,
+        dst_paths.profiles_dir,
+    )
+
+    real_replace = Path.replace
+    calls = {"count": 0}
+
+    def flaky_replace(source, target, timeout=2.0):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise PermissionError("simulated AV lock")
+        return real_replace(source, target)
+
+    with patch("profiledock.restore._replace_with_retry", side_effect=flaky_replace):
+        with pytest.raises(PermissionError, match="simulated AV lock"):
+            restore_backup_archive(archive_file, dst_paths, overwrite=True)
+
+    # 1: quarantine p1 (ok), 2: quarantine p2 (fails), 3: rollback of p1's quarantine
+    assert calls["count"] == 3
+    assert (dst_paths.profiles_dir / "p1" / "browser-data" / "p1.txt").read_text(
+        encoding="utf-8"
+    ) == "original_p1"
+    assert (dst_paths.profiles_dir / "p2" / "browser-data" / "p2.txt").read_text(
+        encoding="utf-8"
+    ) == "original_p2"
+    leftovers = [p.name for p in dst_paths.profiles_dir.iterdir() if p.name.startswith(".quarantine_")]
+    assert leftovers == []
+
+    loaded = load_metadata(dst_paths.profiles_file)
+    assert [p.name for p in loaded.profiles] == ["ExistingP1", "ExistingP2"]
+    assert all(p.engine == "playwright" for p in loaded.profiles)

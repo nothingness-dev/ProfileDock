@@ -966,3 +966,30 @@ def test_migrated_profile_launches_with_persistent_browser_state(tmp_path):
     except playwright.Error as exc:
         pytest.skip(f"no supported browser found: {exc}")
     assert any(cookie["name"] == "migrated-session" and cookie["value"] == "preserved" for cookie in cookies)
+
+
+def test_migrate_excludes_runtime_state_files(tmp_path):
+    src_root = tmp_path / "source"
+    src_root.mkdir()
+    _, data_dir = make_source(src_root)
+    # Crash leftovers that must not travel to the destination.
+    (data_dir / "running.json").write_text('{"pid": 123}', encoding="utf-8")
+    (data_dir / "controller.error").write_text("{}", encoding="utf-8")
+    (data_dir / "scratch.tmp").write_text("temp", encoding="utf-8")
+
+    destination_paths = make_paths(tmp_path / "destination")
+    report = migrate_project(
+        source_root=src_root,
+        destination_paths=destination_paths,
+        remove_source=False,
+    )
+
+    assert report.migrated[0].id == "p1"
+    migrated_data = destination_paths.profiles_dir / "p1" / "browser-data"
+    assert (migrated_data / "state.txt").read_text(encoding="utf-8") == "payload"
+    assert not (migrated_data / "running.json").exists()
+    assert not (migrated_data / "controller.error").exists()
+    assert not (migrated_data / "scratch.tmp").exists()
+
+    loaded = load_metadata(destination_paths.profiles_file)
+    assert len(loaded.profiles) == 1

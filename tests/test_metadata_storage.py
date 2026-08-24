@@ -11,6 +11,7 @@ import pytest
 from profiledock.models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from profiledock.storage import (
     MetadataCorruptedError,
+    MetadataUnreadableError,
     StorageError,
     _atomic_write,
     _write_all,
@@ -265,6 +266,59 @@ class TestCorruptedPrimaryWithValidBackup:
         metadata_path.write_text("corrupted", encoding="utf-8")
         with pytest.raises(MetadataCorruptedError):
             load_metadata_with_recovery(metadata_path, backup_path)
+
+
+class TestTransientReadErrors:
+    def test_transient_read_error_does_not_fall_back_to_backup(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        profile = _create_profile("abc123", "Test", str(profiles_dir / "abc123" / "browser-data"))
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[]),
+            metadata_path,
+            profiles_dir,
+        )
+        doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
+        save_metadata(doc, metadata_path, profiles_dir)
+
+        real_read_text = Path.read_text
+
+        def locked_read(path_self, *args, **kwargs):
+            if path_self == metadata_path:
+                raise OSError("simulated AV lock")
+            return real_read_text(path_self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=locked_read):
+            with pytest.raises(MetadataUnreadableError):
+                load_metadata_with_recovery(metadata_path)
+
+    def test_corrupt_primary_still_recovers_from_valid_backup(
+        self, temp_dir: Path, metadata_path: Path, profiles_dir: Path
+    ) -> None:
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        profile = _create_profile("abc123", "Test", str(profiles_dir / "abc123" / "browser-data"))
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[]),
+            metadata_path,
+            profiles_dir,
+        )
+        save_metadata(
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile]),
+            metadata_path,
+            profiles_dir,
+        )
+        metadata_path.write_text("{not valid json", encoding="utf-8")
+        recovered = load_metadata_with_recovery(metadata_path)
+        assert len(recovered.profiles) == 0
+
+    def test_load_metadata_raises_unreadable_on_oserror(self, tmp_path: Path) -> None:
+        target = tmp_path / "metadata" / "profiles.json"
+        target.parent.mkdir(parents=True)
+        target.write_text("{}", encoding="utf-8")
+        with patch.object(Path, "read_text", autospec=True, side_effect=OSError("disk error")):
+            with pytest.raises(MetadataUnreadableError):
+                load_metadata(target)
 
 
 class TestConcurrentMutations:
