@@ -12,7 +12,7 @@ Global options must appear before the command:
 |---|---|
 | `--data-root PATH` | Override the application-data root for this command. |
 | `--verbose`, `-v` | Enable verbose and trace logging behavior. |
-| `--log-level LEVEL` | Set the log threshold: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. |
+| `--log-level LEVEL` | Set the log threshold: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. Invalid values fail with a usage error. |
 | `--non-interactive` | Prohibit prompts and fail when required input is missing. |
 | `--install-completion [SHELL]` | Install shell completion (bash, zsh, fish, PowerShell). |
 | `--show-completion [SHELL]` | Print shell completion script to stdout. |
@@ -187,7 +187,7 @@ Options:
 | `--yes`, `-y` | Skip repair confirmation where supported. |
 | `--json` | Emit a versioned diagnostic report. |
 
-Checks Python, storage, metadata, browser availability, runtime state, directories, orphan data, and version consistency. Repairs include stale-state cleanup, temporary-operation cleanup, valid metadata recovery, legacy metadata migration, and explicitly requested directory repairs. Active or ambiguous profile state blocks unsafe mutation.
+Checks Python, storage, metadata, browser availability, runtime state, directories, orphan data, and version consistency. Repairs include stale-state cleanup (including unreadable running-state files), temporary-operation cleanup, valid metadata recovery, legacy metadata migration, and explicitly requested directory repairs. Active or ambiguous profile state blocks unsafe mutation. Requesting `--recreate-missing` or `--reattach-orphans` with `--json` without `--yes` fails on stderr instead of prompting; supply `--yes` for automated runs.
 
 ## `migrate`
 
@@ -233,7 +233,7 @@ Validates archive type, paths, member count, expanded size, manifest schema, IDs
 profiledock logs [PROFILE] [--last N] [--json]
 ```
 
-Reads structured local logs, optionally filtered by resolved profile ID. `--last`/`-n` limits the newest entries. Sensitive controller tokens and known secrets are redacted before logging.
+Reads structured local logs, optionally filtered by resolved profile ID. `--last`/`-n` limits the newest entries and must be a positive integer. Sensitive controller tokens and known secrets are redacted before logging.
 
 ## Exit codes, streams, and errors
 
