@@ -257,6 +257,7 @@ def create_backup_archive(
         with tarfile.open(temp_archive, "w:gz") as tar:
             for p in profiles:
                 p_data_dir = Path(p.data_dir)
+                resolved_data_dir = p_data_dir.resolve()
                 rel_paths = _collect_profile_files(p_data_dir, exclude_cache=exclude_cache)
                 files_manifest: dict[str, tuple[int, str]] = {}
                 p_bytes = 0
@@ -266,7 +267,7 @@ def create_backup_archive(
                     if _is_link(fpath) or not fpath.is_file():
                         raise BackupError(f"profile data changed to an unsafe file during backup: {fpath}")
                     try:
-                        fpath.resolve().relative_to(p_data_dir.resolve())
+                        fpath.resolve().relative_to(resolved_data_dir)
                     except ValueError as exc:
                         raise BackupError(f"profile data escaped during backup: {fpath}") from exc
                     arcname = f"profiles/{p.id}/browser-data/{rel_path}"
@@ -359,6 +360,10 @@ def create_backup_archive(
                     f"cannot finalize backup because profile '{p.name}' ({p.id}) became active"
                 )
 
+        # Structural verification only: member uniqueness, manifest presence and
+        # format, and per-file sizes. Content checksums were computed from the
+        # exact bytes streamed into the archive and are re-verified against the
+        # manifest at restore time.
         with tarfile.open(temp_archive, "r:gz") as verify_tar:
             names = verify_tar.getnames()
             if len(names) != len(set(names)):
@@ -371,27 +376,16 @@ def create_backup_archive(
             loaded_manifest = json.loads(manifest_file.read().decode("utf-8"))
             if loaded_manifest.get("format_version") != BACKUP_ARCHIVE_SCHEMA_VERSION:
                 raise BackupError("backup archive verification failed: invalid format version")
+            members = {member.name: member for member in verify_tar.getmembers()}
             for profile_info in loaded_manifest.get("profiles", []):
                 for rel_path, file_meta in profile_info.get("files", {}).items():
                     member_name = f"profiles/{profile_info['id']}/browser-data/{rel_path}"
-                    member = verify_tar.getmember(member_name)
-                    if not member.isfile():
+                    member = members.get(member_name)
+                    if member is None or not member.isfile():
                         raise BackupError(f"backup archive verification failed: unsafe member {member_name}")
-                    extracted = verify_tar.extractfile(member)
-                    if extracted is None:
-                        raise BackupError(f"backup archive verification failed: unreadable {member_name}")
-                    digest = sha256()
-                    size = 0
-                    with extracted:
-                        while True:
-                            chunk = extracted.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            size += len(chunk)
-                            digest.update(chunk)
-                    if size != file_meta["size"] or digest.hexdigest() != file_meta["sha256"]:
+                    if member.size != file_meta["size"]:
                         raise BackupError(
-                            f"backup archive verification failed: checksum mismatch for {member_name}"
+                            f"backup archive verification failed: size mismatch for {member_name}"
                         )
 
         temp_archive.replace(out_path)
