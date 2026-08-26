@@ -22,7 +22,7 @@ from .storage import (
     set_engine_atomic,
     set_launch_config_atomic,
 )
-from .validation import validate_launch_config
+from .validation import validate_engine, validate_launch_config
 
 
 class ProfileNotFoundError(Exception):
@@ -87,8 +87,7 @@ class ProfileManager:
         name = name.strip()
         if not name:
             raise ValueError("profile name cannot be empty")
-        if engine is not None and engine not in {"direct", "playwright"}:
-            raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
+        validate_engine(engine)
         profile_id = ""
         profile_dir = self.profiles_dir
         for _ in range(16):
@@ -166,8 +165,7 @@ class ProfileManager:
         return self._updated_profile(doc, profile.id)
 
     def set_engine(self, identifier: str, engine: Optional[str]) -> Profile:
-        if engine is not None and engine not in {"direct", "playwright"}:
-            raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
+        validate_engine(engine)
         profile = self.resolve(identifier)
         doc = set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
         return self._updated_profile(doc, profile.id)

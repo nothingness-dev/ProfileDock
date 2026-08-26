@@ -61,6 +61,15 @@ def validate_browser(browser: str, engine: str, require_executable: bool = False
         raise ValidationError(f"unsupported Playwright browser channel '{browser}'")
 
 
+VALID_ENGINES = frozenset({"direct", "playwright"})
+
+
+def validate_engine(engine: Optional[str]) -> Optional[str]:
+    if engine is not None and engine not in VALID_ENGINES:
+        raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
+    return engine
+
+
 def validate_launch_config(
     config: LaunchConfig,
     profile_engine: Optional[str] = None,
