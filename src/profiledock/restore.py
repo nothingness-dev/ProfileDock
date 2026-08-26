@@ -39,7 +39,9 @@ class RestoreError(Exception):
 
 
 class InvalidArchiveError(RestoreError):
-    pass
+    def __init__(self, message: str, category: str = "invalid_archive") -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class DecompressionSecurityError(RestoreError):
@@ -247,7 +249,7 @@ def restore_backup_archive(
 ) -> RestoreReport:
     archive = Path(archive_path).resolve()
     if not archive.exists() or not archive.is_file():
-        raise InvalidArchiveError(f"backup archive file does not exist: {archive}")
+        raise InvalidArchiveError(f"backup archive file does not exist: {archive}", category="not_found")
 
     try:
         tar = tarfile.open(archive, "r:gz")  # noqa: SIM115 - closed by the `with tar` below

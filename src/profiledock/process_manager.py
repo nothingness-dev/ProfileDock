@@ -69,7 +69,9 @@ _PLAYWRIGHT_STATE_FIELDS = frozenset(
 
 
 class ProfileRunningError(Exception):
-    pass
+    def __init__(self, message: str, stopped: bool = False) -> None:
+        super().__init__(message)
+        self.stopped = stopped
 
 
 class BrowserLaunchError(Exception):
@@ -932,13 +934,13 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
             ):
                 _unlink_quietly(path)
                 raise ProfileRunningError(
-                    "profile process is not running (PID was reused by another process)"
+                    "profile process is not running (PID was reused by another process)", stopped=True
                 )
     if not is_running(data_dir, runtime_dir):
-        raise ProfileRunningError("profile is not running")
+        raise ProfileRunningError("profile is not running", stopped=True)
     state = _read_state(path)
     if not state:
-        raise ProfileRunningError("profile is not running")
+        raise ProfileRunningError("profile is not running", stopped=True)
 
     if state.get("engine") == "direct":
         state["closing"] = True
@@ -1025,10 +1027,10 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
     if path.exists():
         if not _alive(int(state.get("controller_pid", -1))):
             _unlink_quietly(path)
-            raise ProfileRunningError("profile is not running")
+            raise ProfileRunningError("profile is not running", stopped=True)
         raise BrowserLaunchError("profile did not close within the timeout")
     if not close_sent:
-        raise ProfileRunningError("profile is not running")
+        raise ProfileRunningError("profile is not running", stopped=True)
 
 
 def _context_alive(context: "BrowserContext") -> bool:

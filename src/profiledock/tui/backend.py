@@ -620,7 +620,7 @@ def _close(manager: ProfileManager, values: dict[str, object]) -> Text:
     try:
         close_controller(profile.data_dir, runtime_dir=manager.runtime_path(profile.id))
     except ProfileRunningError as exc:
-        if "not running" in str(exc):
+        if getattr(exc, "stopped", False):
             return Text(f"'{profile.name}' is not running.", style="yellow")
         raise
     return Text(f"Closed '{profile.name}'.", style="green")
@@ -719,7 +719,7 @@ def _restore(paths: DataPaths, values: dict[str, object]) -> Text:
             overwrite=bool(values.get("force")),
         )
     except Exception as exc:
-        category = "not_found" if "does not exist" in str(exc) else error_category(str(exc))
+        category = getattr(exc, "category", None) or error_category(str(exc))
         raise BackendError(str(exc), category) from exc
     body = Text("Restore completed from archive: ", style="green")
     body.append(str(report.archive_path), style="bold")

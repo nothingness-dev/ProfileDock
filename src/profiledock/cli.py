@@ -852,7 +852,7 @@ def close(
         profile = manager().resolve(profile_id)
         close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
     except ProfileRunningError as exc:
-        if "not running" in str(exc):
+        if exc.stopped:
             fail(
                 str(exc),
                 category="profile_active",
@@ -1249,7 +1249,7 @@ def restore(
             overwrite=force,
         )
     except InvalidArchiveError as exc:
-        if "does not exist" in str(exc):
+        if getattr(exc, "category", None) == "not_found":
             fail(
                 str(exc),
                 category="not_found",
