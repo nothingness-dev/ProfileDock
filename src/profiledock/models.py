@@ -65,7 +65,6 @@ def migrate_metadata_value(value: Any) -> dict[str, Any]:
             profile["launch_config"] = migrate_launch_config(profile["launch_config"])
         profiles.append(profile)
     migrated = {"schema_version": METADATA_SCHEMA_VERSION, "profiles": profiles}
-    MetadataDocument.from_dict(migrated)
     return migrated
 
 
