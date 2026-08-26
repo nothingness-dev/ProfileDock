@@ -2,6 +2,7 @@
 annotated-types==0.7.0
 click==8.1.8
 colorama==0.4.6
+execnet==2.1.2
 greenlet==3.1.1
 iniconfig==2.0.0
 librt==0.15.0
@@ -20,6 +21,9 @@ pyee==12.0.0
 Pygments==2.19.1
 pytest==8.3.4
 pytest-asyncio==1.4.0
+pytest-forked==1.7.5
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
 rich==13.9.4
 ruff==0.16.4
 shellingham==1.5.4

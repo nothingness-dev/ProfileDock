@@ -21,12 +21,15 @@ interactive = ["textual>=1.0"]
 test = [
     "pytest>=7",
     "pytest-asyncio>=1.0",
+    "pytest-timeout>=2.3",
     "playwright>=1.40",
     "textual>=1.0",
 ]
 dev = [
     "pytest>=7",
     "pytest-asyncio>=1.0",
+    "pytest-timeout>=2.3",
+    "pytest-xdist>=3.5",
     "playwright>=1.40",
     "textual>=1.0",
     "ruff>=0.16",
@@ -42,6 +45,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+timeout = 120
 markers = [
     "browser: end-to-end tests that launch a real Chromium or Chrome process",
 ]
