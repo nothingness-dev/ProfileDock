@@ -120,14 +120,18 @@ def ensure_tree_safe(target: Path, root: Path) -> Path:
         return resolved
     if not resolved.is_dir() or _is_link(resolved):
         raise DataRootError(f"unsafe directory target: {target}")
+    root_absolute = Path(root).expanduser().absolute()
+    resolved_root = _get_long_path(root_absolute.resolve(strict=False))
     for current, directories, files in os.walk(resolved, followlinks=False):
         current_path = Path(current)
-        ensure_within_root(current_path, root)
         for name in directories + files:
             child = current_path / name
             if _is_link(child):
                 raise DataRootError(f"directory tree contains a link or reparse point: {child}")
-            ensure_within_root(child, root)
+        try:
+            _get_long_path(current_path.resolve(strict=False)).relative_to(resolved_root)
+        except ValueError as exc:
+            raise DataRootError(f"path escapes configured data root: {current_path}") from exc
     return resolved
 
 
