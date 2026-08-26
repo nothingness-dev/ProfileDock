@@ -17,12 +17,12 @@ from .data_root import (
     ensure_within_root,
     validate_path_component,
 )
+from .fsops import replace_with_retry as _replace_with_retry
 from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_launch_config
 from .process_manager import is_active_for_mutation
 from .storage import (
     _atomic_write,
     _backup_metadata,
-    _replace_with_retry,
     load_metadata,
     metadata_lock,
 )
