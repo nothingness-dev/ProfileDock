@@ -10,12 +10,11 @@ from .data_root import (
     resolve_data_root,
     validate_path_component,
 )
-from .models import LaunchConfig, Profile, utc_now
+from .models import LaunchConfig, MetadataDocument, Profile, utc_now
 from .process_manager import ProfileRunningError, is_active_for_mutation
 from .storage import (
     StorageError,
     add_profile_atomic,
-    load_metadata,
     mark_launched_atomic,
     migrate_metadata,
     remove_profile_atomic,
@@ -51,13 +50,11 @@ class ProfileManager:
         except ValueError as exc:
             raise ValueError("unsafe profile id") from exc
 
-    def ensure_migrated(self) -> None:
-        migrate_metadata(self.profiles_file, self.profiles_dir, backup_path=self.backup_file)
+    def ensure_migrated(self) -> MetadataDocument:
+        return migrate_metadata(self.profiles_file, self.profiles_dir, backup_path=self.backup_file)
 
     def list_profiles(self) -> list[Profile]:
-        self.ensure_migrated()
-        doc = load_metadata(self.profiles_file)
-        return doc.profiles
+        return self.ensure_migrated().profiles
 
     def get(self, profile_id: str) -> Profile:
         for profile in self.list_profiles():
@@ -152,27 +149,40 @@ class ProfileManager:
             shutil.rmtree(runtime_path, ignore_errors=False)
         return profile
 
+    def _updated_profile(self, doc: MetadataDocument, profile_id: str) -> Profile:
+        for profile in doc.profiles:
+            if profile.id == profile_id:
+                return profile
+        raise ProfileNotFoundError(f"profile not found: {profile_id}")
+
     def rename(self, identifier: str, new_name: str) -> Profile:
         new_name = new_name.strip()
         if not new_name:
             raise ValueError("profile name cannot be empty")
         profile = self.resolve(identifier)
-        rename_profile_atomic(profile.id, new_name, self.profiles_file, self.profiles_dir, self.backup_file)
-        return self.get(profile.id)
+        doc = rename_profile_atomic(
+            profile.id, new_name, self.profiles_file, self.profiles_dir, self.backup_file
+        )
+        return self._updated_profile(doc, profile.id)
 
     def set_engine(self, identifier: str, engine: Optional[str]) -> Profile:
         if engine is not None and engine not in {"direct", "playwright"}:
             raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
         profile = self.resolve(identifier)
-        set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
-        return self.get(profile.id)
+        doc = set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
+        return self._updated_profile(doc, profile.id)
+
+    def _apply_launch_config(self, profile: Profile, config: Optional[LaunchConfig]) -> Profile:
+        if config is not None:
+            validate_launch_config(config, profile.engine, require_browser_executable=True)
+        doc = set_launch_config_atomic(
+            profile.id, config, self.profiles_file, self.profiles_dir, self.backup_file
+        )
+        return self._updated_profile(doc, profile.id)
 
     def set_launch_config(self, identifier: str, config: Optional[LaunchConfig]) -> Profile:
         profile = self.resolve(identifier)
-        if config is not None:
-            validate_launch_config(config, profile.engine, require_browser_executable=True)
-        set_launch_config_atomic(profile.id, config, self.profiles_file, self.profiles_dir, self.backup_file)
-        return self.get(profile.id)
+        return self._apply_launch_config(profile, config)
 
     def get_launch_config(self, identifier: str) -> LaunchConfig:
         profile = self.resolve(identifier)
@@ -187,7 +197,7 @@ class ProfileManager:
                 raise ValueError(f"unknown launch configuration field: {k}")
             cfg_dict[k] = v
         new_cfg = LaunchConfig.from_dict(cfg_dict)
-        return self.set_launch_config(identifier, new_cfg)
+        return self._apply_launch_config(profile, new_cfg)
 
     def add_start_url(self, identifier: str, url: str) -> Profile:
         profile = self.resolve(identifier)
@@ -196,14 +206,18 @@ class ProfileManager:
         urls = list(current.start_urls)
         if clean_url not in urls:
             urls.append(clean_url)
-        return self.update_launch_config(identifier, start_urls=urls)
+        cfg_dict = current.to_dict()
+        cfg_dict["start_urls"] = urls
+        return self._apply_launch_config(profile, LaunchConfig.from_dict(cfg_dict))
 
     def remove_start_url(self, identifier: str, url: str) -> Profile:
         profile = self.resolve(identifier)
         current = profile.launch_config or LaunchConfig()
         clean_url = url.strip()
         urls = [u for u in current.start_urls if u != clean_url]
-        return self.update_launch_config(identifier, start_urls=urls)
+        cfg_dict = current.to_dict()
+        cfg_dict["start_urls"] = urls
+        return self._apply_launch_config(profile, LaunchConfig.from_dict(cfg_dict))
 
     def reset_launch_config(self, identifier: str) -> Profile:
         return self.set_launch_config(identifier, None)
