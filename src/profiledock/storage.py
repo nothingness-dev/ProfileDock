@@ -4,11 +4,14 @@ import sys
 import time as _time
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import IO, Any, Callable, Optional, Union
 from uuid import uuid4
 
 from .data_root import DataRootError, ensure_within_root
+from .fsops import replace_with_retry as _replace_with_retry
+from .fsops import write_all as _write_all
 from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_metadata_value
 from .validation import ValidationError, validate_metadata_document
 
@@ -145,29 +148,6 @@ def _profile_root_for_metadata(path: Path) -> Path:
     if path.parent.name == "metadata":
         return path.parent.parent / "profiles"
     return path.parent / "profiles"
-
-
-def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
-    deadline = _time.monotonic() + timeout
-    poll_interval = 0.005
-    while True:
-        try:
-            source.replace(target)
-            return
-        except PermissionError:
-            if _time.monotonic() >= deadline:
-                raise
-            _time.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 0.05)
-
-
-def _write_all(fd: int, payload: bytes) -> None:
-    offset = 0
-    while offset < len(payload):
-        written = os.write(fd, payload[offset:])
-        if written < 1:
-            raise OSError("write returned no data")
-        offset += written
 
 
 def _atomic_write(path: Path, content: str, root: Optional[Path] = None) -> None:
@@ -391,6 +371,20 @@ def remove_profile_atomic(
     return atomic_update_metadata(path, profile_root, _remove, backup_path)
 
 
+def _mutate_profile_atomic(
+    profile_id: str,
+    mutate: Callable[[Profile], Profile],
+    path: Union[str, Path],
+    profile_root: Union[str, Path],
+    backup_path: Union[str, Path, None] = None,
+) -> MetadataDocument:
+    def _apply(doc: MetadataDocument) -> MetadataDocument:
+        new_profiles = [mutate(p) if p.id == profile_id else p for p in doc.profiles]
+        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
+
+    return atomic_update_metadata(path, profile_root, _apply, backup_path)
+
+
 def rename_profile_atomic(
     profile_id: str,
     new_name: str,
@@ -398,26 +392,9 @@ def rename_profile_atomic(
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
-    def _rename(doc: MetadataDocument) -> MetadataDocument:
-        new_profiles = []
-        for p in doc.profiles:
-            if p.id == profile_id:
-                new_profiles.append(
-                    Profile(
-                        id=p.id,
-                        name=new_name,
-                        created_at=p.created_at,
-                        data_dir=p.data_dir,
-                        last_launched_at=p.last_launched_at,
-                        engine=p.engine,
-                        launch_config=p.launch_config,
-                    )
-                )
-            else:
-                new_profiles.append(p)
-        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
-
-    return atomic_update_metadata(path, profile_root, _rename, backup_path)
+    return _mutate_profile_atomic(
+        profile_id, lambda p: replace(p, name=new_name), path, profile_root, backup_path
+    )
 
 
 def mark_launched_atomic(
@@ -427,26 +404,9 @@ def mark_launched_atomic(
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
-    def _mark(doc: MetadataDocument) -> MetadataDocument:
-        new_profiles = []
-        for p in doc.profiles:
-            if p.id == profile_id:
-                new_profiles.append(
-                    Profile(
-                        id=p.id,
-                        name=p.name,
-                        created_at=p.created_at,
-                        data_dir=p.data_dir,
-                        last_launched_at=launched_at,
-                        engine=p.engine,
-                        launch_config=p.launch_config,
-                    )
-                )
-            else:
-                new_profiles.append(p)
-        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
-
-    return atomic_update_metadata(path, profile_root, _mark, backup_path)
+    return _mutate_profile_atomic(
+        profile_id, lambda p: replace(p, last_launched_at=launched_at), path, profile_root, backup_path
+    )
 
 
 def set_engine_atomic(
@@ -456,26 +416,9 @@ def set_engine_atomic(
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
-    def _set(doc: MetadataDocument) -> MetadataDocument:
-        new_profiles = []
-        for p in doc.profiles:
-            if p.id == profile_id:
-                new_profiles.append(
-                    Profile(
-                        id=p.id,
-                        name=p.name,
-                        created_at=p.created_at,
-                        data_dir=p.data_dir,
-                        last_launched_at=p.last_launched_at,
-                        engine=engine,
-                        launch_config=p.launch_config,
-                    )
-                )
-            else:
-                new_profiles.append(p)
-        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
-
-    return atomic_update_metadata(path, profile_root, _set, backup_path)
+    return _mutate_profile_atomic(
+        profile_id, lambda p: replace(p, engine=engine), path, profile_root, backup_path
+    )
 
 
 def set_launch_config_atomic(
@@ -485,23 +428,6 @@ def set_launch_config_atomic(
     profile_root: Union[str, Path] = "profiles",
     backup_path: Union[str, Path, None] = None,
 ) -> MetadataDocument:
-    def _update_cfg(doc: MetadataDocument) -> MetadataDocument:
-        new_profiles = []
-        for p in doc.profiles:
-            if p.id == profile_id:
-                new_profiles.append(
-                    Profile(
-                        id=p.id,
-                        name=p.name,
-                        created_at=p.created_at,
-                        data_dir=p.data_dir,
-                        last_launched_at=p.last_launched_at,
-                        engine=p.engine,
-                        launch_config=launch_config,
-                    )
-                )
-            else:
-                new_profiles.append(p)
-        return MetadataDocument(schema_version=doc.schema_version, profiles=new_profiles)
-
-    return atomic_update_metadata(path, profile_root, _update_cfg, backup_path)
+    return _mutate_profile_atomic(
+        profile_id, lambda p: replace(p, launch_config=launch_config), path, profile_root, backup_path
+    )

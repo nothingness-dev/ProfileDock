@@ -22,6 +22,9 @@ from typing import (
 )
 from uuid import uuid4
 
+from .fsops import replace_with_retry as _replace_with_retry
+from .fsops import write_all as _write_all
+
 if TYPE_CHECKING:
     from playwright.sync_api import BrowserContext, Playwright
 
@@ -109,29 +112,6 @@ def error_path(data_dir: str, runtime_dir: Optional[Path] = None) -> Path:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
-    deadline = time.monotonic() + timeout
-    poll_interval = 0.005
-    while True:
-        try:
-            source.replace(target)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 0.05)
-
-
-def _write_all(fd: int, payload: bytes) -> None:
-    offset = 0
-    while offset < len(payload):
-        written = os.write(fd, payload[offset:])
-        if written < 1:
-            raise OSError("write returned no data")
-        offset += written
 
 
 def _atomic_private_bytes(path: Path, payload: bytes) -> None:
