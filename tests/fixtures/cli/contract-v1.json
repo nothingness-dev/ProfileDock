@@ -6,8 +6,6 @@
     "verbose": ["--verbose", "-v"],
     "log_level": ["--log-level"],
     "non_interactive": ["--non-interactive"],
-    "install_completion": ["--install-completion"],
-    "show_completion": ["--show-completion"],
     "version": ["--version", "-V"]
   },
   "commands": {
