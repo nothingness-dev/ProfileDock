@@ -841,17 +841,24 @@ def start_controller(
         )
         deadline = time.monotonic() + startup_timeout
         poll_interval = 0.02
-        while time.monotonic() < deadline:
-            state = _read_state(path)
-            profile_id_value = initial["profile_id"]
-            if state and _valid_state(state, str(profile_id_value)) and state.get("port"):
-                _unlink_quietly(err)
-                _close_stderr(process)
-                return state
-            if process.poll() is not None:
-                break
-            time.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 0.1)
+        try:
+            while time.monotonic() < deadline:
+                state = _read_state(path)
+                profile_id_value = initial["profile_id"]
+                if state and _valid_state(state, str(profile_id_value)) and state.get("port"):
+                    _unlink_quietly(err)
+                    _close_stderr(process)
+                    return state
+                if process.poll() is not None:
+                    break
+                time.sleep(poll_interval)
+                poll_interval = min(poll_interval * 1.5, 0.1)
+        except BaseException:
+            # An interrupt during startup must not orphan the freshly spawned
+            # controller subprocess or its starting-state file.
+            _stop_process(process)
+            _unlink_quietly(path)
+            raise
     except OSError as exc:
         _unlink_quietly(path)
         _write_error(err, "controller_spawn_failed", str(exc), redactions=(token,))
