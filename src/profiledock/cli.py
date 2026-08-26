@@ -288,12 +288,20 @@ def _compute_profile_size(data_dir_str: str) -> Optional[int]:
         return None
     total = 0
     try:
-        for root_dir, _, filenames in os.walk(data_dir):
-            for fname in filenames:
-                try:
-                    total += (Path(root_dir) / fname).stat().st_size
-                except OSError:
-                    pass
+        stack = [data_dir]
+        while stack:
+            current = stack.pop()
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
     except OSError:
         return None
     return total
