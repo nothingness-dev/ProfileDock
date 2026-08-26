@@ -671,7 +671,12 @@ def status(
                     elif not first_frame:
                         typer.echo()
                 first_frame = False
-                _render_once()
+                try:
+                    _render_once()
+                except StorageError as exc:
+                    # A transient lock or I/O blip should not kill a monitor;
+                    # report it and keep polling.
+                    typer.echo(f"status refresh skipped: {exc}", err=True)
                 time.sleep(interval)
     except KeyboardInterrupt:
         pass
