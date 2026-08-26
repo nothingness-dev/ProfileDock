@@ -1,4 +1,5 @@
 import argparse
+import ctypes
 import hmac
 import json
 import os
@@ -10,6 +11,7 @@ import sys
 import time
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from subprocess import Popen
 from typing import (
@@ -322,11 +324,10 @@ def _read_error(path: Path) -> Optional[StateDict]:
     return None
 
 
-def _get_process_create_time(pid: int) -> Optional[float]:
-    if pid < 1:
-        return None
-    if sys.platform == "win32":
-        import ctypes
+if sys.platform == "win32":
+
+    @lru_cache(maxsize=1)
+    def _kernel32() -> tuple[Any, Any, Any]:
         from ctypes import wintypes
 
         class FILETIME(ctypes.Structure):
@@ -335,27 +336,45 @@ def _get_process_create_time(pid: int) -> Optional[float]:
                 ("dwHighDateTime", wintypes.DWORD),
             ]
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.GetProcessTimes.argtypes = [
+        library = ctypes.WinDLL("kernel32", use_last_error=True)
+        library.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        library.OpenProcess.restype = wintypes.HANDLE
+        library.GetProcessTimes.argtypes = [
             wintypes.HANDLE,
             ctypes.POINTER(FILETIME),
             ctypes.POINTER(FILETIME),
             ctypes.POINTER(FILETIME),
             ctypes.POINTER(FILETIME),
         ]
-        kernel32.GetProcessTimes.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
+        library.GetProcessTimes.restype = wintypes.BOOL
+        library.GetExitCodeProcess.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        library.GetExitCodeProcess.restype = wintypes.BOOL
+        library.CloseHandle.argtypes = [wintypes.HANDLE]
+        library.CloseHandle.restype = wintypes.BOOL
+        return library, FILETIME, wintypes
+
+else:
+
+    def _kernel32() -> tuple[Any, Any, Any]:
+        raise NotImplementedError("kernel32 is only available on Windows")
+
+
+def _get_process_create_time(pid: int) -> Optional[float]:
+    if pid < 1:
+        return None
+    if sys.platform == "win32":
+        kernel32, filetime_type, _wintypes = _kernel32()
 
         handle = kernel32.OpenProcess(0x1000 | 0x0400, False, pid)
         if not handle:
             return None
-        creation_time = FILETIME()
-        exit_time = FILETIME()
-        kernel_time = FILETIME()
-        user_time = FILETIME()
+        creation_time = filetime_type()
+        exit_time = filetime_type()
+        kernel_time = filetime_type()
+        user_time = filetime_type()
         try:
             if not kernel32.GetProcessTimes(
                 handle,
@@ -404,16 +423,8 @@ def _alive(pid: int) -> bool:
     if pid < 1:
         return False
     if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
+        kernel32, _, wintypes = _kernel32()
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
         handle = kernel32.OpenProcess(0x1000, False, pid)
         if not handle:
             return False
@@ -421,7 +432,7 @@ def _alive(pid: int) -> bool:
         try:
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
                 return False
-            return exit_code.value == 259
+            return exit_code.value == 259  # type: ignore[no-any-return]  # DWORD.value is int
         finally:
             kernel32.CloseHandle(handle)
     if os.name != "nt":
