@@ -1,6 +1,7 @@
 import json
 import os
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, Optional
 
@@ -678,6 +679,64 @@ def status(
         fail_exception(exc)
 
 
+@dataclass
+class _LaunchOptions:
+    profile: Profile
+    engine: str
+    tabs: int
+    urls: list[str]
+    browser: Optional[str]
+    width: Optional[int]
+    height: Optional[int]
+
+
+def _resolve_launch_options(
+    profile_id: str,
+    tabs: Optional[int],
+    engine: Optional[str],
+    browser: Optional[str],
+    url: Optional[list[str]],
+) -> _LaunchOptions:
+    profile = manager().resolve(profile_id)
+    cfg = getattr(profile, "launch_config", None)
+    active_engine = resolve_engine(engine, profile)
+
+    target_tabs = tabs
+    if target_tabs is None and cfg and cfg.default_tabs is not None:
+        target_tabs = cfg.default_tabs
+    if target_tabs is None:
+        if _non_interactive.get():
+            fail("tab count is required in non-interactive mode; use --tabs")
+        target_tabs = typer.prompt("How many tabs do you want to open?", type=int)
+    if target_tabs < 1:
+        fail("tab count must be at least 1")
+
+    target_urls = list(url) if url else list(cfg.start_urls if cfg and cfg.start_urls else [])
+    target_urls = [item.strip() for item in target_urls]
+    for target_url in target_urls:
+        validate_url(target_url)
+    if len(target_urls) > target_tabs:
+        fail("number of start URLs cannot exceed the requested tab count")
+
+    target_browser = browser if browser is not None else (cfg.browser if cfg else None)
+    if target_browser is not None:
+        candidate = Path(target_browser).expanduser()
+        target_browser = str(candidate.resolve()) if candidate.is_file() else target_browser.strip().lower()
+        validate_browser(target_browser, active_engine, require_executable=True)
+
+    if not Path(profile.data_dir).is_dir():
+        fail("profile data directory is missing")
+    return _LaunchOptions(
+        profile=profile,
+        engine=active_engine,
+        tabs=target_tabs,
+        urls=target_urls,
+        browser=target_browser,
+        width=cfg.window_width if cfg else None,
+        height=cfg.window_height if cfg else None,
+    )
+
+
 @app.command(
     epilog="""Examples:\n
   profiledock launch Personal --tabs 3\n
@@ -717,40 +776,14 @@ def launch(
     corr_id = generate_correlation_id()
     paths = selected_paths()
     try:
-        profile_manager = manager()
-        profile = profile_manager.resolve(profile_id)
-        cfg = getattr(profile, "launch_config", None)
-        active_engine = resolve_engine(engine, profile)
-
-        target_tabs = tabs
-        if target_tabs is None and cfg and cfg.default_tabs is not None:
-            target_tabs = cfg.default_tabs
-        if target_tabs is None:
-            if _non_interactive.get():
-                fail("tab count is required in non-interactive mode; use --tabs")
-            target_tabs = typer.prompt("How many tabs do you want to open?", type=int)
-        if target_tabs < 1:
-            fail("tab count must be at least 1")
-
-        target_urls = list(url) if url else list(cfg.start_urls if cfg and cfg.start_urls else [])
-        target_urls = [item.strip() for item in target_urls]
-        for target_url in target_urls:
-            validate_url(target_url)
-        if len(target_urls) > target_tabs:
-            fail("number of start URLs cannot exceed the requested tab count")
-
-        target_browser = browser if browser is not None else (cfg.browser if cfg else None)
-        if target_browser is not None:
-            candidate = Path(target_browser).expanduser()
-            target_browser = (
-                str(candidate.resolve()) if candidate.is_file() else target_browser.strip().lower()
-            )
-            validate_browser(target_browser, active_engine, require_executable=True)
-        width = cfg.window_width if cfg else None
-        height = cfg.window_height if cfg else None
-
-        if not Path(profile.data_dir).is_dir():
-            fail("profile data directory is missing")
+        opts = _resolve_launch_options(profile_id, tabs, engine, browser, url)
+        profile = opts.profile
+        active_engine = opts.engine
+        target_tabs = opts.tabs
+        target_urls = opts.urls
+        target_browser = opts.browser
+        width = opts.width
+        height = opts.height
 
         write_log_entry(
             log_dir=paths.logs_dir,
@@ -833,7 +866,7 @@ def launch(
         fail_exception(exc)
 
     try:
-        profile_manager.mark_launched(profile.id)
+        manager().mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         typer.echo(f"Warning: browser launched but launch timestamp was not saved: {exc}", err=True)
     typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {target_tabs} tab(s).")
