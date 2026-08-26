@@ -885,6 +885,91 @@ def start_controller(
     )
 
 
+def _close_direct(path: Path, state: StateDict, timeout: float) -> None:
+    state["closing"] = True
+    state["status"] = "closing"
+    try:
+        _atomic_private_json(path, state)
+    except OSError:
+        pass
+    pid = int(state.get("pid", -1))
+    expected_create_time = state.get("process_create_time")
+    if pid > 0 and _alive(pid):
+        if not _is_matching_process(pid, expected_create_time, require_verification=True):
+            raise ProfileRunningError("profile process identity could not be verified; refusing to signal it")
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            _signal_posix_process_group(pid, signal.SIGTERM)
+        deadline = time.monotonic() + timeout
+        poll_interval = 0.02
+        while time.monotonic() < deadline:
+            if not _alive(pid):
+                break
+            time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 0.1)
+        if _alive(pid):
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                _signal_posix_process_group(pid, signal.SIGKILL)
+            force_deadline = time.monotonic() + min(max(timeout, 0.1), 2)
+            force_interval = 0.01
+            while time.monotonic() < force_deadline and _alive(pid):
+                time.sleep(force_interval)
+                force_interval = min(force_interval * 1.5, 0.05)
+        if _alive(pid):
+            raise BrowserLaunchError("browser process did not close within the timeout")
+    _unlink_quietly(path)
+
+
+def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
+    port = int(state.get("port", 0))
+    if not port:
+        raise BrowserLaunchError("profile controller is not ready")
+    token = state.get("token", "")
+    state["closing"] = True
+    state["status"] = "closing"
+    try:
+        _atomic_private_json(path, state)
+    except OSError:
+        pass
+    close_sent = False
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
+            if state.get("legacy_controller"):
+                connection.sendall(("close:" + token).encode("utf-8"))
+                close_sent = True
+            else:
+                connection.sendall(("close:" + token + "\n").encode("utf-8"))
+                response = connection.recv(16)
+                close_sent = response == b"ok\n"
+    except OSError:
+        pass
+    deadline = time.monotonic() + timeout
+    poll_interval = 0.02
+    while path.exists() and time.monotonic() < deadline:
+        time.sleep(poll_interval)
+        poll_interval = min(poll_interval * 1.5, 0.1)
+    if path.exists():
+        if not _alive(int(state.get("controller_pid", -1))):
+            _unlink_quietly(path)
+            raise ProfileRunningError("profile is not running", stopped=True)
+        raise BrowserLaunchError("profile did not close within the timeout")
+    if not close_sent:
+        raise ProfileRunningError("profile is not running", stopped=True)
+
+
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
     path = state_path(data_dir, runtime_dir)
     initial_state = _read_state(path)
@@ -923,53 +1008,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         raise ProfileRunningError("profile is not running", stopped=True)
 
     if state.get("engine") == "direct":
-        state["closing"] = True
-        state["status"] = "closing"
-        try:
-            _atomic_private_json(path, state)
-        except OSError:
-            pass
-        pid = int(state.get("pid", -1))
-        expected_create_time = state.get("process_create_time")
-        if pid > 0 and _alive(pid):
-            if not _is_matching_process(pid, expected_create_time, require_verification=True):
-                raise ProfileRunningError(
-                    "profile process identity could not be verified; refusing to signal it"
-                )
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            else:
-                _signal_posix_process_group(pid, signal.SIGTERM)
-            deadline = time.monotonic() + timeout
-            poll_interval = 0.02
-            while time.monotonic() < deadline:
-                if not _alive(pid):
-                    break
-                time.sleep(poll_interval)
-                poll_interval = min(poll_interval * 1.5, 0.1)
-            if _alive(pid):
-                if sys.platform == "win32":
-                    subprocess.run(
-                        ["taskkill", "/PID", str(pid), "/T", "/F"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                    )
-                else:
-                    _signal_posix_process_group(pid, signal.SIGKILL)
-                force_deadline = time.monotonic() + min(max(timeout, 0.1), 2)
-                force_interval = 0.01
-                while time.monotonic() < force_deadline and _alive(pid):
-                    time.sleep(force_interval)
-                    force_interval = min(force_interval * 1.5, 0.05)
-            if _alive(pid):
-                raise BrowserLaunchError("browser process did not close within the timeout")
-        _unlink_quietly(path)
+        _close_direct(path, state, timeout)
         return
 
     state = _upgrade_legacy_state(path, state, Path(data_dir).parent.name)
@@ -977,40 +1016,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
         raise ProfileRunningError(
             "profile running state is invalid; refusing unauthenticated controller access"
         )
-    port = int(state.get("port", 0))
-    if not port:
-        raise BrowserLaunchError("profile controller is not ready")
-    token = state.get("token", "")
-    state["closing"] = True
-    state["status"] = "closing"
-    try:
-        _atomic_private_json(path, state)
-    except OSError:
-        pass
-    close_sent = False
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
-            if state.get("legacy_controller"):
-                connection.sendall(("close:" + token).encode("utf-8"))
-                close_sent = True
-            else:
-                connection.sendall(("close:" + token + "\n").encode("utf-8"))
-                response = connection.recv(16)
-                close_sent = response == b"ok\n"
-    except OSError:
-        pass
-    deadline = time.monotonic() + timeout
-    poll_interval = 0.02
-    while path.exists() and time.monotonic() < deadline:
-        time.sleep(poll_interval)
-        poll_interval = min(poll_interval * 1.5, 0.1)
-    if path.exists():
-        if not _alive(int(state.get("controller_pid", -1))):
-            _unlink_quietly(path)
-            raise ProfileRunningError("profile is not running", stopped=True)
-        raise BrowserLaunchError("profile did not close within the timeout")
-    if not close_sent:
-        raise ProfileRunningError("profile is not running", stopped=True)
+    _close_playwright(path, state, timeout)
 
 
 def _context_alive(context: "BrowserContext") -> bool:
