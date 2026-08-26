@@ -2,37 +2,15 @@ import json
 import os
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import TYPE_CHECKING, Any, NoReturn, Optional
 
 import typer
 
-from .backup import (
-    BackupError,
-    FileLockedError,
-    ProfileNotStoppedError,
-    TargetExistsError,
-    create_backup_archive,
-)
 from .cli_contract import CLI_JSON_OUTPUT_VERSION, EXIT_USER_ERROR, error_category
 from .cli_contract import EXIT_SUCCESS as EXIT_SUCCESS
 from .cli_contract import EXIT_USAGE_ERROR as EXIT_USAGE_ERROR
 from .data_root import DataPaths, DataRootError, resolve_data_root
-from .doctor import (
-    STATUS_FAILED,
-    STATUS_OK,
-    STATUS_WARNING,
-    DiagnosticCheck,
-    repair_environment,
-    run_diagnostics,
-)
 from .logger import generate_correlation_id, read_profile_logs, write_log_entry
-from .migration import (
-    ConflictError,
-    MigrationError,
-    SourceRunningError,
-    failure_report,
-    migrate_project,
-)
 from .models import LaunchConfig, Profile
 from .process_manager import (
     BrowserLaunchError,
@@ -44,17 +22,20 @@ from .process_manager import (
     start_direct_chrome,
 )
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
-from .restore import (
-    DecompressionSecurityError,
-    InvalidArchiveError,
-    RestoreConflictError,
-    RestoreError,
-    restore_backup_archive,
-)
 from .storage import StorageError
 from .terminal import fail_mark, is_stdout_tty, ok_mark, warn_mark
 from .validation import ValidationError, validate_browser, validate_url
 from .version import __version__
+
+if TYPE_CHECKING:
+    from .doctor import (
+        STATUS_FAILED,
+        STATUS_OK,
+        STATUS_WARNING,
+        DiagnosticCheck,
+        repair_environment,
+        run_diagnostics,
+    )
 
 app = typer.Typer(
     invoke_without_command=True,
@@ -70,6 +51,35 @@ _paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared"
 _verbose: ContextVar[bool] = ContextVar("profiledock_verbose", default=False)
 _log_level: ContextVar[str] = ContextVar("profiledock_log_level", default="INFO")
 _non_interactive: ContextVar[bool] = ContextVar("profiledock_non_interactive", default=False)
+
+_DOCTOR_EXPORTS = frozenset(
+    {
+        "STATUS_FAILED",
+        "STATUS_OK",
+        "STATUS_WARNING",
+        "DiagnosticCheck",
+        "repair_environment",
+        "run_diagnostics",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    # Deferred doctor import keeps `list`/`show`/`status` startups light while
+    # preserving `patch("profiledock.cli.run_diagnostics")`-style monkeypatching.
+    if name in _DOCTOR_EXPORTS:
+        from . import doctor
+
+        return getattr(doctor, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _prime_doctor_exports() -> None:
+    from . import doctor
+
+    for name in _DOCTOR_EXPORTS:
+        if name not in globals():
+            globals()[name] = getattr(doctor, name)
 
 
 def version_callback(value: bool) -> None:
@@ -201,8 +211,6 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
         category = "profile_active"
     elif isinstance(error, BrowserLaunchError):
         category = "browser_launch_failed"
-    elif isinstance(error, DecompressionSecurityError):
-        category = "security_violation"
     elif isinstance(error, DataRootError):
         # DataRootError covers both mundane environment failures (missing
         # LOCALAPPDATA, invalid root) and genuine path-safety refusals; let the
@@ -211,7 +219,12 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
     elif isinstance(error, (StorageError, OSError)):
         category = "storage_error"
     else:
-        category = error_category(str(error))
+        from .restore import DecompressionSecurityError
+
+        if isinstance(error, DecompressionSecurityError):
+            category = "security_violation"
+        else:
+            category = error_category(str(error))
     fail(str(error), code=code, category=category, hint=_HINTS.get(category))
 
 
@@ -907,6 +920,7 @@ def doctor(
     browser availability, runtime state, orphan directories, and version
     consistency. Run this after crashes or forced termination.
     """
+    _prime_doctor_exports()
     paths = selected_paths()
     root = paths.root
 
@@ -1024,6 +1038,8 @@ def migrate(
     --remove-source and confirmation are both supplied. Close all source
     profiles first.
     """
+    from .migration import ConflictError, MigrationError, SourceRunningError, failure_report, migrate_project
+
     paths = selected_paths()
     if remove_source and not yes:
         if json_output:
@@ -1118,6 +1134,14 @@ def backup(
     --exclude-cache skips recreatable browser caches to shrink the archive.
     Existing output requires --force.
     """
+    from .backup import (
+        BackupError,
+        FileLockedError,
+        ProfileNotStoppedError,
+        TargetExistsError,
+        create_backup_archive,
+    )
+
     paths = selected_paths()
     profile_manager = manager()
 
@@ -1200,6 +1224,14 @@ def restore(
     before anything is committed. Conflicting IDs or names are refused unless
     --force is given; running profiles are never overwritten.
     """
+    from .restore import (
+        DecompressionSecurityError,
+        InvalidArchiveError,
+        RestoreConflictError,
+        RestoreError,
+        restore_backup_archive,
+    )
+
     paths = selected_paths()
 
     try:
