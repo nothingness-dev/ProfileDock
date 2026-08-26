@@ -11,6 +11,7 @@ ProfileDock is a lightweight Python CLI for managing isolated, persistent Chromi
 - Platform application-data storage with configurable data roots.
 - Transactional metadata and filesystem operations with strict security boundaries.
 - Frozen planned 1.0 CLI contract and tested historical format compatibility.
+- Optional full-screen interactive console on bare `profiledock` (Textual extra).
 
 ## Quick installation
 

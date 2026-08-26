@@ -6,7 +6,7 @@
 profiledock [GLOBAL OPTIONS] COMMAND [ARGUMENTS] [OPTIONS]
 ```
 
-Running `profiledock` with no command opens an interactive full-screen menu (mouse or arrow-key selection) when stdout is a terminal, the `interactive` extra is installed (`pip install "profiledock[interactive]"`), and `--non-interactive`/`PROFILEDOCK_NON_INTERACTIVE` are not set. Otherwise it prints the usage summary with exit code 2. Press `q` or `Esc` to leave the menu.
+Running `profiledock` with no command opens a full-screen interactive shell (see the getting-started guide) when stdout is a terminal, the `interactive` extra is installed (`pip install "profiledock[interactive]"`), and `--non-interactive`/`PROFILEDOCK_NON_INTERACTIVE` are not set. Otherwise it prints the usage summary with exit code 2. Press `q` to leave the shell; `Esc` steps back from forms and result views.
 
 Global options must appear before the command:
 
@@ -16,8 +16,6 @@ Global options must appear before the command:
 | `--verbose`, `-v` | Enable verbose and trace logging behavior. |
 | `--log-level LEVEL` | Set the log threshold: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. Invalid values fail with a usage error. |
 | `--non-interactive` | Prohibit prompts and fail when required input is missing. |
-| `--install-completion [SHELL]` | Install shell completion (bash, zsh, fish, PowerShell). |
-| `--show-completion [SHELL]` | Print shell completion script to stdout. |
 | `--version`, `-V` | Print the installed ProfileDock version and exit. |
 | `--help` | Show help. |
 
