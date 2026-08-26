@@ -204,6 +204,116 @@ def _collect_profile_files(data_dir: Path, exclude_cache: bool = False) -> list[
     return sorted(relative_files)
 
 
+def _archive_profile(
+    tar: tarfile.TarFile,
+    profile: Profile,
+    exclude_cache: bool,
+    committed_bytes: int,
+) -> tuple[dict[str, Any], BackupProfileResult]:
+    p_data_dir = Path(profile.data_dir)
+    resolved_data_dir = p_data_dir.resolve()
+    rel_paths = _collect_profile_files(p_data_dir, exclude_cache=exclude_cache)
+    files_manifest: dict[str, tuple[int, str]] = {}
+    p_bytes = 0
+
+    for rel_path in rel_paths:
+        fpath = p_data_dir / rel_path
+        if _is_link(fpath) or not fpath.is_file():
+            raise BackupError(f"profile data changed to an unsafe file during backup: {fpath}")
+        try:
+            fpath.resolve().relative_to(resolved_data_dir)
+        except ValueError as exc:
+            raise BackupError(f"profile data escaped during backup: {fpath}") from exc
+        arcname = f"profiles/{profile.id}/browser-data/{rel_path}"
+        tarinfo = tar.gettarinfo(str(fpath), arcname=arcname)
+        if not tarinfo.isreg():
+            raise BackupError(f"profile data contains an unsafe file: {fpath}")
+        if tarinfo.size > MAX_MEMBER_SIZE_BYTES:
+            raise BackupError(
+                f"file '{rel_path}' in profile '{profile.name}' ({profile.id}) is {tarinfo.size} bytes, "
+                f"exceeding the per-file restore limit of {MAX_MEMBER_SIZE_BYTES} bytes; "
+                "such an archive could never be restored. Exclude transient data with "
+                "--exclude-cache or remove the file before backing up."
+            )
+
+        try:
+            with fpath.open("rb") as handle:
+                reader = _HashingFileReader(handle)
+                tar.addfile(tarinfo, reader)
+                checksum = reader.hexdigest
+                size = reader.bytes_read
+                files_manifest[rel_path] = (size, checksum)
+                p_bytes += size
+        except PermissionError as exc:
+            raise FileLockedError(
+                f"cannot read locked file '{fpath}': {exc}. "
+                "A background browser process or application may still be holding the file open. "
+                "Please ensure all browser processes and background apps are completely closed."
+            ) from exc
+        except OSError as exc:
+            raise BackupError(f"cannot read profile data file '{fpath}': {exc}") from exc
+
+        if committed_bytes + p_bytes > MAX_TOTAL_EXTRACT_BYTES:
+            raise BackupError(
+                f"backup exceeds the total restore limit of {MAX_TOTAL_EXTRACT_BYTES} bytes; "
+                "an archive this large could never be restored. Exclude transient data with "
+                "--exclude-cache or split profiles across multiple backups."
+            )
+
+    profile_info = {
+        "id": profile.id,
+        "name": profile.name,
+        "created_at": profile.created_at,
+        "last_launched_at": profile.last_launched_at,
+        "engine": profile.engine,
+        "launch_config": profile.launch_config.to_dict() if profile.launch_config else None,
+        "file_count": len(files_manifest),
+        "total_bytes": p_bytes,
+        "files": {
+            rel_path: {"size": size, "sha256": checksum}
+            for rel_path, (size, checksum) in files_manifest.items()
+        },
+    }
+    result = BackupProfileResult(
+        id=profile.id,
+        name=profile.name,
+        engine=profile.engine,
+        status="backed_up",
+        file_count=len(files_manifest),
+        total_bytes=p_bytes,
+        message="successfully backed up",
+    )
+    return profile_info, result
+
+
+def _verify_archive_structure(archive: Path) -> None:
+    # Structural verification only: member uniqueness, manifest presence and
+    # format, and per-file sizes. Content checksums were computed from the
+    # exact bytes streamed into the archive and are re-verified against the
+    # manifest at restore time.
+    with tarfile.open(archive, "r:gz") as verify_tar:
+        names = verify_tar.getnames()
+        if len(names) != len(set(names)):
+            raise BackupError("backup archive verification failed: duplicate member names")
+        if "backup_manifest.json" not in names:
+            raise BackupError("backup archive verification failed: missing manifest")
+        manifest_file = verify_tar.extractfile("backup_manifest.json")
+        if manifest_file is None:
+            raise BackupError("backup archive verification failed: unreadable manifest")
+        loaded_manifest = json.loads(manifest_file.read().decode("utf-8"))
+        if loaded_manifest.get("format_version") != BACKUP_ARCHIVE_SCHEMA_VERSION:
+            raise BackupError("backup archive verification failed: invalid format version")
+        members = {member.name: member for member in verify_tar.getmembers()}
+        for profile_info in loaded_manifest.get("profiles", []):
+            for rel_path, file_meta in profile_info.get("files", {}).items():
+                member_name = f"profiles/{profile_info['id']}/browser-data/{rel_path}"
+                member = members.get(member_name)
+                if member is None or not member.isfile():
+                    raise BackupError(f"backup archive verification failed: unsafe member {member_name}")
+                if member.size != file_meta["size"]:
+                    raise BackupError(f"backup archive verification failed: size mismatch for {member_name}")
+
+
 def create_backup_archive(
     profiles: list[Profile],
     data_paths: DataPaths,
@@ -256,87 +366,11 @@ def create_backup_archive(
     try:
         with tarfile.open(temp_archive, "w:gz") as tar:
             for p in profiles:
-                p_data_dir = Path(p.data_dir)
-                resolved_data_dir = p_data_dir.resolve()
-                rel_paths = _collect_profile_files(p_data_dir, exclude_cache=exclude_cache)
-                files_manifest: dict[str, tuple[int, str]] = {}
-                p_bytes = 0
-
-                for rel_path in rel_paths:
-                    fpath = p_data_dir / rel_path
-                    if _is_link(fpath) or not fpath.is_file():
-                        raise BackupError(f"profile data changed to an unsafe file during backup: {fpath}")
-                    try:
-                        fpath.resolve().relative_to(resolved_data_dir)
-                    except ValueError as exc:
-                        raise BackupError(f"profile data escaped during backup: {fpath}") from exc
-                    arcname = f"profiles/{p.id}/browser-data/{rel_path}"
-                    tarinfo = tar.gettarinfo(str(fpath), arcname=arcname)
-                    if not tarinfo.isreg():
-                        raise BackupError(f"profile data contains an unsafe file: {fpath}")
-                    if tarinfo.size > MAX_MEMBER_SIZE_BYTES:
-                        raise BackupError(
-                            f"file '{rel_path}' in profile '{p.name}' ({p.id}) is {tarinfo.size} bytes, "
-                            f"exceeding the per-file restore limit of {MAX_MEMBER_SIZE_BYTES} bytes; "
-                            "such an archive could never be restored. Exclude transient data with "
-                            "--exclude-cache or remove the file before backing up."
-                        )
-
-                    try:
-                        with fpath.open("rb") as handle:
-                            reader = _HashingFileReader(handle)
-                            tar.addfile(tarinfo, reader)
-                            checksum = reader.hexdigest
-                            size = reader.bytes_read
-                            files_manifest[rel_path] = (size, checksum)
-                            p_bytes += size
-                    except PermissionError as exc:
-                        raise FileLockedError(
-                            f"cannot read locked file '{fpath}': {exc}. "
-                            "A background browser process or application may still be holding the file open. "
-                            "Please ensure all browser processes and background apps are completely closed."
-                        ) from exc
-                    except OSError as exc:
-                        raise BackupError(f"cannot read profile data file '{fpath}': {exc}") from exc
-
-                    if grand_total_bytes + p_bytes > MAX_TOTAL_EXTRACT_BYTES:
-                        raise BackupError(
-                            f"backup exceeds the total restore limit of {MAX_TOTAL_EXTRACT_BYTES} bytes; "
-                            "an archive this large could never be restored. Exclude transient data with "
-                            "--exclude-cache or split profiles across multiple backups."
-                        )
-
-                profile_info = {
-                    "id": p.id,
-                    "name": p.name,
-                    "created_at": p.created_at,
-                    "last_launched_at": p.last_launched_at,
-                    "engine": p.engine,
-                    "launch_config": p.launch_config.to_dict() if p.launch_config else None,
-                    "file_count": len(files_manifest),
-                    "total_bytes": p_bytes,
-                    "files": {
-                        rel_path: {"size": size, "sha256": checksum}
-                        for rel_path, (size, checksum) in files_manifest.items()
-                    },
-                }
-
+                profile_info, result = _archive_profile(tar, p, exclude_cache, grand_total_bytes)
                 manifest_profiles.append(profile_info)
-
-                grand_total_files += len(files_manifest)
-                grand_total_bytes += p_bytes
-
-                profile_results.append(
-                    BackupProfileResult(
-                        id=p.id,
-                        name=p.name,
-                        engine=p.engine,
-                        status="backed_up",
-                        file_count=len(files_manifest),
-                        total_bytes=p_bytes,
-                        message="successfully backed up",
-                    )
-                )
+                grand_total_files += result.file_count
+                grand_total_bytes += result.total_bytes
+                profile_results.append(result)
 
             manifest_document = {
                 "format_version": BACKUP_ARCHIVE_SCHEMA_VERSION,
@@ -360,33 +394,7 @@ def create_backup_archive(
                     f"cannot finalize backup because profile '{p.name}' ({p.id}) became active"
                 )
 
-        # Structural verification only: member uniqueness, manifest presence and
-        # format, and per-file sizes. Content checksums were computed from the
-        # exact bytes streamed into the archive and are re-verified against the
-        # manifest at restore time.
-        with tarfile.open(temp_archive, "r:gz") as verify_tar:
-            names = verify_tar.getnames()
-            if len(names) != len(set(names)):
-                raise BackupError("backup archive verification failed: duplicate member names")
-            if "backup_manifest.json" not in names:
-                raise BackupError("backup archive verification failed: missing manifest")
-            manifest_file = verify_tar.extractfile("backup_manifest.json")
-            if manifest_file is None:
-                raise BackupError("backup archive verification failed: unreadable manifest")
-            loaded_manifest = json.loads(manifest_file.read().decode("utf-8"))
-            if loaded_manifest.get("format_version") != BACKUP_ARCHIVE_SCHEMA_VERSION:
-                raise BackupError("backup archive verification failed: invalid format version")
-            members = {member.name: member for member in verify_tar.getmembers()}
-            for profile_info in loaded_manifest.get("profiles", []):
-                for rel_path, file_meta in profile_info.get("files", {}).items():
-                    member_name = f"profiles/{profile_info['id']}/browser-data/{rel_path}"
-                    member = members.get(member_name)
-                    if member is None or not member.isfile():
-                        raise BackupError(f"backup archive verification failed: unsafe member {member_name}")
-                    if member.size != file_meta["size"]:
-                        raise BackupError(
-                            f"backup archive verification failed: size mismatch for {member_name}"
-                        )
+        _verify_archive_structure(temp_archive)
 
         temp_archive.replace(out_path)
 
