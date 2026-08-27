@@ -9,3 +9,7 @@ profiles.json
 profiles.json.bak
 profiles.lock
 profiles/
+
+# local transient tooling directories
+.manual-tmp/
+/tmp*/
