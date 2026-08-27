@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from profiledock.cli import EXIT_SUCCESS, EXIT_USER_ERROR, app
@@ -18,6 +19,7 @@ from profiledock.doctor import (
     check_metadata_backup_state,
     check_metadata_schema,
     check_orphan_directories,
+    check_playwright_chromium,
     check_playwright_package,
     check_profile_directories,
     check_python_version,
@@ -206,6 +208,49 @@ def test_check_profile_directories_missing(tmp_path):
     exist_chk, path_chk = check_profile_directories(tmp_path)
     assert exist_chk.status == STATUS_WARNING
     assert "Missing data directories" in exist_chk.summary
+
+
+def test_check_playwright_chromium_action_guidance():
+    with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
+        chk = check_playwright_chromium()
+    assert chk.id == "playwright_chromium"
+    assert chk.status == STATUS_WARNING
+    assert chk.action == "Run 'playwright install chromium'."
+
+
+def _store_profile_with_data_dir(layout, data_dir: str) -> None:
+    doc = MetadataDocument(
+        schema_version=1,
+        profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", data_dir)],
+    )
+    save_metadata(doc, layout.profiles_file, layout.profiles_dir)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows treats path casing as equivalent")
+def test_check_profile_directories_tolerates_windows_casing(tmp_path):
+    layout = paths(tmp_path)
+    canonical = layout.profiles_dir / "p1" / "browser-data"
+    altered = str(canonical)[0].swapcase() + str(canonical)[1:]
+    assert altered != str(canonical)
+    _store_profile_with_data_dir(layout, altered)
+
+    exist_chk, path_chk = check_profile_directories(tmp_path)
+
+    assert exist_chk.status == STATUS_WARNING
+    assert path_chk.status == STATUS_OK
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="POSIX comparison stays case-sensitive")
+def test_check_profile_directories_linux_flags_casing_mismatch(tmp_path):
+    layout = paths(tmp_path)
+    canonical = layout.profiles_dir / "p1" / "browser-data"
+    altered = str(canonical).replace("/p1/", "/P1/")
+    assert altered != str(canonical)
+    _store_profile_with_data_dir(layout, altered)
+
+    _, path_chk = check_profile_directories(tmp_path)
+
+    assert path_chk.status == STATUS_FAILED
 
 
 def test_check_direct_chrome():
