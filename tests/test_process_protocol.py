@@ -425,9 +425,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
     data_dir.mkdir(parents=True)
 
     with patch("profiledock.process_manager._system_browser_executable", return_value=None):
-        with pytest.raises(
-            BrowserLaunchError, match="Google Chrome or Chromium executable not found"
-        ):
+        with pytest.raises(BrowserLaunchError, match="Google Chrome or Chromium executable not found"):
             start_direct_chrome(str(data_dir), tabs=1)
 
     dummy_chrome = tmp_path / "chrome.exe"
