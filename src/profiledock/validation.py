@@ -14,18 +14,14 @@ class ValidationError(Exception):
 
 
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https", "about"})
-_ALLOWED_PLAYWRIGHT_CHANNELS = frozenset(
-    {"chromium", "chrome", "msedge", "chrome-beta", "msedge-beta", "msedge-dev"}
-)
+_ALLOWED_PLAYWRIGHT_CHANNELS = frozenset({"chromium", "chrome"})
 _ALLOWED_DIRECT_BROWSERS = frozenset(
     {
         "chrome",
         "chromium",
-        "brave",
         "google-chrome",
         "google-chrome-stable",
         "chromium-browser",
-        "brave-browser",
     }
 )
 

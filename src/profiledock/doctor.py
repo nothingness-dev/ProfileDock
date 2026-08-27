@@ -359,8 +359,8 @@ def check_direct_chrome() -> DiagnosticCheck:
     return DiagnosticCheck(
         id=check_id,
         status=STATUS_WARNING,
-        summary="No Chrome, Chromium, or Brave executable found for direct mode.",
-        action="Install Google Chrome, Chromium, or Brave for direct engine support.",
+        summary="No Chrome or Chromium executable found for direct mode.",
+        action="Install Google Chrome or Chromium for direct engine support.",
     )
 
 
@@ -417,7 +417,7 @@ def check_browser_availability(
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
-            summary="Direct browser engine detected (Chrome, Chromium, or Brave).",
+            summary="Direct browser engine detected (Chrome or Chromium).",
         )
     if pw_check.status == STATUS_OK:
         return DiagnosticCheck(
@@ -435,7 +435,7 @@ def check_browser_availability(
         id=check_id,
         status=STATUS_FAILED,
         summary="No browser engine available.",
-        action="Install Playwright Chromium, Google Chrome, Chromium, or Brave.",
+        action="Install Playwright Chromium, Google Chrome, or Chromium.",
     )
 
 

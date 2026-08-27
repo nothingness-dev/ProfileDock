@@ -27,7 +27,7 @@ from ..backend import BrowserInfo, ProfileRow
 from .deck import VimOptionList
 
 CURSOR_GLYPH = "❯"  # noqa: RUF001
-KNOWN_BROWSER_NAMES = {"chrome", "chromium", "brave", "brave-browser", "msedge", "edge"}
+KNOWN_BROWSER_NAMES = {"chrome", "chromium"}
 ALL_PROFILES = "__all__"
 CUSTOM_BROWSER = "__custom__"
 

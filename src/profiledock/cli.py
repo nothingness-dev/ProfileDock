@@ -763,7 +763,7 @@ def launch(
         None,
         "--browser",
         "-b",
-        help="Browser name (chrome, chromium, brave) or executable path for this launch.",
+        help="Browser name (chrome, chromium) or executable path for this launch.",
     ),
     url: Optional[list[str]] = typer.Option(
         None,

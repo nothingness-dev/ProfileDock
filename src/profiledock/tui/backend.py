@@ -270,21 +270,6 @@ _BROWSER_CANDIDATES: tuple[tuple[str, ...], ...] = (
         "/snap/bin/chromium",
         "/Applications/Chromium.app/Contents/MacOS/Chromium",
     ),
-    (
-        "Brave Browser",
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        "/usr/bin/brave-browser",
-        "/usr/bin/brave",
-        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    ),
-    (
-        "Microsoft Edge",
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        "/usr/bin/microsoft-edge",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    ),
 )
 
 _browser_version_cache: dict[str, str] = {}

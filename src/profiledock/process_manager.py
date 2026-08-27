@@ -653,7 +653,7 @@ def start_direct_chrome(
     browser_bin = executable_path if executable_path is not None else _system_browser_executable(browser)
     if browser_bin is None or not Path(browser_bin).is_file():
         raise BrowserLaunchError(
-            "Google Chrome, Chromium, or Brave executable not found on system",
+            "Google Chrome or Chromium executable not found on system",
             "browser_not_found",
         )
 
@@ -1124,34 +1124,28 @@ def _launch_context(
 
 
 def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path]:
-    candidates: dict[str, list[Path]] = {"chrome": [], "chromium": [], "brave": []}
+    candidates: dict[str, list[Path]] = {"chrome": [], "chromium": []}
     if sys.platform == "win32":
         for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
             base = os.environ.get(variable)
             if base:
                 candidates["chrome"].append(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
-                candidates["brave"].append(
-                    Path(base) / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe"
-                )
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
             candidates["chromium"].append(Path(local_app_data) / "Chromium" / "Application" / "chrome.exe")
         commands = {
             "chrome": ("chrome", "google-chrome", "google-chrome-stable"),
             "chromium": ("chromium", "chromium-browser"),
-            "brave": ("brave", "brave-browser"),
         }
         for group, names in commands.items():
             candidates[group].extend(Path(value) for value in (shutil.which(name) for name in names) if value)
     elif sys.platform == "darwin":
         candidates["chrome"].append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
         candidates["chromium"].append(Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
-        candidates["brave"].append(Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"))
     else:
         commands = {
             "chrome": ("google-chrome", "google-chrome-stable", "chrome"),
             "chromium": ("chromium", "chromium-browser"),
-            "brave": ("brave-browser", "brave"),
         }
         for group, names in commands.items():
             candidates[group].extend(Path(value) for value in (shutil.which(name) for name in names) if value)
@@ -1161,13 +1155,11 @@ def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path
         "google-chrome-stable": "chrome",
         "chromium": "chromium",
         "chromium-browser": "chromium",
-        "brave": "brave",
-        "brave-browser": "brave",
     }
     selected_group = aliases.get(preferred.lower()) if preferred else None
     if preferred and selected_group is None:
         return None
-    groups = [selected_group] if selected_group else ["chrome", "chromium", "brave"]
+    groups = [selected_group] if selected_group else ["chrome", "chromium"]
     return next(
         (candidate for group in groups for candidate in candidates[group] if candidate.is_file()),
         None,
