@@ -22,6 +22,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..backup import create_backup_archive
+from ..browser_detection import browser_rows
 from ..cli_contract import EXIT_SUCCESS, EXIT_USER_ERROR, error_category
 from ..data_root import DataPaths
 from ..doctor import STATUS_FAILED, STATUS_OK, STATUS_WARNING, DiagnosticCheck, run_diagnostics
@@ -250,34 +251,41 @@ def recent_logs(paths: DataPaths, profile_id: str | None, last_n: int) -> list[d
 # ---------------------------------------------------------------------------
 # browser detection
 
-_BROWSER_CANDIDATES: tuple[tuple[str, ...], ...] = (
-    # (display name, candidate executable paths)
-    (
-        "Google Chrome",
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
-        "/opt/google/chrome/chrome",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    ),
-    (
-        "Chromium",
-        r"C:\Program Files\Chromium\Application\chrome.exe",
-        r"C:\Program Files (x86)\Chromium\Application\chrome.exe",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/snap/bin/chromium",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ),
-)
-
 _browser_version_cache: dict[str, str] = {}
+
+
+def _windows_file_version(executable: str) -> str:
+    """Read the VS_FIXEDFILEINFO product version from a PE image."""
+    import ctypes
+
+    version_api = ctypes.windll.version
+    size = version_api.GetFileVersionInfoSizeW(executable, None)
+    if not size:
+        return ""
+    data = ctypes.create_string_buffer(size)
+    if not version_api.GetFileVersionInfoW(executable, 0, size, data):
+        return ""
+    pointer = ctypes.c_void_p()
+    length = ctypes.c_uint()
+    if not version_api.VerQueryValueW(data, "\\", ctypes.byref(pointer), ctypes.byref(length)):
+        return ""
+    if length.value < 16:
+        return ""
+    fields = ctypes.cast(pointer, ctypes.POINTER(ctypes.c_uint * (length.value // 4))).contents
+    signature = fields[0]
+    major_pair, minor_pair = fields[2], fields[3]
+    if signature != 0xFEEF04BD:
+        return ""
+    return f"{major_pair >> 16}.{major_pair & 0xFFFF}.{minor_pair >> 16}.{minor_pair & 0xFFFF}"
 
 
 def _probe_version(executable: str) -> str:
     if sys.platform == "win32":
-        return ""
+        if executable in _browser_version_cache:
+            return _browser_version_cache[executable]
+        version = _windows_file_version(executable)
+        _browser_version_cache[executable] = version
+        return version
     cached = _browser_version_cache.get(executable)
     if cached:
         return cached
@@ -306,8 +314,7 @@ def _probe_version(executable: str) -> str:
 def detect_browsers() -> list[BrowserInfo]:
     """Detect installed browsers for the interactive browser picker."""
     found: list[BrowserInfo] = []
-    for candidates in _BROWSER_CANDIDATES:
-        name, paths = candidates[0], candidates[1:]
+    for name, paths in browser_rows():
         for candidate in paths:
             expanded = Path(os.path.expandvars(candidate))
             if expanded.is_file():

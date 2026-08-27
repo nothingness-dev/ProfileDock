@@ -3,7 +3,6 @@ import ctypes
 import hmac
 import json
 import os
-import shutil
 import signal
 import socket
 import subprocess
@@ -22,6 +21,7 @@ from typing import (
 )
 from uuid import uuid4
 
+from .browser_detection import system_browser_executable as _system_browser_impl
 from .fsops import replace_with_retry as _replace_with_retry
 from .fsops import write_all as _write_all
 
@@ -1098,72 +1098,17 @@ def _launch_context(
 
     try:
         return playwright.chromium.launch_persistent_context(data_dir, **kwargs), "chromium"
-    except PlaywrightError as chromium_error:
-        try:
-            return playwright.chromium.launch_persistent_context(
-                data_dir, channel="chrome", **kwargs
-            ), "chrome"
-        except PlaywrightError as chrome_error:
-            executable = _system_browser_executable()
-            if executable is not None:
-                try:
-                    return playwright.chromium.launch_persistent_context(
-                        data_dir,
-                        executable_path=str(executable),
-                        **kwargs,
-                    ), "system"
-                except PlaywrightError as system_error:
-                    raise PlaywrightError(
-                        f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}"
-                        f"\nSystem browser: {system_error}"
-                    ) from chromium_error
-            raise PlaywrightError(
-                f"Playwright Chromium: {chromium_error}\nGoogle Chrome: {chrome_error}"
-                f"\nSystem browser: not found"
-            ) from chromium_error
+    except PlaywrightError as error:
+        raise PlaywrightError(
+            f"Playwright Chromium is not available ({error}). "
+            "Run 'playwright install chromium', or switch this profile to the "
+            "direct engine to use an installed Google Chrome or Chromium."
+        ) from error
 
 
 def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path]:
-    candidates: dict[str, list[Path]] = {"chrome": [], "chromium": []}
-    if sys.platform == "win32":
-        for variable in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            base = os.environ.get(variable)
-            if base:
-                candidates["chrome"].append(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe")
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            candidates["chromium"].append(Path(local_app_data) / "Chromium" / "Application" / "chrome.exe")
-        commands = {
-            "chrome": ("chrome", "google-chrome", "google-chrome-stable"),
-            "chromium": ("chromium", "chromium-browser"),
-        }
-        for group, names in commands.items():
-            candidates[group].extend(Path(value) for value in (shutil.which(name) for name in names) if value)
-    elif sys.platform == "darwin":
-        candidates["chrome"].append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
-        candidates["chromium"].append(Path("/Applications/Chromium.app/Contents/MacOS/Chromium"))
-    else:
-        commands = {
-            "chrome": ("google-chrome", "google-chrome-stable", "chrome"),
-            "chromium": ("chromium", "chromium-browser"),
-        }
-        for group, names in commands.items():
-            candidates[group].extend(Path(value) for value in (shutil.which(name) for name in names) if value)
-    aliases = {
-        "chrome": "chrome",
-        "google-chrome": "chrome",
-        "google-chrome-stable": "chrome",
-        "chromium": "chromium",
-        "chromium-browser": "chromium",
-    }
-    selected_group = aliases.get(preferred.lower()) if preferred else None
-    if preferred and selected_group is None:
-        return None
-    groups = [selected_group] if selected_group else ["chrome", "chromium"]
-    return next(
-        (candidate for group in groups for candidate in candidates[group] if candidate.is_file()),
-        None,
-    )
+    """Thin delegation kept so callers and tests can patch this name."""
+    return _system_browser_impl(preferred)
 
 
 def _controller(

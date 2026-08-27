@@ -22,12 +22,13 @@ from textual.widget import Widget
 from textual.widgets import Checkbox, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
+from ...browser_detection import DIRECT_BROWSER_ALIASES
 from ..actions import CHROMIUM_FLAGS, ActionSpec, FieldKind, FieldSpec, build_argv, fuzzy_score
 from ..backend import BrowserInfo, ProfileRow
 from .deck import VimOptionList
 
 CURSOR_GLYPH = "❯"  # noqa: RUF001
-KNOWN_BROWSER_NAMES = {"chrome", "chromium"}
+KNOWN_BROWSER_NAMES = frozenset(DIRECT_BROWSER_ALIASES)
 ALL_PROFILES = "__all__"
 CUSTOM_BROWSER = "__custom__"
 

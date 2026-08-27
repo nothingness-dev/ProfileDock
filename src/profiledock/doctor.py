@@ -1,5 +1,6 @@
 import importlib.metadata
 import json
+import logging
 import os
 import shutil
 import sys
@@ -34,6 +35,8 @@ from .version import __version__
 STATUS_OK = "ok"
 STATUS_WARNING = "warning"
 STATUS_FAILED = "failed"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -378,10 +381,10 @@ def check_system_chrome() -> DiagnosticCheck:
                     status=STATUS_OK,
                     summary="System Google Chrome is installed and functional.",
                 )
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                logger.debug("System Google Chrome channel probe failed.", exc_info=exc)
+    except Exception as exc:
+        logger.debug("Playwright was unavailable for the system Chrome check.", exc_info=exc)
 
     executable = _system_browser_executable()
     if executable is not None:
@@ -396,8 +399,8 @@ def check_system_chrome() -> DiagnosticCheck:
                 status=STATUS_OK,
                 summary=f"System browser is installed and functional at {executable}.",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Executable-path Playwright probe failed.", exc_info=exc)
 
     return DiagnosticCheck(
         id=check_id,
@@ -429,7 +432,7 @@ def check_browser_availability(
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
-            summary="Browser engine available (System Google Chrome fallback).",
+            summary="Browser engine available (System Google Chrome).",
         )
     return DiagnosticCheck(
         id=check_id,

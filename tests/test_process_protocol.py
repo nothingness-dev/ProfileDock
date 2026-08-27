@@ -669,8 +669,8 @@ def test_system_browser_preference_selects_requested_family(tmp_path):
         return None
 
     with (
-        patch("profiledock.process_manager.sys.platform", "linux"),
-        patch("profiledock.process_manager.shutil.which", side_effect=find_browser),
+        patch("profiledock.browser_detection.sys.platform", "linux"),
+        patch("profiledock.browser_detection.shutil.which", side_effect=find_browser),
     ):
         assert _system_browser_executable("chrome") == chrome
         assert _system_browser_executable("chromium") == chromium

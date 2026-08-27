@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+from .browser_detection import DIRECT_BROWSER_ALIASES
 from .data_root import _is_link
 from .models import LaunchConfig, Profile
 
@@ -15,15 +16,7 @@ class ValidationError(Exception):
 
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https", "about"})
 _ALLOWED_PLAYWRIGHT_CHANNELS = frozenset({"chromium", "chrome"})
-_ALLOWED_DIRECT_BROWSERS = frozenset(
-    {
-        "chrome",
-        "chromium",
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium-browser",
-    }
-)
+_ALLOWED_DIRECT_BROWSERS = DIRECT_BROWSER_ALIASES
 
 
 def validate_url(url: str) -> None:

@@ -194,7 +194,7 @@ def test_socket_initialization_failure_writes_category(tmp_path):
     assert "socket unavailable" in error["message"]
 
 
-def test_browser_attempt_errors_identify_both_channels():
+def test_browser_attempt_errors_identify_the_missing_channel():
     playwright = pytest.importorskip("playwright.sync_api")
 
     class FailingChromium:
@@ -206,26 +206,4 @@ def test_browser_attempt_errors_identify_both_channels():
     with pytest.raises(playwright.Error) as raised:
         _launch_context(instance, "unused", True)
     assert "Playwright Chromium" in str(raised.value)
-    assert "Google Chrome" in str(raised.value)
-    assert "System browser" in str(raised.value)
-
-
-def test_system_browser_executable_is_used_as_final_fallback(tmp_path):
-    playwright = pytest.importorskip("playwright.sync_api")
-    executable = tmp_path / "chromium"
-    executable.write_text("browser", encoding="utf-8")
-
-    class Chromium:
-        def launch_persistent_context(self, data_dir, **kwargs):
-            if kwargs.get("executable_path") == str(executable):
-                return "context"
-            raise playwright.Error("unavailable")
-
-    instance = type("Playwright", (), {"chromium": Chromium()})()
-    with patch(
-        "profiledock.process_manager._system_browser_executable",
-        return_value=executable,
-    ):
-        context, channel = _launch_context(instance, "unused", True)
-    assert context == "context"
-    assert channel == "system"
+    assert "playwright install chromium" in str(raised.value)
