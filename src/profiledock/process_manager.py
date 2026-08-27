@@ -484,6 +484,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                 return "starting"
             if clean_stale:
                 _unlink_quietly(path)
+                return "stopped"
             return "stale"
         if not state or not _valid_state(state, Path(data_dir).parent.name):
             return "error"
@@ -493,6 +494,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                 return "closing"
             if clean_stale:
                 _unlink_quietly(path)
+                return "stopped"
             return "stale"
         pid = int(state.get("controller_pid", -1))
         if pid <= 0:
@@ -501,10 +503,12 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                 return "starting"
             if clean_stale:
                 _unlink_quietly(path)
+                return "stopped"
             return "stale"
         if not _alive(pid):
             if clean_stale:
                 _unlink_quietly(path)
+                return "stopped"
             return "stale"
         port = int(state.get("port", 0))
         if not port:
@@ -702,6 +706,7 @@ def start_direct_chrome(
         f"--user-data-dir={data_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--disable-background-mode",
         "--new-window",
     ]
     if window_width is not None and window_height is not None:
