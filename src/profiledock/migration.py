@@ -16,6 +16,7 @@ from .data_root import (
     ensure_within_root,
     validate_path_component,
 )
+from .fsops import replace_with_retry as _replace_with_retry
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value
 from .process_manager import _alive, is_active_for_mutation
 from .storage import (
@@ -500,7 +501,7 @@ def migrate_project(
                     raise MigrationError(f"source profile data changed during migration: {profile.id}")
 
             for temporary, final_profile in temporary_directories:
-                temporary.replace(final_profile)
+                _replace_with_retry(temporary, final_profile)
                 finalized_directories.append(final_profile)
 
             new_profiles = list(existing_profiles)
