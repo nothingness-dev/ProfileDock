@@ -32,3 +32,12 @@ def test_setup_documentation_matches_script_flags():
     documentation = (ROOT / "docs" / "guides" / "installation.md").read_text(encoding="utf-8")
     for option in ("--dev", "--with-playwright", "--test"):
         assert option in documentation
+
+
+def test_documented_python_requirement_matches_package_metadata():
+    package_metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    installation = (ROOT / "docs" / "guides" / "installation.md").read_text(encoding="utf-8")
+    assert 'requires-python = ">=3.10"' in package_metadata
+    assert "Python 3.10 or newer is required." in readme
+    assert "Python 3.10 or newer." in installation
