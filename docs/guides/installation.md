@@ -4,7 +4,7 @@
 
 - Python 3.9 or newer.
 - Windows, macOS, or Linux.
-- Google Chrome, Chromium, or Brave for the default Direct engine.
+- Google Chrome or Chromium for the default Direct engine.
 - Playwright Chromium only when using the Playwright engine or browser integration tests.
 
 The base runtime depends on Typer and the Python standard library. Browser automation is optional.

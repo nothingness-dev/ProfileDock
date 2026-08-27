@@ -69,7 +69,7 @@ Activate `.venv`, reinstall with `pip install -e .`, or invoke the executable di
 
 ### Browser executable not found
 
-Install Chrome, Chromium, or Brave for Direct mode. For Playwright mode, install the optional dependency and Chromium:
+Install Chrome or Chromium for Direct mode. For Playwright mode, install the optional dependency and Chromium:
 
 ```bash
 pip install -e ".[playwright]"

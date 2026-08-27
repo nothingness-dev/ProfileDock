@@ -4,7 +4,7 @@
 
 ### Direct engine
 
-`direct` is the default. It launches an installed Google Chrome, Chromium, or Brave executable directly and requires no Playwright package.
+`direct` is the default. It launches an installed Google Chrome or Chromium executable directly and requires no Playwright package.
 
 ```bash
 profiledock create Work --engine direct

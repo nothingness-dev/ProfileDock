@@ -4,7 +4,7 @@ ProfileDock is a lightweight Python CLI for managing isolated, persistent Chromi
 
 ## Features
 
-- Direct Chrome, Chromium, or Brave launches with no automation dependency.
+- Direct Chrome or Chromium launches with no automation dependency.
 - Optional Playwright persistent contexts with exact page counts.
 - Create, list, inspect, configure, launch, close, rename, and delete profiles.
 - Versioned backup, restore, legacy migration, diagnostics, repair, logs, and JSON output.
