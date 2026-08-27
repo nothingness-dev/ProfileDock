@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Optional
 
 from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
@@ -164,9 +164,12 @@ def _elevated_file_hint(path: Path, exc: Exception) -> Optional[str]:
     try:
         probe = path.parent / f".pd-write-probe-{os.getpid()}.tmp"
         probe.write_text("", encoding="utf-8")
-        probe.unlink()
     except OSError:
         return None
+    try:
+        probe.unlink(missing_ok=True)
+    except OSError:
+        pass
     return (
         "This file was likely created by an elevated (administrator) process, so its ACL "
         "excludes your normal account. From an ADMINISTRATOR PowerShell run: "
@@ -224,6 +227,32 @@ def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
         )
 
 
+def _contained_within(child: Path, parent: Path) -> bool:
+    """Directory containment test honoring case-insensitive filesystems.
+
+    Strict ``relative_to`` misses real locations when segment casing differs,
+    which happens for missing leaf directories whose drive letter or folder
+    name was recorded with different case than the live tree (common on
+    Windows and macOS).
+    """
+    try:
+        return bool(child.relative_to(parent))
+    except ValueError:
+        pass
+    if sys.platform == "win32":
+        child_part = PureWindowsPath(str(child).lower())
+        parent_part = PureWindowsPath(str(parent).lower())
+    elif sys.platform == "darwin":
+        child_part = PurePosixPath(str(child).lower())
+        parent_part = PurePosixPath(str(parent).lower())
+    else:
+        return False
+    try:
+        return bool(child_part.relative_to(parent_part))
+    except ValueError:
+        return False
+
+
 def check_profile_directories(root: Path) -> tuple[DiagnosticCheck, DiagnosticCheck]:
     existence_id = "profile_directories_exist"
     paths_id = "profile_paths_under_data_root"
@@ -268,7 +297,8 @@ def check_profile_directories(root: Path) -> tuple[DiagnosticCheck, DiagnosticCh
             missing_dirs.append(f"{p.id} ({p.data_dir})")
         try:
             resolved = data_path.resolve()
-            resolved.relative_to(profiles_root)
+            if not _contained_within(resolved, profiles_root):
+                invalid_paths.append(f"{p.id} ({p.data_dir})")
         except (ValueError, OSError):
             invalid_paths.append(f"{p.id} ({p.data_dir})")
 
@@ -346,7 +376,7 @@ def check_playwright_chromium() -> DiagnosticCheck:
             id=check_id,
             status=STATUS_WARNING,
             summary=f"Playwright Chromium is not available: {exc}",
-            action="Run 'playwright install chromium' or ensure Google Chrome is installed.",
+            action="Run 'playwright install chromium'.",
         )
 
 
