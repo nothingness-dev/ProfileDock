@@ -118,10 +118,10 @@ class TestInteractiveApp:
     async def test_configured_theme_env_respected(self, monkeypatch):
         from profiledock.interactive import ProfileDockApp
 
-        monkeypatch.setenv("PROFILEDOCK_THEME", "nord")
+        monkeypatch.setenv("PROFILEDOCK_THEME", "light")
         app_instance = ProfileDockApp()
         async with app_instance.run_test():
-            assert app_instance.theme == "nord"
+            assert app_instance.theme == "light"
 
     @pytest.mark.asyncio
     async def test_tiny_terminal_hides_panels(self):
@@ -224,16 +224,49 @@ class TestInteractiveApp:
             assert manager.list_profiles() == []
 
     @pytest.mark.asyncio
-    async def test_single_click_runs_command(self):
+    async def test_single_click_moves_selection_without_running(self):
         self._make_profiles()
         from profiledock.interactive import ProfileDockApp
 
         app_instance = ProfileDockApp()
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance)
+            deck = app_instance.query_one("#deck")
+            assert deck.highlighted == 1
             await pilot.click("#deck", offset=(6, 2))
             await self._settle(pilot, app_instance)
-            assert app_instance._mode == "output"
+            assert app_instance._mode == "browse"
+            assert deck.highlighted == 2
+
+    @pytest.mark.asyncio
+    async def test_form_gates_deck_and_rail_then_restores_them(self):
+        self._make_profiles()
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.widgets.forms import FormPanel
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            deck = app_instance.query_one("#deck")
+            rail = app_instance.query_one("#rail")
+            hl_before = deck.highlighted
+
+            await pilot.press("o")  # open launch form
+            await pilot.pause()
+            assert deck.disabled
+            assert rail.disabled
+
+            # clicks on gated panes must not move their selection mid-form
+            await pilot.click("#deck", offset=(6, 2))
+            await self._settle(pilot, app_instance)
+            assert app_instance.query_one("#form-pane", FormPanel).styles.display == "block"
+            assert deck.highlighted == hl_before
+
+            await pilot.press("escape")
+            await self._settle(pilot, app_instance)
+            assert not deck.disabled
+            assert not rail.disabled
+            assert deck.has_focus
 
     @pytest.mark.asyncio
     async def test_form_reopens_after_cancel_without_duplicate_ids(self):
