@@ -426,7 +426,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
 
     with patch("profiledock.process_manager._system_browser_executable", return_value=None):
         with pytest.raises(
-            BrowserLaunchError, match="Google Chrome, Chromium, or Brave executable not found"
+            BrowserLaunchError, match="Google Chrome or Chromium executable not found"
         ):
             start_direct_chrome(str(data_dir), tabs=1)
 
@@ -659,15 +659,15 @@ def test_system_browser_preference_selects_requested_family(tmp_path):
     from profiledock.process_manager import _system_browser_executable
 
     chrome = tmp_path / "google-chrome"
-    brave = tmp_path / "brave-browser"
+    chromium = tmp_path / "chromium"
     chrome.write_text("chrome", encoding="utf-8")
-    brave.write_text("brave", encoding="utf-8")
+    chromium.write_text("chromium", encoding="utf-8")
 
     def find_browser(name):
         if name == "google-chrome":
             return str(chrome)
-        if name == "brave-browser":
-            return str(brave)
+        if name == "chromium":
+            return str(chromium)
         return None
 
     with (
@@ -675,7 +675,7 @@ def test_system_browser_preference_selects_requested_family(tmp_path):
         patch("profiledock.process_manager.shutil.which", side_effect=find_browser),
     ):
         assert _system_browser_executable("chrome") == chrome
-        assert _system_browser_executable("brave") == brave
+        assert _system_browser_executable("chromium") == chromium
         assert _system_browser_executable("unsupported") is None
 
 

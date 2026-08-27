@@ -67,7 +67,8 @@ def test_validate_launch_config():
 
 def test_validate_browser_aliases_and_paths(tmp_path):
     validate_browser("chrome", "direct")
-    validate_browser("msedge", "playwright")
+    validate_browser("chrome", "playwright")
+    validate_browser("chromium", "playwright")
 
     executable = tmp_path / "browser.exe"
     executable.write_text("browser", encoding="utf-8")
