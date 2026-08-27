@@ -435,7 +435,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
         pid = 12345
 
     with (
-        patch("profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()),
+        patch("profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()) as popen,
         patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
     ):
         state = start_direct_chrome(str(data_dir), tabs=2, executable_path=dummy_chrome)
@@ -443,6 +443,7 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
         assert state["engine"] == "direct"
         assert state["tabs"] == 2
         assert state["channel"] == "chrome"
+        assert "--disable-background-mode" in popen.call_args.args[0]
 
     with (
         patch("profiledock.process_manager._alive", return_value=True),

@@ -75,6 +75,8 @@ def test_get_status_states(manager):
     starting["port"] = 1
     path.write_text(json.dumps(starting), encoding="utf-8")
     assert get_status(profile.data_dir, clean_stale=False) == "stale"
+    assert get_status(profile.data_dir) == "stopped"
+    assert not path.exists()
 
     err = path.parent / "controller.error"
     err.write_text('{"error_type": "test_err", "message": "fail"}', encoding="utf-8")
