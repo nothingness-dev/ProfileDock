@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Python 3.9 or newer.
+- Python 3.10 or newer.
 - Windows, macOS, or Linux.
 - Google Chrome or Chromium for the default Direct engine.
 - Playwright Chromium only when using the Playwright engine or browser integration tests.

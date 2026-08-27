@@ -15,7 +15,7 @@ ProfileDock is a lightweight Python CLI for managing isolated, persistent Chromi
 
 ## Quick installation
 
-Python 3.9 or newer is required.
+Python 3.10 or newer is required.
 
 ```bash
 python scripts/setup_project.py
