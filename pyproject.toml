@@ -19,14 +19,14 @@ version = {attr = "profiledock.version.__version__"}
 playwright = ["playwright>=1.40"]
 interactive = ["textual>=1.0"]
 test = [
-    "pytest>=7",
+    "pytest>=8.4",
     "pytest-asyncio>=1.0",
     "pytest-timeout>=2.3",
     "playwright>=1.40",
     "textual>=1.0",
 ]
 dev = [
-    "pytest>=7",
+    "pytest>=8.4",
     "pytest-asyncio>=1.0",
     "pytest-timeout>=2.3",
     "pytest-xdist>=3.5",
