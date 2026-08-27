@@ -21,7 +21,6 @@ pyee==13.0.1
 Pygments==2.20.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
-pytest-forked==1.7.5
 pytest-timeout==2.4.0
 pytest-xdist==3.8.0
 rich==15.0.0

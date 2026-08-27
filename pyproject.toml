@@ -7,7 +7,7 @@ name = "profiledock"
 dynamic = ["version"]
 description = "A lightweight CLI for isolated persistent Chromium profiles"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "typer>=0.9",
 ]
