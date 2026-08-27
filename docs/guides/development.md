@@ -16,6 +16,15 @@ playwright install chromium
 
 `requirements.txt` contains runtime requirements. `requirements-dev.lock` contains reproducible development and test requirements. `pyproject.toml` remains the package metadata and optional-extra source.
 
+Regenerate the lockfile only after intentional dependency changes:
+
+```bash
+pip install -e ".[dev]"
+pip freeze > requirements-dev.lock
+```
+
+Review the diff before committing; platform-specific pins differ between operating systems.
+
 ## Test suite
 
 Run all tests:

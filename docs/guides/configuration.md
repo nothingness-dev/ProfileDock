@@ -23,7 +23,7 @@ playwright install chromium
 profiledock launch Work --tabs 3 --engine playwright
 ```
 
-If Playwright Chromium is unavailable, ProfileDock attempts supported installed browser fallbacks and reports a concise launch error.
+The Playwright engine launches Chromium only. When the bundled browser is missing, launch fails with instructions to run `playwright install chromium`; switch the profile to the direct engine to start an installed Google Chrome or Chromium instead.
 
 ## Engine precedence
 

@@ -65,7 +65,7 @@ ProfileDock migrates supported persistent formats automatically with backup and 
 
 ### `profiledock` is not recognized
 
-Activate `.venv`, reinstall with `pip install -e .`, or invoke the executable directly from `.venv/bin` or `.venv\Scripts`.
+Activate `.venv`, reinstall with `pip install -e .`, or invoke the executable directly from `.venv/bin` or `.venv\Scripts`. From an environment where the package is importable, `python -m profiledock` behaves identically to the console script.
 
 ### Browser executable not found
 
