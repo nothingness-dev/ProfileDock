@@ -12,31 +12,28 @@ from textual.message import Message
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
-from ..actions import ActionSpec, icons_enabled
+from ..actions import ActionSpec
 from ..backend import ProfileRow
 from .deck import CURSOR_GLYPH, VimOptionList
 
-PROFILE_GLYPH = "󰈹"
-PROFILE_FALLBACK = "#"
-
 _STATUS_STYLE = {
-    "running": ("●", "green"),
-    "starting": ("◐", "yellow"),
-    "closing": ("◐", "yellow"),
-    "stale": ("✗", "red"),
-    "error": ("✗", "red"),
-    "stopped": ("○", "$text-muted"),
+    "running": "green",
+    "starting": "yellow",
+    "closing": "yellow",
+    "stale": "red",
+    "error": "red",
+    "stopped": "$text-muted",
 }
 
 
 def _status_badge(status: str, pid: int | None) -> str:
-    dot, color = _STATUS_STYLE.get(status, ("○", "$text-muted"))
+    color = _STATUS_STYLE.get(status, "$text-muted")
     label = status.upper()
     if status == "running" and pid:
-        label = f"RUNNING PID {pid}"
+        label = f"RUNNING {pid}"
     if status == "stopped":
         label = "IDLE"
-    return f"[$text-muted]\\[[/][{color}]{dot} {label}[/][$text-muted]][/]"
+    return f"[$text-muted]\\[[/][{color}]{label}[/][$text-muted]][/]"
 
 
 class ProfileRail(VimOptionList):
@@ -71,7 +68,7 @@ class ProfileRail(VimOptionList):
         """The highlighted profile changed."""
 
     class Selected(RailMessage):
-        """A profile row was chosen with Enter or click."""
+        """A profile row was chosen with Enter."""
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -144,21 +141,20 @@ class ProfileRail(VimOptionList):
             self._refresh_prompt(previous, False)
         self._refresh_prompt(current, True)
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        event.stop()
-        self.post_message(self.Selected(self, self._rows.get(str(event.option.id or ""))))
+    def _emit_selected(self, identifier: str) -> None:
+        row = self._rows.get(identifier)
+        if row is not None:
+            self.post_message(self.Selected(self, row))
 
 
 def _row_prompt(row: ProfileRow, name_width: int, highlighted: bool) -> str:
-    icon = PROFILE_GLYPH if icons_enabled() else PROFILE_FALLBACK
     name = row.name
     if len(name) > name_width:
         name = name[: max(1, name_width - 1)] + "…"
     name = name.ljust(name_width)
     cursor = f"[$accent]{CURSOR_GLYPH}[/]" if highlighted else " "
-    glyph = f"[$secondary]{icon}[/]"
     label = f"[$text]{name}[/]"
-    return f"{cursor} {glyph} {label}  {_status_badge(row.status, row.pid)}"
+    return f"{cursor} {label}  {_status_badge(row.status, row.pid)}"
 
 
 class TelemetryCards(Static):
@@ -194,10 +190,10 @@ class CommandPreview(Static):
     """
 
     def show_action(self, spec: ActionSpec) -> None:
-        destructive = "\n  [bold $error]⚠ destructive: requires confirmation[/]" if spec.destructive else ""
+        destructive = "\n[bold $error]destructive: confirmation required[/]" if spec.destructive else ""
         self.update(
-            f"[bold $accent]profiledock {spec.label}[/]"
-            f" [$text-muted]─[/] [$text]{spec.description}[/]"
+            f"[bold]profiledock {spec.label}[/]"
+            f" [$text-muted]- {spec.description}[/]"
             f"\n[$text-muted]key {spec.hotkey.upper()} · group {spec.group}{destructive}[/]"
         )
 

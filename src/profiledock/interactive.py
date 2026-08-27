@@ -28,8 +28,8 @@ except ImportError:  # pragma: no cover - exercised only without the extra
     TEXTUAL_AVAILABLE = False
     MIN_HEIGHT = 18
     MIN_WIDTH = 70
-    DEFAULT_THEME = "tokyo-night"
-    THEME_CYCLE = ["tokyo-night", "catppuccin-mocha", "nord"]
+    DEFAULT_THEME = "dark"
+    THEME_CYCLE = ["dark", "light"]
 
     def configured_theme() -> str:
         return DEFAULT_THEME

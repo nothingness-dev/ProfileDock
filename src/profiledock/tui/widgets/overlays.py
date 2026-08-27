@@ -31,7 +31,7 @@ class ConfirmModal(ModalScreen[bool]):
         max-width: 90%;
         height: auto;
         max-height: 80%;
-        border: round $error;
+        border: solid $error;
         background: $surface;
         padding: 1 2;
     }
@@ -86,7 +86,7 @@ class ConfirmModal(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
-            yield Label(f"⚠  profiledock {self._spec.label}", id="confirm-title")
+            yield Label(f"Warning: profiledock {self._spec.label}", id="confirm-title")
             if self._typed:
                 message = (
                     f"Delete profile '{self._target}' and all of its browser data permanently?\n"

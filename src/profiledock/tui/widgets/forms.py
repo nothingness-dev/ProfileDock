@@ -27,7 +27,7 @@ from ..actions import CHROMIUM_FLAGS, ActionSpec, FieldKind, FieldSpec, build_ar
 from ..backend import BrowserInfo, ProfileRow
 from .deck import VimOptionList
 
-CURSOR_GLYPH = "❯"  # noqa: RUF001
+CURSOR_GLYPH = ">"
 KNOWN_BROWSER_NAMES = frozenset(DIRECT_BROWSER_ALIASES)
 ALL_PROFILES = "__all__"
 CUSTOM_BROWSER = "__custom__"
@@ -59,7 +59,7 @@ def _profile_prompt(row: ProfileRow, width: int, selected: bool) -> str:
         status = "IDLE"
     pid = f" PID {row.pid}" if row.status == "running" and row.pid else ""
     color = _STATUS_COLORS.get(row.status, "$text-muted")
-    cursor = "[$accent]›[/]" if selected else " "  # noqa: RUF001
+    cursor = "[$accent]>[/]" if selected else " "
     name = row.name.ljust(width)
     label = f"[$text]{name}[/]"
     badge = f"[bold {color}]\\[{status}{pid}][/]"
@@ -351,8 +351,16 @@ class FormPanel(VerticalScroll):
         padding: 1 2;
     }
     #form-title {
-        color: $accent;
+        color: $text;
         text-style: bold;
+        margin-bottom: 0;
+    }
+    #form-subtitle {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    #form-destructive {
+        color: $error;
         margin-bottom: 1;
     }
     FormPanel Input {
@@ -391,6 +399,14 @@ class FormPanel(VerticalScroll):
         display: none;
     }
     FormPanel FieldRow.advanced.-visible {
+        display: block;
+    }
+    FormPanel Label.adv-header {
+        display: none;
+        color: $text-muted;
+        margin-top: 1;
+    }
+    FormPanel Label.adv-header.-visible {
         display: block;
     }
     """
@@ -437,8 +453,8 @@ class FormPanel(VerticalScroll):
 
     def toggle_advanced(self) -> bool:
         self._advanced = not self._advanced
-        for row in self.query("FieldRow.advanced"):
-            row.set_class(self._advanced, "-visible")
+        for widget in self.query(".advanced"):
+            widget.set_class(self._advanced, "-visible")
         return self._advanced
 
     def clear(self) -> None:
@@ -601,15 +617,31 @@ class FormPanel(VerticalScroll):
                 self._clear_errors()
 
     def _build_fields(self, spec: ActionSpec, preselect_profile: str) -> list[Widget]:
-        widgets: list[Widget] = [Label(f"profiledock {spec.label} ─ {spec.description}", id="form-title")]
+        widgets: list[Widget] = [Label(f"profiledock {spec.label}", id="form-title")]
+        widgets.append(Label(spec.description, id="form-subtitle"))
+        if spec.destructive:
+            widgets.append(Label("destructive action - confirmation required", id="form-destructive"))
+        advanced_header_done = False
         for field_spec in spec.fields:
+            if field_spec.advanced and not advanced_header_done:
+                widgets.append(Label("- advanced options -", classes="adv-header advanced"))
+                advanced_header_done = True
             widgets.append(self._build_field(field_spec, preselect_profile))
         widgets.append(Label("", id="form-validation"))
         widgets.append(Static("", id="form-preview", markup=False))
         return widgets
 
+    def _field_label(self, spec: FieldSpec) -> Label:
+        markup = f"{spec.label}"
+        if spec.required:
+            markup += " [$error]*[/]"
+        return Label(markup, classes="field-label")
+
+    @staticmethod
+    def _hint_label(spec: FieldSpec) -> Label | None:
+        return Label(spec.hint, classes="field-hint") if spec.hint else None
+
     def _build_field(self, spec: FieldSpec, preselect_profile: str) -> Widget:
-        label = Label(spec.label, classes="field-label")
         if spec.kind in (FieldKind.TEXT, FieldKind.NUMBER, FieldKind.PATH):
             restrict = "[0-9]" if spec.kind is FieldKind.NUMBER else None
             control: Widget = FormInput(
@@ -618,22 +650,22 @@ class FormPanel(VerticalScroll):
                 id=f"field-{spec.name}",
                 restrict=restrict,
             )
-            return self._simple_row(spec, label, control)
+            return self._simple_row(spec, control)
         if spec.kind is FieldKind.ENGINE:
             entries = [(option, option) for option in (spec.options or ("direct", "playwright"))]
             control = ChoiceList(entries, selected=spec.default or "direct", id=f"choice-{spec.name}")
-            return self._simple_row(spec, label, control)
+            return self._simple_row(spec, control)
         if spec.kind is FieldKind.BROWSER:
             entries = [(browser.label(), browser.path) for browser in self._browsers]
             entries.append(("Custom Binary Path…", CUSTOM_BROWSER))
-            control = ChoiceList(
+            choice = ChoiceList(
                 entries,
                 selected=entries[0][1] if entries else CUSTOM_BROWSER,
                 id=f"choice-{spec.name}",
             )
             custom = FormInput(placeholder="/path/to/browser", id=f"field-{spec.name}-custom")
             custom.display = False
-            return self._stacked_row(spec, label, control, custom, focus_custom_on=True)
+            return self._stacked_row(spec, choice, custom, focus_custom_on=True)
         if spec.kind in (FieldKind.PROFILE, FieldKind.PROFILE_OR_ALL):
             preselect = preselect_profile if self._rows else ""
             if spec.kind is FieldKind.PROFILE_OR_ALL and not preselect:
@@ -644,41 +676,51 @@ class FormPanel(VerticalScroll):
                 preselect=preselect,
                 id=f"picker-{spec.name}",
             )
-            return self._simple_row(spec, label, control)
+            return self._simple_row(spec, control)
         if spec.kind is FieldKind.FLAGS:
             control = FlagsList(list(CHROMIUM_FLAGS), id=f"flags-{spec.name}")
             custom = FormInput(
                 placeholder="extra --flags separated by spaces", id=f"field-{spec.name}-custom"
             )
-            return self._stacked_row(spec, label, control, custom)
+            return self._stacked_row(spec, control, custom)
         if spec.kind is FieldKind.TOGGLE:
             control = Checkbox(spec.label, value=spec.toggled, id=f"toggle-{spec.name}")
-            return self._simple_row(spec, control)
+            return self._simple_row(spec, control, labeled=False)
         return Label(f"unsupported field: {spec.name}")
 
-    def _simple_row(self, spec: FieldSpec, *children: Widget) -> Widget:
-        self._order.extend(children)
-        classes = "advanced" if spec.advanced else None
-        if classes:
-            return FieldRow(spec, *children, id=f"row-{spec.name}", classes=classes)
-        return FieldRow(spec, *children, id=f"row-{spec.name}")
+    def _simple_row(self, spec: FieldSpec, *controls: Widget, labeled: bool = True) -> Widget:
+        """Assemble one labeled form row; optional muted hint trails the controls."""
+        widgets: list[Widget] = [self._field_label(spec)] if labeled else []
+        widgets.extend(controls)
+        self._order.extend(controls)
+        hint = self._hint_label(spec)
+        if hint is not None:
+            widgets.append(hint)
+        return FieldRow(spec, *widgets, id=f"row-{spec.name}", classes="advanced" if spec.advanced else None)
 
     def _stacked_row(
         self,
         spec: FieldSpec,
-        label: Label,
         primary: Widget,
         secondary: Widget,
         focus_custom_on: bool = False,
     ) -> Widget:
-        inner = Vertical(primary, secondary, classes="field-stack")
+        """Labeled row whose controls (plus optional hint) sit in one vertical stack."""
         self._order.append(primary)
         if not focus_custom_on:
             self._order.append(secondary)
-        classes = "advanced" if spec.advanced else None
-        if classes:
-            return FieldRow(spec, label, inner, id=f"row-{spec.name}", classes=classes)
-        return FieldRow(spec, label, inner, id=f"row-{spec.name}")
+        stack_children: list[Widget] = [primary, secondary]
+        hint = self._hint_label(spec)
+        if hint is not None:
+            stack_children.append(hint)
+        inner = Vertical(*stack_children, classes="field-stack")
+        return FieldRow(
+            spec,
+            self._field_label(spec),
+            inner,
+            id=f"row-{spec.name}",
+            classes="advanced" if spec.advanced else None,
+        )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         event.stop()

@@ -74,11 +74,11 @@ class ProfileDockApp(App[None]):
     #main { height: 1fr; margin: 0 1; }
 
     .panel {
-        border: round $pd-border;
+        border: solid $pd-border;
         background: $surface;
     }
     .panel:focus-within {
-        border: round $primary;
+        border: solid $primary;
     }
 
     #deck-panel {
@@ -293,8 +293,22 @@ class ProfileDockApp(App[None]):
         inspect_pane.styles.display = "block" if mode == Mode.BROWSE else "none"
         form_pane.styles.display = "block" if mode == Mode.FORM else "none"
         output_pane.styles.display = "block" if mode == Mode.OUTPUT else "none"
+
+        interactive = mode == Mode.BROWSE
+        deck = self.query_one("#deck", CommandDeck)
+        rail = self.query_one("#rail", ProfileRail)
+        filt = self.query_one("#deck-filter", Input)
+        if not interactive and filt.display:
+            filt.value = ""
+            filt.display = False
+            deck.set_filter("")
+        deck.disabled = not interactive
+        rail.disabled = not interactive
+        deck.reset_armed()
+        rail.reset_armed()
+
         if mode == Mode.BROWSE:
-            self.query_one("#deck", CommandDeck).focus()
+            deck.focus()
         elif mode == Mode.FORM:
             form_pane.focus_first()
         else:

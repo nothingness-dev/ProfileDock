@@ -4,25 +4,65 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from textual import events
 from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
-from ..actions import GROUP_TITLES, ActionSpec, fuzzy_score, group_icon, grouped_actions
+from ..actions import GROUP_TITLES, ActionSpec, fuzzy_score, grouped_actions
 
-CURSOR_GLYPH = "❯"  # noqa: RUF001
+CURSOR_GLYPH = ">"
 
 
 class VimOptionList(OptionList):
-    """OptionList with vim-style j/k navigation and stable focus geometry."""
+    """OptionList with vim-style navigation; clicks move focus, Enter runs."""
 
     BINDINGS: ClassVar[list[Any]] = [
         Binding("j", "cursor_down", show=False),
         Binding("k", "cursor_up", show=False),
     ]
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._enter_armed = False
+
     def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
+        return
+
+    def reset_armed(self) -> None:
+        """Drop any pending keyboard-select arming (used across mode switches)."""
+        self._enter_armed = False
+
+    async def _on_key(self, event: events.Key) -> None:
+        """Arm the next select so only genuine keyboard Enter reaches it."""
+        if event.key == "enter":
+            self._enter_armed = True
+
+    async def _on_click(self, event: events.Click) -> None:
+        """Clicks move the selection; running a command stays on Enter."""
+        clicked_option: int | None = event.style.meta.get("option")
+        if clicked_option is not None and not self._options[clicked_option].disabled:
+            self.highlighted = clicked_option
+
+    def _highlighted_option_id(self) -> str | None:
+        index = self.highlighted
+        if index is None:
+            return None
+        option = self.get_option_at_index(index)
+        return str(option.id) if option.id else None
+
+    def action_select(self) -> None:
+        """Consume at most one armed Enter; clicks route here unarmed and stay inert."""
+        armed, self._enter_armed = self._enter_armed, False
+        if not armed:
+            return
+        identifier = self._highlighted_option_id()
+        if identifier is not None:
+            self._emit_selected(identifier)
+
+    def _emit_selected(self, identifier: str) -> None:
+        """Subclasses turn the highlighted id into their Selected message."""
         return
 
 
@@ -31,32 +71,20 @@ def _name_width() -> int:
 
 
 def _group_header(group_id: str) -> Option:
-    icon = group_icon(group_id)
     _nerd, _fallback, title = GROUP_TITLES[group_id]
-    return Option(f"[bold $accent]{icon}  {title}[/]", id=f"group:{group_id}", disabled=True)
+    return Option(f"[bold]{title}[/]", id=f"group:{group_id}", disabled=True)
 
 
 def _command_prompt(spec: ActionSpec, name_width: int, desc_width: int, highlighted: bool) -> str:
     name = spec.label.ljust(name_width)
-    key = f" {spec.hotkey.upper()} "
+    key = f"[{spec.hotkey.upper()}]"
     description = spec.description
     if len(description) > desc_width:
         description = description[: max(1, desc_width - 1)] + "…"
-    if highlighted:
-        cursor = f"[$accent]{CURSOR_GLYPH}[/]"
-        pill = f"[bold black on $accent]{key}[/]"
-        glyph = f"[$secondary]{spec.icon}[/]"
-        label = f"[$text]{name}[/]"
-        mark = "[$accent]│[/]"
-        desc = f"[$text]{description}[/]"
-    else:
-        cursor = " "
-        pill = f"[bold $primary]{key}[/]"
-        glyph = f"[$secondary]{spec.icon}[/]"
-        label = f"[$text]{name}[/]"
-        mark = "[$text-muted]│[/]"
-        desc = f"[$text-muted]{description}[/]"
-    return f"{cursor} {pill} {glyph} {label} {mark} {desc}"
+    cursor = f"[$accent]{CURSOR_GLYPH}[/]" if highlighted else " "
+    label = f"[$text]{name}[/]"
+    desc = f"[$text-muted]{description}[/]"
+    return f"{cursor} {key} {label}  {desc}"
 
 
 def _all_actions() -> list[ActionSpec]:
@@ -76,7 +104,7 @@ def _filtered(actions: list[ActionSpec], query: str) -> list[ActionSpec]:
 
 
 class CommandDeck(VimOptionList):
-    """Grouped command list with a full-width selection pill and cursor."""
+    """Grouped, filterable command list with a plain selection cursor."""
 
     DEFAULT_CSS = """
     CommandDeck {
@@ -91,9 +119,6 @@ class CommandDeck(VimOptionList):
     CommandDeck > .option-list--option-highlighted {
         background: $pd-selection;
     }
-    CommandDeck > .option-list--option-hover {
-        background: $pd-selection 60%;
-    }
     """
 
     class DeckMessage(Message):
@@ -107,7 +132,7 @@ class CommandDeck(VimOptionList):
             return self.deck
 
     class Selected(DeckMessage):
-        """A command was chosen with Enter or click."""
+        """A command was chosen with Enter."""
 
     class Highlighted(DeckMessage):
         """The highlighted command changed; the preview pane follows."""
@@ -126,7 +151,7 @@ class CommandDeck(VimOptionList):
 
     def _desc_width(self) -> int:
         width = self.size.width or 80
-        prefix = 1 + 1 + 3 + 1 + 1 + 1 + _name_width() + 1 + 1 + 1
+        prefix = 1 + 1 + 3 + 1 + _name_width() + 2
         return max(8, width - 2 - prefix)
 
     @property
@@ -192,8 +217,7 @@ class CommandDeck(VimOptionList):
             self._refresh_prompt(previous, False)
         self._refresh_prompt(current, True)
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        event.stop()
-        spec = self._specs.get(str(event.option.id or ""))
+    def _emit_selected(self, identifier: str) -> None:
+        spec = self._specs.get(identifier)
         if spec is not None:
             self.post_message(self.Selected(self, spec))

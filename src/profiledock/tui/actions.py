@@ -137,7 +137,9 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="o",
         fields=(
             PROFILE_FIELD,
-            FieldSpec("tabs", "Tabs", FieldKind.NUMBER, placeholder="tabs to open (preset or 1)"),
+            FieldSpec(
+                "tabs", "Tabs", FieldKind.NUMBER, placeholder="tabs to open (preset or 1)", hint="at least 1"
+            ),
             FieldSpec(
                 "engine",
                 "Engine",
@@ -241,7 +243,7 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="g",
         fields=(
             FieldSpec("profile", "Profile", FieldKind.PROFILE_OR_ALL, placeholder="all profiles"),
-            FieldSpec("last", "Last N", FieldKind.NUMBER, default="25"),
+            FieldSpec("last", "Last N", FieldKind.NUMBER, default="25", hint="recent log entries"),
         ),
     ),
     ActionSpec(

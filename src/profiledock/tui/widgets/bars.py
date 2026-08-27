@@ -19,6 +19,11 @@ def _token(name: str, app_theme: str) -> str:
     return theme.variable(name, app_theme)
 
 
+def _contrast(app_theme: str) -> str:
+    """Readable text color for solid badges on the given theme."""
+    return "black" if theme.is_dark(app_theme) else "white"
+
+
 class HeaderBar(Static):
     """Single-row global header: workspace badge, title, live telemetry."""
 
@@ -53,21 +58,22 @@ class HeaderBar(Static):
         line.add_column(justify="center", ratio=2)
         line.add_column(justify="right", ratio=1)
 
-        badge = Text(f" {self.workspace} ", style=f"bold black on {_token('pd-amber', app_theme)}")
+        badge_style = f"bold {_contrast(app_theme)} on {_token('pd-amber', app_theme)}"
+        badge = Text(f" {self.workspace} ", style=badge_style)
 
         title = Text()
         title.append("ProfileDock", style="bold")
-        title.append(" ─ ", style=_token("pd-muted", app_theme))
+        title.append(" - ", style=_token("pd-muted", app_theme))
         title.append("Isolated Chromium Profile Manager", style=_token("pd-cyan", app_theme))
 
         metrics = Text()
         metrics.append("Active: ", style=_token("pd-muted", app_theme))
         metrics.append(f"{running}/{total}", style="bold green" if running else "bold")
         metrics.append(" Running", style=_token("pd-muted", app_theme))
-        metrics.append(" │ ", style=_token("pd-border", app_theme))
+        metrics.append(" | ", style=_token("pd-border", app_theme))
         metrics.append("Storage: ", style=_token("pd-muted", app_theme))
         metrics.append(storage, style="bold")
-        metrics.append(" │ ", style=_token("pd-border", app_theme))
+        metrics.append(" | ", style=_token("pd-border", app_theme))
         metrics.append("Engine: ", style=_token("pd-muted", app_theme))
         metrics.append(engine, style="bold")
 
@@ -118,18 +124,19 @@ class FooterBar(Widget):
         crumb = Text()
         for index, part in enumerate(self._breadcrumb):
             if index:
-                crumb.append(" › ", style=muted)  # noqa: RUF001
+                crumb.append(" > ", style=muted)
             crumb.append(part, style="bold" if index == len(self._breadcrumb) - 1 else "")
         return crumb
 
     def _chips_text(self, app_theme: str) -> Text:
         muted = _token("pd-muted", app_theme)
         border = _token("pd-border", app_theme)
+        keys = _contrast(app_theme)
         chips = Text()
         for index, (key, label) in enumerate(self._chips):
             if index:
                 chips.append("  ")
-            chips.append(f" {key} ", style=f"bold black on {border}")
+            chips.append(f" {key} ", style=f"bold {keys} on {border}")
             chips.append(f" {label}", style=muted)
         return chips
 
@@ -146,7 +153,7 @@ class FooterBar(Widget):
         crumb = self._breadcrumb_text(app_theme)
         if self._status:
             crumb.append("  ")
-            crumb.append(f" {self._status} ", style=f"black on {amber}")
+            crumb.append(f" {self._status} ", style=f"{_contrast(app_theme)} on {amber}")
         top_grid.add_row(crumb, Text())
         self.query_one("#footer-top", Static).update(top_grid)
 
@@ -155,7 +162,7 @@ class FooterBar(Widget):
         bottom_grid.add_column(justify="right")
         right_hint = Text()
         if self._theme_label:
-            right_hint.append(f" {self._theme_label} ", style=f"black on {muted}")
+            right_hint.append(f" {self._theme_label} ", style=f"{_contrast(app_theme)} on {muted}")
         bottom_grid.add_row(self._chips_text(app_theme), right_hint)
         self.query_one("#footer-bottom", Static).update(bottom_grid)
 
