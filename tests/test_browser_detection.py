@@ -41,6 +41,7 @@ def test_preferred_alias_selects_requested_family(tmp_path):
 
     with (
         patch("profiledock.browser_detection.sys.platform", "linux"),
+        patch("profiledock.browser_detection._BROWSER_ROWS", (("Google Chrome", ()), ("Chromium", ()))),
         patch("profiledock.browser_detection.shutil.which", side_effect=find_which),
     ):
         assert system_browser_executable("chromium") == chromium
