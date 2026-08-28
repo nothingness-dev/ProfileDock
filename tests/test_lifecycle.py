@@ -19,6 +19,7 @@ from profiledock.process_manager import (
     _alive,
     _find_browser_pid,
     _get_process_create_time,
+    _is_matching_process,
     _parse_linux_process_stat,
     _terminate_matching_process,
     _valid_state,
@@ -250,6 +251,37 @@ def test_close_never_signals_identity_mismatched_browser(tmp_path):
             orphan.wait()
 
 
+def test_close_with_malformed_playwright_state_refuses_without_crash(tmp_path):
+    data_dir = tmp_path / "abc123" / "browser-data"
+    data_dir.mkdir(parents=True)
+    path = state_path(str(data_dir))
+    path.write_text(
+        json.dumps(
+            {
+                "protocol_version": 2,
+                "engine": "playwright",
+                "profile_id": "abc123",
+                "controller_pid": "not-a-pid",
+                "port": 12345,
+                "token": "x" * 40,
+                "tabs": 1,
+                "status": "running",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ProfileRunningError, match="refusing unauthenticated controller access"):
+        close_controller(str(data_dir), timeout=0.2)
+    assert path.exists()
+
+
+def test_is_matching_process_rejects_garbage_identity():
+    pid = os.getpid()
+    assert _is_matching_process(pid, "not-a-time", require_verification=True) is False
+    assert _is_matching_process(pid, "not-a-time", require_verification=False) is False
+    assert _is_matching_process(pid, None, require_verification=True) is True
+
+
 def test_playwright_launch_defaults_to_visible_and_passes_timeouts(tmp_path):
     (tmp_path / "browser-data").mkdir()
     profile = type(
@@ -332,6 +364,24 @@ def test_full_lifecycle_records_state_and_terminates_all_processes(tmp_path):
             close_controller(str(data_dir), timeout=5)
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.browser
+def test_closing_last_page_cleans_runtime_state_and_processes(tmp_path):
+    pytest.importorskip("playwright.sync_api")
+    data_dir = tmp_path / "abc123" / "browser-data"
+    data_dir.mkdir(parents=True)
+    state = start_controller(str(data_dir), 1, headless=True)
+    send_controller_command(
+        str(data_dir),
+        cmd="close_tab",
+        args={"index": 0},
+        auto_start_headless=False,
+    )
+    assert _wait_until(lambda: not state_path(str(data_dir)).exists())
+    assert _wait_until(lambda: not _alive(state["controller_pid"]))
+    if state["browser_pid"] > 0:
+        assert _wait_until(lambda: not _alive(state["browser_pid"]))
 
 
 @pytest.mark.browser
