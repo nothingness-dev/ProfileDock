@@ -410,6 +410,8 @@ def _is_matching_process(
         return False
     if expected_start_time is None:
         return True
+    if not isinstance(expected_start_time, (int, float)):
+        return False
     actual_start_time = _get_process_create_time(pid)
     if actual_start_time is None:
         return not require_verification
@@ -1306,15 +1308,16 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                     "profile process is not running (PID was reused by another process)", stopped=True
                 )
     if initial_state and initial_state.get("engine") != "direct":
-        controller_pid = int(initial_state.get("controller_pid", -1) or 0)
+        raw_controller_pid = initial_state.get("controller_pid")
+        raw_browser_pid = initial_state.get("browser_pid")
+        controller_pid = raw_controller_pid if type(raw_controller_pid) is int else 0
         if controller_pid > 0 and not _alive(controller_pid) and not initial_state.get("closing"):
             # The controller crashed without a close request. Recover by
             # terminating the recorded browser (only when its process identity
             # matches) and cleaning all runtime state.
-            browser_pid = int(initial_state.get("browser_pid", 0) or 0)
-            if browser_pid > 0:
+            if type(raw_browser_pid) is int and raw_browser_pid > 0:
                 _terminate_matching_process(
-                    browser_pid,
+                    raw_browser_pid,
                     initial_state.get("browser_create_time"),
                     min(max(timeout, 0.1), 5),
                 )
