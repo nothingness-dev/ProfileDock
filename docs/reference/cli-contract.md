@@ -19,7 +19,7 @@ The only engine values are `direct` and `playwright`.
 - `create --engine` and `launch --engine` support the `-e` alias.
 - `set-engine <profile> <engine>` updates profile metadata.
 - `config set <profile> engine <engine>` updates the launch preset.
-- Launch resolution is: explicit `launch --engine`, launch-config engine, profile engine, `PROFILEDOCK_DEFAULT_ENGINE`, then `direct`.
+- Launch resolution is: explicit `launch --engine`, launch-config engine, profile engine, `PROFILEDOCK_DEFAULT_ENGINE`, then `direct`. Playwright launches open a visible Chromium window unless `--headless` is supplied.
 - Profile JSON returned by `list`, `show`, and `status` exposes the effective engine, not merely the nullable metadata value.
 - Launch-config JSON exposes its independently stored engine value.
 

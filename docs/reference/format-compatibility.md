@@ -27,7 +27,7 @@ Launch configuration schema version 1 contains `schema_version`, `default_tabs`,
 `running.json` uses protocol version 2 and is discriminated by `engine`.
 
 - `direct` state identifies the browser process with `pid`, `launcher_pid`, and `process_create_time`, plus launch status and browser details. It never contains a controller token or port.
-- `playwright` state identifies the local controller with `controller_pid`, `controller_started_at`, a loopback `port`, and an authentication `token`, plus launch status and page details. It never authorizes operating-system process termination as a Direct state.
+- `playwright` state identifies the local controller with `controller_pid`, `controller_started_at`, a loopback `port`, and an authentication `token`, plus launch status and page details. When the browser main process can be identified, the state also records `browser_pid` and `browser_create_time` for identity-verified process management, and `headless` records the visibility of the launch. A Playwright state never authorizes operating-system process termination as a Direct state, and a recorded browser PID is never signalled unless its create time matches `browser_create_time`.
 
 Unversioned Direct and Playwright state and Playwright protocol version 1 migrate sequentially to protocol version 2. A pre-migration copy is retained beside the runtime state as `running.json.v<version>.bak`. Runtime files remain outside `browser-data`.
 

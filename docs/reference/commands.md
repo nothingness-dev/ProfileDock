@@ -136,7 +136,7 @@ Options:
 | `--interval SECONDS`, `-i SECONDS` | Polling interval in seconds when using `--watch` (default: 1.0). |
 | `--json` | Emit versioned JSON output. |
 
-Without a selector, reports every profile. With a selector, reports one. Status values include `stopped`, `starting`, `running`, `closing`, `stale`, and `error` where applicable. JSON `data` remains an array in both forms and exposes the effective engine.
+Without a selector, reports every profile. With a selector, reports one. Status values include `stopped`, `starting`, `running`, `closing`, `crashed`, `stale`, and `error` where applicable. JSON `data` remains an array in both forms and exposes the effective engine.
 
 ## `launch`
 
@@ -152,16 +152,18 @@ Options:
 | `--engine VALUE`, `-e VALUE` | One-launch `direct` or `playwright` override. |
 | `--browser VALUE`, `-b VALUE` | Browser name or executable path. |
 | `--url URL`, `-u URL` | Start URL; repeat for multiple pages. |
+| `--headless` | Run a Playwright browser in the background without a visible window. |
+| `--wait-timeout SECONDS` | Seconds to wait for the browser and controller to become fully ready (default: 30). |
 
-When no tab count or preset exists, interactive mode prompts. Non-interactive mode requires `--tabs`. Start URLs cannot outnumber tabs. Duplicate launch is refused. Launch writes runtime state outside `browser-data` and records the launch timestamp after success.
+Playwright launches open a visible Chromium window by default; pass `--headless` for a background Playwright launch. The Direct engine does not accept `--headless`. The command returns only after the controller and browser are fully ready, and a failed startup rolls back all runtime artifacts. When no tab count or preset exists, interactive mode prompts. Non-interactive mode requires `--tabs`. Start URLs cannot outnumber tabs. Duplicate launch is refused while the profile is starting or already running. Launch writes runtime state outside `browser-data` and records the launch timestamp after success.
 
 ## `close`
 
 ```text
-profiledock close PROFILE
+profiledock close PROFILE [--timeout SECONDS]
 ```
 
-Requests graceful Playwright context shutdown or safely terminates the verified Direct browser process. Runtime state is cleaned after closure. Missing, stale, malformed, or unverifiable state is handled conservatively.
+Requests graceful Playwright context shutdown or safely terminates the verified Direct browser process. `--timeout SECONDS` bounds how long the command waits for the browser and controller to terminate and for persistent data to flush (default: 15). The command returns only after the state file is removed and the recorded browser process has exited; a stuck browser is terminated only when its recorded process identity matches. Crashed runtime state is recovered automatically, and a browser process is never signalled unless its identity matches the recorded process. Missing, stale, malformed, or unverifiable state is handled conservatively.
 
 ## `delete`
 
