@@ -235,6 +235,54 @@ profiledock logs [PROFILE] [--last N] [--json]
 
 Reads structured local logs, optionally filtered by resolved profile ID. `--last`/`-n` limits the newest entries and must be a positive integer. Sensitive controller tokens and known secrets are redacted before logging.
 
+## `tabs`
+
+```text
+profiledock tabs PROFILE [--json]
+```
+
+List open browser tabs, page titles, and active URLs for a running Playwright session. This command does not auto-start a stopped profile.
+
+## `open-tab`
+
+```text
+profiledock open-tab PROFILE [URL] [--json]
+```
+
+Opens a new tab dynamically in a Playwright browser session without restarting it. If the profile is stopped, ProfileDock starts a headless Playwright controller that remains active until `profiledock close PROFILE` is run.
+
+## `close-tab`
+
+```text
+profiledock close-tab PROFILE INDEX [--json]
+```
+
+Closes a specific tab index in an active Playwright browser session.
+
+## `read`
+
+```text
+profiledock read PROFILE [URL] [--tab N] [--json]
+```
+
+Reads page content as formatted Markdown in the terminal using the profile's persistent authenticated session. A stopped profile is started headlessly and remains active until explicitly closed.
+
+## `eval`
+
+```text
+profiledock eval PROFILE SCRIPT [--tab N] [--json]
+```
+
+Evaluates a JavaScript expression in the active page context and prints the serialized result. This intentionally runs arbitrary browser-side JavaScript with the selected profile's page privileges; use only expressions you trust. Evaluation is terminated after 10 seconds. A stopped profile is started headlessly and remains active until explicitly closed.
+
+## `cookies`
+
+```text
+profiledock cookies PROFILE [--output FILE] [--url URL] [--json]
+```
+
+Exports live session cookies directly from browser RAM, bypassing SQLite filesystem locks. Cookie output is sensitive authentication material. File output uses a private atomic JSON write and refuses links or non-file targets. A stopped profile is started headlessly and remains active until explicitly closed.
+
 ## Exit codes, streams, and errors
 
 | Code | Meaning |

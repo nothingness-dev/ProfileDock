@@ -140,6 +140,20 @@ Each profile result includes `id`, `name`, nullable metadata `engine`, status, f
 
 Optional values depend on the event. Known secrets are redacted before storage and output.
 
+## Live Playwright commands
+
+`tabs --json` returns an array of objects with `index`, `title`, and `url`.
+
+`open-tab --json` returns one tab object with `index`, `title`, and `url`.
+
+`close-tab --json` returns `index` and `remaining_tabs`.
+
+`read --json` returns `url`, `title`, Markdown `content`, and a `links` array. Each link has `index`, `text`, and `url`.
+
+`eval --json` returns an object containing the serialized `result` value.
+
+`cookies --json` returns an array of Playwright cookie objects when writing to stdout. With `--output`, data contains the absolute `output_file` and exported cookie `count`; the sensitive cookies are written only to that private JSON file.
+
 ## Errors and forward compatibility
 
 CLI syntax failures exit 2 and are not JSON documents because parsing fails before command execution. Operational failures exit 1. Automation must use exit status in addition to parsing output.

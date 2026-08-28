@@ -31,6 +31,8 @@ Launch configuration schema version 1 contains `schema_version`, `default_tabs`,
 
 Unversioned Direct and Playwright state and Playwright protocol version 1 migrate sequentially to protocol version 2. A pre-migration copy is retained beside the runtime state as `running.json.v<version>.bak`. Runtime files remain outside `browser-data`.
 
+Playwright protocol version 2 accepts authenticated, newline-delimited JSON commands for lifecycle, tab management, page reading, JavaScript evaluation, and cookie export. Requests and responses are size-bounded, command arguments are validated, and legacy authenticated `probe` and `close` strings remain supported for compatibility with existing clients.
+
 ## Backup archives
 
 Backup archive format version 1 contains a strict `backup_manifest.json` with the producing ProfileDock version, creation time, aggregate counts, profile metadata, launch configuration, file sizes, and SHA-256 checksums. Unknown manifest fields, inconsistent totals, unsafe members, unsupported future versions, and malformed embedded metadata are rejected.

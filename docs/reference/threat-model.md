@@ -91,15 +91,17 @@ Residual risks:
 
 Protections:
 
-- The Playwright controller listens only on loopback and accepts a bounded command vocabulary: authenticated `probe` and `close` requests.
+- The Playwright controller listens only on loopback and accepts a bounded command vocabulary for lifecycle, tab inspection, navigation, page reading, JavaScript evaluation, and cookie export.
 - Each controller uses a random per-launch token stored in private runtime state.
 - Commands have size limits and socket timeouts, and tokens are compared in constant time.
-- Arbitrary text is not executed as a shell command, Python expression, browser script, or URL.
+- Commands and arguments are schema-checked, URLs are restricted to supported schemes, and request and response sizes are bounded.
+- `eval` intentionally executes the exact JavaScript expression supplied by the local CLI user inside the selected page. It never executes that expression as a shell command or Python expression.
 - Mutation checks can authenticate controller availability before changing profile data.
 
 Residual risks:
 
 - The token is a bearer credential. A same-account attacker who can read runtime state can send valid commands.
+- A token holder can execute JavaScript in the profile's pages and export live cookies for the controller lifetime; these capabilities are equivalent to controlling that browser session.
 - Tokens remain valid for the controller lifetime and do not provide replay protection.
 - Loopback does not establish OS-user identity by itself.
 - The protocol provides local command authentication, not encryption or protection from a privileged packet/process observer.
@@ -158,7 +160,7 @@ Residual risks:
 
 Protections:
 
-- ProfileDock does not intentionally log cookies, passwords, LocalStorage values, controller tokens, or authorization header values.
+- ProfileDock does not intentionally log cookies, passwords, LocalStorage values, controller tokens, or authorization header values. Explicit cookie exports are written only to the requested output stream or private atomic JSON file.
 - URLs are reduced to origin and a limited path prefix without query strings or fragments.
 - Known secrets, common credential fields, and bearer tokens are redacted before structured log writes.
 - Log messages and controller diagnostics are bounded, runtime tokens receive explicit redaction, and logs rotate by size.
