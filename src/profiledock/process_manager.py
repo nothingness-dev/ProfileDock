@@ -30,7 +30,9 @@ if TYPE_CHECKING:
 
 _MAX_ERROR_BYTES = 4096
 RUNNING_STATE_PROTOCOL_VERSION = 2
-_MAX_COMMAND_BYTES = 512
+_MAX_COMMAND_BYTES = 65536
+_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+_IPC_COMMANDS = frozenset({"probe", "close", "tabs", "open_tab", "close_tab", "read_page", "eval", "cookies"})
 _DIRECT_STATE_FIELDS = frozenset(
     {
         "protocol_version",
@@ -546,6 +548,71 @@ def _controller_available(state: StateDict) -> bool:
         return False
 
 
+def send_controller_command(
+    data_dir: str,
+    cmd: str,
+    args: Optional[dict[str, Any]] = None,
+    runtime_dir: Optional[Path] = None,
+    timeout: float = 30.0,
+    auto_start_headless: bool = True,
+) -> dict[str, Any]:
+    """Send a command to a Playwright controller, auto-starting headlessly if stopped."""
+    if cmd not in _IPC_COMMANDS:
+        raise ValueError(f"unsupported controller command: {cmd}")
+    if args is not None and not isinstance(args, dict):
+        raise ValueError("controller command arguments must be an object")
+    path = state_path(data_dir, runtime_dir)
+    state = _read_state(path)
+    profile_id = Path(data_dir).parent.name
+
+    if state:
+        state = _upgrade_legacy_state(path, state, profile_id)
+
+    if (
+        not state
+        or not _valid_state(state, profile_id)
+        or not state.get("port")
+        or not _controller_available(state)
+    ):
+        if not auto_start_headless:
+            raise ProfileRunningError(f"profile '{profile_id}' is not running with Playwright controller")
+        state = start_controller(data_dir, tabs=1, headless=True, runtime_dir=runtime_dir)
+
+    port = int(state.get("port", 0))
+    token = str(state.get("token", ""))
+    payload = {"cmd": cmd, "token": token, "args": args or {}}
+    encoded_payload = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+    if len(encoded_payload) > _MAX_COMMAND_BYTES:
+        raise ValueError("controller command exceeds the maximum request size")
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as connection:
+            connection.settimeout(timeout)
+            connection.sendall(encoded_payload)
+            response_raw = b""
+            while True:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                response_raw += chunk
+                if len(response_raw) > _MAX_RESPONSE_BYTES:
+                    raise BrowserLaunchError("profile controller response exceeds the maximum size")
+                if b"\n" in chunk:
+                    break
+            if not response_raw:
+                raise BrowserLaunchError("empty response from profile controller")
+            response_line = response_raw.split(b"\n", 1)[0]
+            decoded = json.loads(response_line.decode("utf-8"))
+            if not isinstance(decoded, dict):
+                raise BrowserLaunchError("invalid response from profile controller")
+            res_obj: dict[str, Any] = decoded
+            if res_obj.get("status") == "error":
+                raise BrowserLaunchError(res_obj.get("message", "unknown controller error"))
+            return res_obj
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BrowserLaunchError(f"failed to communicate with controller: {exc}") from exc
+
+
 def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
     path = state_path(data_dir, runtime_dir)
     state = _read_state(path)
@@ -1038,6 +1105,179 @@ def _context_alive(context: "BrowserContext") -> bool:
         return False
 
 
+def _execute_ipc_command(
+    cmd_obj: dict[str, Any], context: "BrowserContext", token: str
+) -> tuple[dict[str, Any], bool]:
+    """Execute a parsed JSON-RPC command against active browser context.
+
+    Returns (response_dict, should_exit_loop).
+    """
+    req_token = cmd_obj.get("token", "")
+    if not isinstance(req_token, str) or not hmac.compare_digest(req_token, token):
+        return ({"status": "error", "message": "unauthorized command token"}, False)
+
+    cmd = cmd_obj.get("cmd", "")
+    args = cmd_obj.get("args", {})
+    if not isinstance(cmd, str) or cmd not in _IPC_COMMANDS:
+        return ({"status": "error", "message": f"unknown command '{cmd}'"}, False)
+    if not isinstance(args, dict):
+        return ({"status": "error", "message": "command arguments must be an object"}, False)
+
+    if cmd == "probe":
+        return ({"status": "ok"}, False)
+
+    if cmd == "close":
+        return ({"status": "ok"}, True)
+
+    if cmd == "tabs":
+        pages_info = []
+        for idx, page in enumerate(context.pages):
+            try:
+                title = page.title()
+            except Exception:
+                title = ""
+            pages_info.append({"index": idx, "url": page.url, "title": title})
+        return ({"status": "ok", "tabs": pages_info}, False)
+
+    if cmd == "open_tab":
+        url = args.get("url", "about:blank")
+        if not isinstance(url, str):
+            return ({"status": "error", "message": "URL must be a string"}, False)
+        try:
+            from .validation import validate_url
+
+            validate_url(url)
+            page = context.new_page()
+            if url and url != "about:blank":
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            return (
+                {
+                    "status": "ok",
+                    "tab": {
+                        "index": len(context.pages) - 1,
+                        "url": page.url,
+                        "title": page.title(),
+                    },
+                },
+                False,
+            )
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd == "close_tab":
+        index = args.get("index")
+        if type(index) is not int or not (0 <= index < len(context.pages)):
+            return ({"status": "error", "message": f"tab index out of range: {index}"}, False)
+        try:
+            context.pages[index].close()
+            return ({"status": "ok", "remaining_tabs": len(context.pages)}, False)
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd == "read_page":
+        tab_index = args.get("tab", 0)
+        url = args.get("url")
+        if url is not None and not isinstance(url, str):
+            return ({"status": "error", "message": "URL must be a string or null"}, False)
+        if url:
+            try:
+                from .validation import validate_url
+
+                validate_url(url)
+            except Exception as exc:
+                return ({"status": "error", "message": str(exc)}, False)
+        if not context.pages:
+            context.new_page()
+        if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
+            return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
+        page = context.pages[tab_index]
+        try:
+            if url:
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            html = page.content()
+            from .page_reader import extract_page_markdown
+
+            extracted = extract_page_markdown(html, base_url=page.url)
+            return (
+                {
+                    "status": "ok",
+                    "url": page.url,
+                    "title": extracted["title"] or page.title(),
+                    "content": extracted["content"],
+                    "links": extracted["links"],
+                },
+                False,
+            )
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd == "eval":
+        script = args.get("script", "")
+        tab_index = args.get("tab", 0)
+        if not isinstance(script, str) or not script:
+            return ({"status": "error", "message": "script expression must not be empty"}, False)
+        if not context.pages:
+            context.new_page()
+        if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
+            return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
+        page = context.pages[tab_index]
+        session = None
+        try:
+            session = context.new_cdp_session(page)
+            evaluation = session.send(
+                "Runtime.evaluate",
+                {
+                    "expression": script,
+                    "awaitPromise": True,
+                    "returnByValue": True,
+                    "timeout": 10000,
+                },
+            )
+            exception = evaluation.get("exceptionDetails")
+            if isinstance(exception, dict):
+                detail = exception.get("text") or "JavaScript evaluation failed"
+                return ({"status": "error", "message": str(detail)}, False)
+            remote = evaluation.get("result", {})
+            if not isinstance(remote, dict):
+                return ({"status": "error", "message": "invalid JavaScript result"}, False)
+            result = remote.get("value")
+            if "unserializableValue" in remote:
+                result = remote["unserializableValue"]
+            return ({"status": "ok", "result": result}, False)
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+        finally:
+            if session is not None:
+                try:
+                    session.detach()
+                except Exception:
+                    pass
+
+    if cmd == "cookies":
+        urls = args.get("urls")
+        try:
+            if urls is not None:
+                if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
+                    return ({"status": "error", "message": "cookie URLs must be a list of strings"}, False)
+                from .validation import validate_url
+
+                for url in urls:
+                    validate_url(url)
+            cookie_list = context.cookies(urls) if urls else context.cookies()
+            return ({"status": "ok", "cookies": cookie_list}, False)
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    return ({"status": "error", "message": f"unknown command '{cmd}'"}, False)
+
+
+def _encode_ipc_response(response: dict[str, Any]) -> bytes:
+    encoded = (json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8")
+    if len(encoded) <= _MAX_RESPONSE_BYTES:
+        return encoded
+    return b'{"status":"error","message":"controller response exceeds the maximum size"}\n'
+
+
 def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str) -> None:
     while _context_alive(context):
         try:
@@ -1046,17 +1286,43 @@ def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str
             continue
         with connection:
             try:
-                connection.settimeout(2.0)
-                command = connection.recv(_MAX_COMMAND_BYTES + 1)
+                connection.settimeout(30.0)
+                command_raw = b""
+                while True:
+                    chunk = connection.recv(_MAX_COMMAND_BYTES)
+                    if not chunk:
+                        break
+                    command_raw += chunk
+                    if b"\n" in chunk:
+                        break
+                    if len(command_raw) > _MAX_COMMAND_BYTES:
+                        break
             except (socket.timeout, OSError):
                 continue
-            if len(command) > _MAX_COMMAND_BYTES or not command:
+            if len(command_raw) > _MAX_COMMAND_BYTES or not command_raw:
                 try:
                     connection.sendall(b"error\n")
                 except OSError:
                     pass
                 continue
-            supplied = command.decode("utf-8", errors="replace").rstrip("\r\n")
+            supplied = command_raw.decode("utf-8", errors="replace").strip()
+
+            if supplied.startswith("{") and supplied.endswith("}"):
+                try:
+                    cmd_obj = json.loads(supplied)
+                    resp, should_exit = _execute_ipc_command(cmd_obj, context, token)
+                    connection.sendall(_encode_ipc_response(resp))
+                    if should_exit:
+                        return
+                    continue
+                except Exception as exc:
+                    try:
+                        err_resp = {"status": "error", "message": str(exc)}
+                        connection.sendall(_encode_ipc_response(err_resp))
+                    except OSError:
+                        pass
+                    continue
+
             close_command = "close:" + token
             probe_command = "probe:" + token
             if hmac.compare_digest(supplied, probe_command):

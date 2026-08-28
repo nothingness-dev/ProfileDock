@@ -26,6 +26,7 @@ from ..browser_detection import browser_rows
 from ..cli_contract import EXIT_SUCCESS, EXIT_USER_ERROR, error_category
 from ..data_root import DataPaths
 from ..doctor import STATUS_FAILED, STATUS_OK, STATUS_WARNING, DiagnosticCheck, run_diagnostics
+from ..fsops import write_private_json
 from ..logger import read_profile_logs
 from ..models import Profile
 from ..process_manager import (
@@ -33,6 +34,7 @@ from ..process_manager import (
     ProfileRunningError,
     close_controller,
     get_status,
+    send_controller_command,
     start_controller,
     start_direct_chrome,
     state_path,
@@ -501,7 +503,138 @@ def _dispatch(paths: DataPaths, action_id: str, values: dict[str, object]) -> Te
         return _backup(paths, manager, values)
     if action_id == "restore":
         return _restore(paths, values)
+    if action_id == "tabs":
+        return _tabs(paths, manager, values)
+    if action_id == "open-tab":
+        return _open_tab(paths, manager, values)
+    if action_id == "read":
+        return _read_page(paths, manager, values)
+    if action_id == "cookies":
+        return _cookies(paths, manager, values)
     raise BackendError(f"unknown action '{action_id}'", "invalid_input")
+
+
+def _resolve_profile(manager: ProfileManager, values: dict[str, object]) -> Profile:
+    identifier = str(values.get("profile") or "").strip()
+    if not identifier:
+        raise BackendError("a profile identifier is required", "invalid_input")
+    return _require_profile(manager, identifier)
+
+
+def _tabs(paths: DataPaths, manager: ProfileManager, values: dict[str, object]) -> Text:
+    profile = _resolve_profile(manager, values)
+    try:
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="tabs",
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=False,
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+
+    tabs_data = res.get("tabs", [])
+    if not tabs_data:
+        return Text("No open tabs.", style="dim")
+
+    table = Table(show_header=True, box=None, padding=(0, 2, 0, 0))
+    table.add_column("INDEX", style="cyan")
+    table.add_column("TITLE", style="bold")
+    table.add_column("URL")
+    for item in tabs_data:
+        table.add_row(str(item.get("index", 0)), item.get("title", "") or "(untitled)", item.get("url", ""))
+    return _table_text(table)
+
+
+def _open_tab(paths: DataPaths, manager: ProfileManager, values: dict[str, object]) -> Text:
+    profile = _resolve_profile(manager, values)
+    url = str(values.get("url") or "about:blank").strip()
+    if url != "about:blank":
+        try:
+            validate_url(url)
+        except ValidationError as exc:
+            raise BackendError(str(exc), "invalid_input") from exc
+    try:
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="open_tab",
+            args={"url": url},
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=True,
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+
+    tab_info = res.get("tab", {})
+    body = Text("Opened tab ", style="green")
+    body.append(f"[{tab_info.get('index', 0)}]", style="bold cyan")
+    body.append(f": {tab_info.get('url', url)}")
+    return body
+
+
+def _read_page(paths: DataPaths, manager: ProfileManager, values: dict[str, object]) -> Text:
+    profile = _resolve_profile(manager, values)
+    url_raw = str(values.get("url") or "").strip()
+    url = url_raw if url_raw else None
+    if url:
+        try:
+            validate_url(url)
+        except ValidationError as exc:
+            raise BackendError(str(exc), "invalid_input") from exc
+    try:
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="read_page",
+            args={"url": url, "tab": 0},
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=True,
+            timeout=40.0,
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+
+    title = res.get("title", "")
+    content = res.get("content", "")
+    page_url = res.get("url", "")
+    body = Text()
+    if title:
+        body.append(f"# {title}\n", style="bold cyan")
+        body.append(f"{page_url}\n\n", style="dim")
+    body.append(content or "(empty content)")
+    return body
+
+
+def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object]) -> Text:
+    profile = _resolve_profile(manager, values)
+    output_raw = str(values.get("output") or "").strip()
+    try:
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="cookies",
+            args={},
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=True,
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+
+    cookies_list = res.get("cookies", [])
+    if output_raw:
+        out_path = Path(output_raw).expanduser()
+        try:
+            write_private_json(out_path, cookies_list)
+            body = Text("Exported ", style="green")
+            body.append(f"{len(cookies_list)}", style="bold")
+            body.append(f" cookie(s) to '{out_path}'.")
+            return body
+        except OSError as exc:
+            raise BackendError(f"could not write cookies to '{out_path}': {exc}", "storage_error") from exc
+
+    return Text(json.dumps(cookies_list, indent=2))
 
 
 def _render_list(rows: list[ProfileRow]) -> Text:
