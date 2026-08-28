@@ -68,6 +68,9 @@ _PLAYWRIGHT_STATE_FIELDS = frozenset(
         "window_width",
         "window_height",
         "legacy_controller",
+        "browser_pid",
+        "browser_create_time",
+        "headless",
         "pid",
     }
 )
@@ -178,6 +181,16 @@ def _valid_state(value: StateDict, profile_id: Optional[str] = None) -> bool:
     try:
         started_at = datetime.fromisoformat(value["controller_started_at"])
     except (TypeError, ValueError):
+        return False
+    if "browser_pid" in value and (type(value["browser_pid"]) is not int or value["browser_pid"] < 0):
+        return False
+    if (
+        "browser_create_time" in value
+        and value["browser_create_time"] is not None
+        and not isinstance(value["browser_create_time"], (int, float))
+    ):
+        return False
+    if "headless" in value and type(value["headless"]) is not bool:
         return False
     return started_at.tzinfo is not None and started_at.utcoffset() is not None
 
@@ -433,6 +446,174 @@ def _alive(pid: int) -> bool:
         return False
 
 
+_CHROMIUM_PROCESS_NAMES = ("chrome", "chromium", "headless_shell", "msedge")
+
+
+def _is_chromium_process_name(name: str) -> bool:
+    lowered = name.lower()
+    return any(marker in lowered for marker in _CHROMIUM_PROCESS_NAMES)
+
+
+def _parse_linux_process_stat(value: str) -> tuple[int, str]:
+    name_start = value.find("(")
+    name_end = value.rfind(")")
+    if name_start < 0 or name_end <= name_start:
+        raise ValueError("invalid process stat")
+    stat_fields = value[name_end + 1 :].split()
+    if len(stat_fields) < 2:
+        raise ValueError("invalid process stat")
+    return int(stat_fields[1]), value[name_start + 1 : name_end]
+
+
+def _list_processes() -> list[tuple[int, int, str]]:
+    """Return (pid, parent_pid, executable_name) snapshots for all processes."""
+    if sys.platform == "win32":
+        import ctypes.wintypes as wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", wintypes.WCHAR * 260),
+            ]
+
+        TH32CS_SNAPPROCESS = 0x2
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32FirstW.restype = wintypes.BOOL
+        kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32NextW.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if snapshot == wintypes.HANDLE(-1).value:
+            return []
+        entries: list[tuple[int, int, str]] = []
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        try:
+            if kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+                while True:
+                    entries.append(
+                        (int(entry.th32ProcessID), int(entry.th32ParentProcessID), str(entry.szExeFile))
+                    )
+                    if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                        break
+        finally:
+            kernel32.CloseHandle(snapshot)
+        return entries
+
+    if not Path("/proc").is_dir():
+        return []
+    entries = []
+    for pid_dir in Path("/proc").iterdir():
+        if not pid_dir.name.isdigit():
+            continue
+        try:
+            process_stat = (pid_dir / "stat").read_text(encoding="utf-8")
+            ppid, comm = _parse_linux_process_stat(process_stat)
+            entries.append((int(pid_dir.name), ppid, comm))
+        except (OSError, ValueError, IndexError):
+            continue
+    return entries
+
+
+def _find_browser_pid(controller_pid: int) -> int:
+    """Locate the main Chromium process spawned by the controller process tree.
+
+    Returns the PID of the root of the Chromium subtree (the browser main
+    process), or 0 when it cannot be determined. Callers must treat 0 as
+    "unknown" and never signal it.
+    """
+    if controller_pid < 1:
+        return 0
+    try:
+        entries = _list_processes()
+    except Exception:
+        return 0
+    by_pid = {pid: (ppid, name) for pid, ppid, name in entries}
+    best_pid = 0
+    for pid, (_ppid, name) in by_pid.items():
+        if not _is_chromium_process_name(name):
+            continue
+        topmost_chromium = pid
+        current = pid
+        reached_controller = False
+        for _ in range(64):
+            entry = by_pid.get(current)
+            if entry is None:
+                break
+            parent_pid, _parent_name = entry
+            if parent_pid == controller_pid:
+                reached_controller = True
+                break
+            if parent_pid not in by_pid:
+                break
+            if _is_chromium_process_name(by_pid[parent_pid][1]):
+                topmost_chromium = parent_pid
+            current = parent_pid
+        if reached_controller and topmost_chromium:
+            best_pid = topmost_chromium
+            break
+    return best_pid
+
+
+def _terminate_matching_process(pid: int, expected_create_time: Optional[float], timeout: float) -> bool:
+    """Terminate a process tree only when its identity matches the recorded one.
+
+    Returns True when the process is gone (or was already absent). A PID whose
+    create time does not match the recorded value is never signalled.
+    """
+    if pid < 1 or not _alive(pid):
+        return True
+    if expected_create_time is None:
+        return False
+    if not _is_matching_process(pid, expected_create_time, require_verification=True):
+        return False
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        _signal_posix_process_group(pid, signal.SIGTERM)
+    deadline = time.monotonic() + max(timeout, 0.1)
+    poll_interval = 0.02
+    while time.monotonic() < deadline and _alive(pid):
+        time.sleep(poll_interval)
+        poll_interval = min(poll_interval * 1.5, 0.1)
+    if _alive(pid):
+        if not _is_matching_process(pid, expected_create_time, require_verification=True):
+            return False
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            _signal_posix_process_group(pid, signal.SIGKILL)
+        force_deadline = time.monotonic() + min(max(timeout, 0.1), 2)
+        force_interval = 0.01
+        while time.monotonic() < force_deadline and _alive(pid):
+            time.sleep(force_interval)
+            force_interval = min(force_interval * 1.5, 0.05)
+    return not _alive(pid)
+
+
 def _read_state(path: Path) -> Optional[StateDict]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -484,9 +665,14 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
             launcher_pid = state["launcher_pid"]
             if pid == 0 and launcher_pid > 0 and _alive(launcher_pid):
                 return "starting"
+            if state.get("closing"):
+                if clean_stale:
+                    _unlink_quietly(path)
+                    return "stopped"
+                return "stale"
             if clean_stale:
                 _unlink_quietly(path)
-                return "stopped"
+                return "crashed"
             return "stale"
         if not state or not _valid_state(state, Path(data_dir).parent.name):
             return "error"
@@ -508,9 +694,14 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
                 return "stopped"
             return "stale"
         if not _alive(pid):
+            if state.get("closing"):
+                if clean_stale:
+                    _unlink_quietly(path)
+                    return "stopped"
+                return "stale"
             if clean_stale:
                 _unlink_quietly(path)
-                return "stopped"
+                return "crashed"
             return "stale"
         port = int(state.get("port", 0))
         if not port:
@@ -917,7 +1108,12 @@ def start_controller(
             while time.monotonic() < deadline:
                 state = _read_state(path)
                 profile_id_value = initial["profile_id"]
-                if state and _valid_state(state, str(profile_id_value)) and state.get("port"):
+                if (
+                    state
+                    and _valid_state(state, str(profile_id_value))
+                    and state.get("port")
+                    and _controller_available(state)
+                ):
                     _unlink_quietly(err)
                     _close_stderr(process)
                     return state
@@ -939,6 +1135,7 @@ def start_controller(
     error_info = _read_error(err)
     if error_info:
         _close_stderr(process)
+        _unlink_quietly(path)
         raise BrowserLaunchError(
             error_info["message"],
             str(error_info["error_type"]),
@@ -950,11 +1147,13 @@ def start_controller(
             message = f"{message}: {stderr}"
         _write_error(err, "controller_exited", message, redactions=(token,))
         _close_stderr(process)
+        _unlink_quietly(path)
         raise BrowserLaunchError(
             message,
             "controller_exited",
         )
     _stop_process(process)
+    _unlink_quietly(path)
     message = f"Controller startup timed out after {startup_timeout:g} seconds"
     _write_error(err, "controller_timeout", message, redactions=(token,))
     _close_stderr(process)
@@ -1041,12 +1240,38 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
         time.sleep(poll_interval)
         poll_interval = min(poll_interval * 1.5, 0.1)
     if path.exists():
-        if not _alive(int(state.get("controller_pid", -1))):
-            _unlink_quietly(path)
-            raise ProfileRunningError("profile is not running", stopped=True)
-        raise BrowserLaunchError("profile did not close within the timeout")
+        browser_pid = int(state.get("browser_pid", 0) or 0)
+        if browser_pid > 0:
+            # Last-resort cleanup after a stuck close; the browser process is
+            # only signalled when its identity matches the recorded one.
+            _terminate_matching_process(
+                browser_pid, state.get("browser_create_time"), min(max(timeout, 0.1), 5)
+            )
+            grace_deadline = time.monotonic() + min(max(timeout, 0.1), 5)
+            while path.exists() and time.monotonic() < grace_deadline:
+                time.sleep(0.05)
+        if path.exists():
+            if not _alive(int(state.get("controller_pid", -1))):
+                _unlink_quietly(path)
+                raise ProfileRunningError("profile is not running", stopped=True)
+            raise BrowserLaunchError("profile did not close within the timeout")
     if not close_sent:
         raise ProfileRunningError("profile is not running", stopped=True)
+
+    # The controller removes running.json only after context.close() has
+    # flushed persistent profile data. Wait for the controller (and browser)
+    # processes to fully exit so a follow-up launch never races a dying
+    # browser and no Chromium or controller processes survive the command.
+    controller_pid = int(state.get("controller_pid", -1))
+    if controller_pid > 0:
+        while _alive(controller_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    browser_pid = int(state.get("browser_pid", 0) or 0)
+    if browser_pid > 0 and _alive(browser_pid):
+        if not _is_matching_process(browser_pid, state.get("browser_create_time"), require_verification=True):
+            # The recorded PID now belongs to an unrelated process; never signal it.
+            return
+        _terminate_matching_process(browser_pid, state.get("browser_create_time"), min(max(timeout, 0.1), 5))
 
 
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
@@ -1080,6 +1305,21 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[P
                 raise ProfileRunningError(
                     "profile process is not running (PID was reused by another process)", stopped=True
                 )
+    if initial_state and initial_state.get("engine") != "direct":
+        controller_pid = int(initial_state.get("controller_pid", -1) or 0)
+        if controller_pid > 0 and not _alive(controller_pid) and not initial_state.get("closing"):
+            # The controller crashed without a close request. Recover by
+            # terminating the recorded browser (only when its process identity
+            # matches) and cleaning all runtime state.
+            browser_pid = int(initial_state.get("browser_pid", 0) or 0)
+            if browser_pid > 0:
+                _terminate_matching_process(
+                    browser_pid,
+                    initial_state.get("browser_create_time"),
+                    min(max(timeout, 0.1), 5),
+                )
+            _unlink_quietly(path)
+            raise ProfileRunningError("profile is not running", stopped=True)
     if not is_running(data_dir, runtime_dir):
         raise ProfileRunningError("profile is not running", stopped=True)
     state = _read_state(path)
@@ -1236,6 +1476,11 @@ def _execute_ipc_command(
             exception = evaluation.get("exceptionDetails")
             if isinstance(exception, dict):
                 detail = exception.get("text") or "JavaScript evaluation failed"
+                thrown = exception.get("exception")
+                if isinstance(thrown, dict):
+                    description = thrown.get("description") or thrown.get("value")
+                    if description:
+                        detail = f"{detail}: {description}"
                 return ({"status": "error", "message": str(detail)}, False)
             remote = evaluation.get("result", {})
             if not isinstance(remote, dict):
@@ -1445,6 +1690,7 @@ def _controller(
                         except Exception:
                             pass
 
+                browser_pid = _find_browser_pid(os.getpid())
                 _atomic_private_json(
                     path,
                     {
@@ -1460,6 +1706,11 @@ def _controller(
                         "page_count": len(context.pages),
                         "channel": channel,
                         "status": "running",
+                        "browser_pid": browser_pid,
+                        "browser_create_time": _get_process_create_time(browser_pid)
+                        if browser_pid > 0
+                        else None,
+                        "headless": bool(headless),
                     },
                 )
                 _wait_for_close(server, context, token)
@@ -1524,7 +1775,7 @@ def main() -> None:
             browser_channel=args.browser_channel,
             window_width=width,
             window_height=height,
-            start_urls=args.url,
+            start_urls=args.url or None,
         )
     )
 

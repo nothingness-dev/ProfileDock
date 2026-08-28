@@ -607,7 +607,7 @@ def status(
 ) -> None:
     """Report runtime status of one profile or all profiles.
 
-    Status values: stopped, starting, running, closing, stale, error.
+    Status values: stopped, starting, running, closing, crashed, stale, error.
     With --watch, refreshes continuously until Ctrl+C.
     """
     if watch and interval <= 0:
@@ -773,13 +773,27 @@ def launch(
         "-u",
         help="Start URL for one tab; repeat for multiple pages. Overrides stored start URLs.",
     ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Run the browser in the background without a visible window. "
+        "By default the launch opens a visible Chromium window.",
+    ),
+    wait_timeout: float = typer.Option(
+        30.0,
+        "--wait-timeout",
+        help="Seconds to wait for the browser and controller to become fully ready.",
+    ),
 ) -> None:
     """Launch a profile's browser with its persistent data.
 
-    Login is always manual. Relaunching the same profile reuses its saved
-    cookies, sessions, and history. A duplicate launch is refused while the
-    profile is already running.
+    Playwright launches open a visible Chromium window by default; pass
+    --headless for a background launch. Login is always manual. Relaunching the
+    same profile reuses its saved cookies, sessions, and history. A duplicate
+    launch is refused while the profile is starting or already running.
     """
+    if wait_timeout <= 0:
+        fail("wait timeout must be greater than 0")
     corr_id = generate_correlation_id()
     paths = selected_paths()
     try:
@@ -791,6 +805,8 @@ def launch(
         target_browser = opts.browser
         width = opts.width
         height = opts.height
+        if headless and active_engine != "playwright":
+            fail("--headless requires the Playwright engine")
 
         write_log_entry(
             log_dir=paths.logs_dir,
@@ -841,7 +857,13 @@ def launch(
             if width is not None and height is not None:
                 controller_options["window_width"] = width
                 controller_options["window_height"] = height
-            state = start_controller(profile.data_dir, target_tabs, **controller_options)
+            state = start_controller(
+                profile.data_dir,
+                target_tabs,
+                headless=headless,
+                startup_timeout=wait_timeout,
+                **controller_options,
+            )
             write_log_entry(
                 log_dir=paths.logs_dir,
                 level="INFO",
@@ -851,6 +873,7 @@ def launch(
                 engine="playwright",
                 pid=state.get("controller_pid") or state.get("pid"),
                 result="success",
+                details={"headless": headless},
             )
     except (
         ProfileNotFoundError,
@@ -876,6 +899,10 @@ def launch(
         manager().mark_launched(profile.id)
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
         typer.echo(f"Warning: browser launched but launch timestamp was not saved: {exc}", err=True)
+    if active_engine == "playwright":
+        mode = "headless" if headless else "visible"
+        typer.echo(f"Launched '{profile.name}' (engine: {active_engine}, {mode}) with {target_tabs} tab(s).")
+        return
     typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {target_tabs} tab(s).")
 
 
@@ -1169,15 +1196,24 @@ def export_cookies(
 @app.command()
 def close(
     profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    timeout: float = typer.Option(
+        15.0,
+        "--timeout",
+        help="Seconds to wait for the browser and controller to terminate and flush data.",
+    ),
 ) -> None:
     """Close a running profile's browser cleanly.
 
-    Requests graceful shutdown and removes runtime state afterwards.
-    Safe to run on stale state; refuses ambiguous or unverified processes.
+    Requests graceful shutdown, waits for the browser and controller processes
+    to terminate and persistent data to flush, then removes runtime state.
+    Recovers crashed runtime state and terminates only identity-verified
+    orphan browser processes.
     """
+    if timeout <= 0:
+        fail("timeout must be greater than 0")
     try:
         profile = manager().resolve(profile_id)
-        close_controller(profile.data_dir, runtime_dir=runtime_path(profile))
+        close_controller(profile.data_dir, timeout=timeout, runtime_dir=runtime_path(profile))
     except ProfileRunningError as exc:
         if exc.stopped:
             fail(
