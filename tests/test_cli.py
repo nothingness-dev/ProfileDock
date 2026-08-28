@@ -130,7 +130,7 @@ def test_launch_browser_error_shown_concisely(tmp_path):
         encoding="utf-8",
     )
 
-    def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None):
+    def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None, startup_timeout=30.0):
         raise BrowserLaunchError("Playwright Chromium: not installed\nGoogle Chrome: not found")
 
     with (
@@ -184,7 +184,7 @@ def test_launch_running_error_shown_concisely(tmp_path):
         encoding="utf-8",
     )
 
-    def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None):
+    def fake_start_controller(data_dir, tabs, headless=False, runtime_dir=None, startup_timeout=30.0):
         raise ProfileRunningError("profile is already running")
 
     with (
@@ -788,7 +788,7 @@ def test_launch_with_playwright_override(tmp_path):
         result = runner.invoke(app, ["launch", "abc123", "--tabs", "1", "--engine", "playwright"])
     assert result.exit_code == 0
     assert mock_ctrl.called
-    assert "Launched 'OverrideTest' (engine: playwright) with 1 tab(s)." in result.output
+    assert "Launched 'OverrideTest' (engine: playwright, visible) with 1 tab(s)." in result.output
 
 
 def test_create_with_engine_direct_integration(tmp_path):
