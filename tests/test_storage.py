@@ -1,3 +1,8 @@
+import os
+
+import pytest
+
+from profiledock.fsops import write_private_json
 from profiledock.models import Profile
 from profiledock.storage import load_profiles, save_profiles
 
@@ -31,3 +36,17 @@ def test_metadata_lock_reentrancy(tmp_path):
     path = tmp_path / "profiles.json"
     with metadata_lock(path):
         assert (tmp_path / "profiles.lock").exists()
+
+
+def test_private_json_write_is_atomic_and_private(tmp_path):
+    path = tmp_path / "cookies.json"
+    write_private_json(path, [{"name": "sid", "value": "secret"}])
+    assert path.read_text(encoding="utf-8").endswith("\n")
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+    assert not list(tmp_path.glob(".cookies.json.*.tmp"))
+
+
+def test_private_json_write_rejects_directory_target(tmp_path):
+    with pytest.raises(OSError, match="unsafe JSON output target"):
+        write_private_json(tmp_path, {})

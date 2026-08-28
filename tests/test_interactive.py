@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from profiledock.cli import EXIT_USAGE_ERROR, app
+from profiledock.tui.actions import ACTIONS
 
 runner = CliRunner()
 
@@ -65,7 +66,6 @@ class TestInteractiveApp:
     @pytest.mark.asyncio
     async def test_deck_lists_all_commands_grouped(self):
         from profiledock.interactive import ProfileDockApp
-        from profiledock.tui.actions import ACTIONS
 
         app_instance = ProfileDockApp()
         async with app_instance.run_test():
@@ -373,3 +373,8 @@ class TestInteractiveApp:
             flags = form.query_one("#flags-flags", FlagsList)
             assert flags.value == []
             assert form.query_one("#field-tabs").value == ""
+
+
+def test_action_hotkeys_are_unique():
+    hotkeys = [action.hotkey for action in ACTIONS]
+    assert len(hotkeys) == len(set(hotkeys))

@@ -23,6 +23,12 @@
     "backup": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "output": ["--output", "-o"], "force": ["--force", "-f"], "exclude_cache": ["--exclude-cache", "-C"], "json_output": ["--json"]}},
     "restore": {"arguments": ["archive"], "options": {"force": ["--force", "-f"], "json_output": ["--json"]}},
     "logs": {"arguments": ["profile_id"], "options": {"last": ["--last", "-n"], "json_output": ["--json"]}},
+    "tabs": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
+    "open-tab": {"arguments": ["profile_id", "url"], "options": {"json_output": ["--json"]}},
+    "close-tab": {"arguments": ["profile_id", "index"], "options": {"json_output": ["--json"]}},
+    "read": {"arguments": ["profile_id", "url"], "options": {"tab": ["--tab", "-t"], "json_output": ["--json"]}},
+    "eval": {"arguments": ["profile_id", "script"], "options": {"tab": ["--tab", "-t"], "json_output": ["--json"]}},
+    "cookies": {"arguments": ["profile_id"], "options": {"output_file": ["--output", "-o"], "url": ["--url", "-u"], "json_output": ["--json"]}},
     "config": {
       "arguments": [],
       "options": {},
@@ -40,7 +46,7 @@
   "json": {
     "output_version": 1,
     "envelope_fields": ["output_version", "command", "data"],
-    "commands": ["list", "show", "status", "config show", "doctor", "migrate", "backup", "restore", "logs"],
+    "commands": ["list", "show", "status", "config show", "doctor", "migrate", "backup", "restore", "logs", "tabs", "open-tab", "close-tab", "read", "eval", "cookies"],
     "profile_engine": "effective engine after launch-config, profile, environment, and default precedence"
   },
   "engine": {
