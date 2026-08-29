@@ -1,9 +1,29 @@
 import json
 import os
 import time
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from .data_root import _is_link
+
+
+def sha256_file(path: Path) -> str:
+    """Return the hexadecimal SHA-256 digest of a file, streaming in 1 MiB chunks.
+
+    Single shared implementation used by backup verification, restore checksum
+    validation, and migration manifests. Raises the underlying OSError (e.g.
+    PermissionError for locked files) to the caller for domain-specific wrapping.
+    """
+    digest = sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None:
@@ -30,8 +50,6 @@ def write_all(fd: int, payload: bytes) -> None:
 
 
 def write_private_json(path: Path, value: Any) -> None:
-    from .data_root import _is_link
-
     target = path.expanduser().absolute()
     if _is_link(target) or (target.exists() and not target.is_file()):
         raise OSError(f"unsafe JSON output target: {target}")

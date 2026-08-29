@@ -105,9 +105,6 @@ from .process.state import (
     state_path,
 )
 
-if TYPE_CHECKING:
-    pass
-
 __all__ = [
     "IO",
     "RUNNING_STATE_PROTOCOL_VERSION",

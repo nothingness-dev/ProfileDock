@@ -4,16 +4,17 @@ import os
 import tarfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import IO, Any, Optional
+from typing import IO, Any
 from uuid import uuid4
 
 from .data_root import DataPaths, DataRootError, _is_link, ensure_within_root, validate_path_component
+from .fsops import sha256_file
 from .models import Profile, utc_now
 from .process_manager import is_active_for_mutation
-from .restore import MAX_MEMBER_SIZE_BYTES, MAX_TOTAL_EXTRACT_BYTES
+from .restore import MAX_MEMBER_SIZE_BYTES, MAX_TOTAL_EXTRACT_BYTES, ArchiveProfileResult
 from .version import __version__
 
 BACKUP_ARCHIVE_SCHEMA_VERSION = 1
@@ -35,18 +36,7 @@ class TargetExistsError(BackupError):
     pass
 
 
-@dataclass
-class BackupProfileResult:
-    id: str
-    name: str
-    engine: Optional[str]
-    status: str
-    file_count: int = 0
-    total_bytes: int = 0
-    message: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+BackupProfileResult = ArchiveProfileResult
 
 
 @dataclass
@@ -94,21 +84,14 @@ class _HashingFileReader:
 
 
 def _hash_file(path: Path) -> str:
-    digest = sha256()
     try:
-        with path.open("rb") as handle:
-            while True:
-                chunk = handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
+        return sha256_file(path)
     except PermissionError as exc:
         raise FileLockedError(
             f"cannot read locked file '{path}': {exc}. "
             "A background browser process or application may still be holding the file open. "
             "Please ensure all browser processes and background apps are completely closed."
         ) from exc
-    return digest.hexdigest()
 
 
 def _is_runtime_or_log_file(rel_path_str: str) -> bool:

@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from .errors import BrowserLaunchError, ProfileRunningError
 from .identity import _close_stderr, _stderr_message, _terminate_matching_process
+from .launch import prepare_runtime_dir, validate_launch_request
 from .state import (
     RUNNING_STATE_PROTOCOL_VERSION,
     StateDict,
@@ -49,26 +50,12 @@ def start_controller(
     from profiledock.process_manager import _stop_process as _stop_process_impl
     from profiledock.process_manager import is_running as _is_running_impl
 
-    if tabs < 1:
-        raise ValueError("tab count must be at least 1")
-    if (window_width is None) != (window_height is None):
-        raise ValueError("both window_width and window_height must be specified together")
-    if window_width is not None and (window_width < 100 or window_height is None or window_height < 100):
-        raise ValueError("window width and height must be at least 100")
-    urls = list(start_urls or [])
-    if len(urls) > tabs:
-        raise ValueError("number of start URLs cannot exceed the requested tab count")
-    if not Path(data_dir).is_dir():
-        raise BrowserLaunchError(
-            "profile data directory is missing or invalid",
-            "invalid_data_directory",
-        )
+    validate_launch_request(data_dir, tabs, window_width, window_height, start_urls)
+
     path = state_path(data_dir, runtime_dir)
     err = error_path(data_dir, runtime_dir)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name != "nt":
-        path.parent.chmod(0o700)
-    _unlink_quietly(err)
+    prepare_runtime_dir(data_dir, runtime_dir)
+    urls = list(start_urls or [])
     if state_file_is_unreadable(path):
         raise ProfileRunningError(
             "profile runtime state file is unreadable; run 'profiledock doctor --repair' to clean it up"

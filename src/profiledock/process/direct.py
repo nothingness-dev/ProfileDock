@@ -17,6 +17,7 @@ from typing import Any, Optional
 from ..browser_detection import system_browser_executable as _system_browser_impl
 from .errors import BrowserLaunchError, ProfileRunningError
 from .identity import _signal_posix_process_group
+from .launch import prepare_runtime_dir, validate_launch_request
 from .state import (
     RUNNING_STATE_PROTOCOL_VERSION,
     StateDict,
@@ -61,22 +62,10 @@ def start_direct_chrome(
     )
     from profiledock.process_manager import is_running as _is_running_impl
 
-    if tabs < 1:
-        raise ValueError("tab count must be at least 1")
-    if executable_path is not None and browser is not None:
-        raise ValueError("specify either executable_path or browser, not both")
-    if (window_width is None) != (window_height is None):
-        raise ValueError("both window_width and window_height must be specified together")
-    if window_width is not None and (window_width < 100 or window_height is None or window_height < 100):
-        raise ValueError("window width and height must be at least 100")
-    urls = list(start_urls or [])
-    if len(urls) > tabs:
-        raise ValueError("number of start URLs cannot exceed the requested tab count")
-    if not Path(data_dir).is_dir():
-        raise BrowserLaunchError(
-            "profile data directory is missing or invalid",
-            "invalid_data_directory",
-        )
+    validate_launch_request(
+        data_dir, tabs, window_width, window_height, start_urls, executable_path, browser
+    )
+
     browser_bin = executable_path if executable_path is not None else _system_browser_executable_impl(browser)
     if browser_bin is None or not Path(browser_bin).is_file():
         raise BrowserLaunchError(
@@ -85,12 +74,9 @@ def start_direct_chrome(
         )
 
     path = state_path(data_dir, runtime_dir)
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name != "nt":
-        path.parent.chmod(0o700)
-
+    prepare_runtime_dir(data_dir, runtime_dir)
     err = error_path(data_dir, runtime_dir)
-    _unlink_quietly(err)
+    urls = list(start_urls or [])
 
     if state_file_is_unreadable(path):
         raise ProfileRunningError(

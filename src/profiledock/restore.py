@@ -4,7 +4,6 @@ import re
 import shutil
 import tarfile
 from dataclasses import asdict, dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -18,6 +17,7 @@ from .data_root import (
     validate_path_component,
 )
 from .fsops import replace_with_retry as _replace_with_retry
+from .fsops import sha256_file
 from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_launch_config
 from .process_manager import is_active_for_mutation
 from .storage import (
@@ -70,7 +70,14 @@ def _restore_quarantines(quarantined: list[tuple[Path, Path]]) -> list[str]:
 
 
 @dataclass
-class RestoreProfileResult:
+class ArchiveProfileResult:
+    """Per-profile outcome row shared by the backup and restore reports.
+
+    Single definition so both report schemas stay field-for-field identical;
+    ``BackupProfileResult`` and ``RestoreProfileResult`` are compatibility
+    aliases preserved for their historical import paths.
+    """
+
     id: str
     name: str
     engine: Optional[str]
@@ -81,6 +88,9 @@ class RestoreProfileResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+RestoreProfileResult = ArchiveProfileResult
 
 
 @dataclass
@@ -108,14 +118,7 @@ class RestoreReport:
 
 
 def _verify_checksum(path: Path, expected_sha256: str) -> bool:
-    digest = sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest() == expected_sha256
+    return sha256_file(path) == expected_sha256
 
 
 def _validate_safe_member_path(member_name: str) -> Path:

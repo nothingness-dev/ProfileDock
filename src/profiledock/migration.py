@@ -2,7 +2,6 @@ import json
 import os
 import shutil
 from dataclasses import asdict, dataclass
-from hashlib import sha256
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -17,6 +16,7 @@ from .data_root import (
     validate_path_component,
 )
 from .fsops import replace_with_retry as _replace_with_retry
+from .fsops import sha256_file
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value
 from .process_manager import _alive, is_active_for_mutation
 from .storage import (
@@ -220,16 +220,6 @@ def _source_profile_running(layout: SourceLayout, profile_id: str) -> bool:
     return False
 
 
-def _hash_file(path: Path) -> str:
-    digest = sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(1024 * 1024)
-            if not block:
-                return digest.hexdigest()
-            digest.update(block)
-
-
 def _directory_manifest(root: Path) -> tuple[set[str], dict[str, tuple[int, str]]]:
     directories: set[str] = set()
     files: dict[str, tuple[int, str]] = {}
@@ -251,7 +241,7 @@ def _directory_manifest(root: Path) -> tuple[set[str], dict[str, tuple[int, str]
             # could make the destination profile appear falsely active.
             if _is_runtime_or_log_file(relative_file):
                 continue
-            files[relative_file] = (file_path.stat().st_size, _hash_file(file_path))
+            files[relative_file] = (file_path.stat().st_size, sha256_file(file_path))
     return directories, files
 
 
