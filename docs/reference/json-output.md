@@ -40,7 +40,33 @@ When a launch configuration exists, `launch_config` is also present and follows 
 
 ## `show PROFILE --json`
 
-`command` is `show`. `data` is one profile object.
+`command` is `show`. `data` is one profile object. Since the resource-monitoring release, `data` also always carries a `metrics` object:
+
+```json
+{
+  "profile_id": "abc123",
+  "name": "Work",
+  "engine": "direct",
+  "status": "stopped",
+  "live": null,
+  "storage": {
+    "total_bytes": 1048576,
+    "browser_data_bytes": 786432,
+    "cache_bytes": 204800,
+    "cookies_storage_bytes": 8192,
+    "logs_bytes": 49152
+  }
+}
+```
+
+The `storage` object is always present. `live` is `null` when the profile is not verifiably running; otherwise it reports:
+
+- `status` — `running`, `stopped`, or `degraded`
+- `total_cpu_percent` — aggregated process-tree CPU over the sampling window
+- `total_memory_rss_bytes` — resident memory (working set on Windows) across the tree
+- `process_count` — number of sampled processes
+- `processes` — per-process rows with `pid`, `name` (`browser`|`renderer`|`gpu`|`utility`|`controller`), `cpu_percent`, `memory_rss_bytes`, `memory_vms_bytes`
+- `tab_count` — active tabs when known, else `null`
 
 ## `status [PROFILE] --json`
 
@@ -60,6 +86,28 @@ When a launch configuration exists, `launch_config` is also present and follows 
   ]
 }
 ```
+
+With `--metrics`/`-m`, each item gains a `metrics` key carrying the same object described under `show PROFILE --json`; the default (no `--metrics`) payload is unchanged.
+
+## `top [PROFILE] --json`
+
+`command` is `top`. `data` is an object with `interval_seconds`, `watch`, and a `profiles` array. Each row:
+
+```json
+{
+  "profile_id": "abc123",
+  "name": "Work",
+  "engine": "direct",
+  "status": "running",
+  "cpu_percent": 12.5,
+  "memory_rss_bytes": 1234567,
+  "process_count": 4,
+  "tab_count": 3,
+  "disk_total_bytes": 1048576
+}
+```
+
+Live columns (`cpu_percent`, `memory_rss_bytes`, `process_count`, `tab_count`) are `null` for non-running profiles; `disk_total_bytes` is always present. In `--watch --json` mode one compact (non-indented) snapshot is emitted per refresh as a newline-delimited stream.
 
 ## `config show PROFILE --json`
 

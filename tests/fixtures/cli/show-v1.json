@@ -8,6 +8,20 @@
     "data_dir": "/profiles/abc123/browser-data",
     "last_launched_at": null,
     "engine": "playwright",
-    "status": "stopped"
+    "status": "stopped",
+    "metrics": {
+      "profile_id": "abc123",
+      "name": "Work",
+      "engine": "playwright",
+      "status": "stopped",
+      "live": null,
+      "storage": {
+        "total_bytes": 0,
+        "browser_data_bytes": 0,
+        "cache_bytes": 0,
+        "cookies_storage_bytes": 0,
+        "logs_bytes": 0
+      }
+    }
   }
 }

@@ -48,7 +48,7 @@ Lists every profile with ID, name, effective engine, and runtime status. Empty h
 profiledock show PROFILE [--json]
 ```
 
-Shows identity, effective engine, status, timestamps, data directory, and launch configuration when present.
+Shows identity, effective engine, status, timestamps, data directory, and launch configuration when present. When the profile is running it also reports live CPU %, resident memory (RSS), and process count; stopped profiles report the disk footprint breakdown (browser data, cache, cookies, logs). With `--json`, a `metrics` object is always included in `data` (`live` is `null` when not running) and is described in the [JSON output reference](json-output.md).
 
 ## `rename`
 
@@ -125,7 +125,7 @@ Clears the complete launch preset and restores inherited/default launch behavior
 ## `status`
 
 ```text
-profiledock status [PROFILE] [--watch] [--interval SECONDS] [--json]
+profiledock status [PROFILE] [--watch] [--interval SECONDS] [--json] [--metrics]
 ```
 
 Options:
@@ -135,8 +135,9 @@ Options:
 | `--watch`, `-w` | Continuously poll and display live status. |
 | `--interval SECONDS`, `-i SECONDS` | Polling interval in seconds when using `--watch` (default: 1.0). |
 | `--json` | Emit versioned JSON output. |
+| `--metrics`, `-m` | Include per-profile resource metrics: process-tree CPU %, resident memory (RSS), process count, active tabs, and disk footprint. |
 
-Without a selector, reports every profile. With a selector, reports one. Status values include `stopped`, `starting`, `running`, `closing`, `crashed`, `stale`, and `error` where applicable. JSON `data` remains an array in both forms and exposes the effective engine.
+Without a selector, reports every profile. With a selector, reports one. Status values include `stopped`, `starting`, `running`, `closing`, `crashed`, `stale`, and `error` where applicable. JSON `data` remains an array in both forms and exposes the effective engine. With `--metrics`, each item gains a `metrics` object shaped like the `show` metrics payload (JSON output reference) and human output appends `CPU%`, `RSS`, `PROCS`, `TABS`, and `DISK` columns. Default output (without `--metrics`) is unchanged.
 
 ## `launch`
 
@@ -284,6 +285,30 @@ profiledock cookies PROFILE [--output FILE] [--url URL] [--json]
 ```
 
 Exports live session cookies directly from browser RAM, bypassing SQLite filesystem locks. Cookie output is sensitive authentication material. File output uses a private atomic JSON write and refuses links or non-file targets. A stopped profile is started headlessly and remains active until explicitly closed.
+
+## `top`
+
+```text
+profiledock top [PROFILE] [--watch] [--interval SECONDS] [--json]
+```
+
+Live resource monitor (like `docker stats`): reports each profile's process-tree CPU %, resident memory (RSS), process count, active tabs, and total disk footprint. Running profiles report live telemetry measured over a short sampling window; stopped profiles report their disk footprint with `-` for live columns.
+
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--watch`, `-w` | Continuously refresh until Ctrl+C. Defaults to on when stdout is a TTY and off when piped (also disabled by `--non-interactive`). |
+| `--interval SECONDS`, `-i SECONDS` | Refresh interval in seconds (default: 1.0). |
+| `--json` | Emit versioned JSON telemetry. In `--watch --json` mode a compact JSON snapshot is printed per refresh for streaming ingestion. |
+
+```bash
+profiledock top
+profiledock top Personal --json
+profiledock top --watch --interval 2
+```
+
+JSON `data` is an object with `interval_seconds`, `watch`, and a `profiles` array; each row carries `profile_id`, `name`, `engine`, `status`, `cpu_percent`, `memory_rss_bytes`, `process_count`, `tab_count`, and `disk_total_bytes`. A non-running profile reports `null` for the live metrics.
 
 ## Exit codes, streams, and errors
 

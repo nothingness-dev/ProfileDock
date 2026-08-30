@@ -24,6 +24,7 @@ from rich.text import Text
 from ..backup import create_backup_archive
 from ..browser_detection import browser_rows
 from ..cli_contract import EXIT_SUCCESS, EXIT_USER_ERROR, error_category
+from ..cli_support import format_cpu_percent
 from ..data_root import DataPaths
 from ..doctor import STATUS_FAILED, STATUS_OK, STATUS_WARNING, DiagnosticCheck, run_diagnostics
 from ..fsops import write_private_json
@@ -239,7 +240,45 @@ def profile_card(paths: DataPaths, row: ProfileRow) -> list[tuple[str, Text]]:
             ("Window", Text(f"{config.window_width}x{config.window_height}" if config.window_width else "-"))
         )
         card.append(("Start URLs", Text(str(len(config.start_urls)) if config.start_urls else "0")))
+    card.extend(_resource_entries(paths, profile, row))
     return card
+
+
+def _resource_entries(paths: DataPaths, profile: Any, row: ProfileRow) -> list[tuple[str, Text]]:
+    """Live CPU/RAM gauges plus disk breakdown for the inspector card.
+
+    Best-effort: telemetry failures simply omit the entries.
+    """
+    from ..metrics import get_profile_metrics
+
+    try:
+        metrics = get_profile_metrics(
+            profile,
+            runtime_dir=paths.runtime_dir / profile.id,
+            status=row.status,
+            cpu_sample_interval=0.1,
+        )
+    except Exception:
+        return []
+    storage = metrics.storage
+    live = metrics.live
+    entries: list[tuple[str, Text]] = []
+    if live is not None:
+        entries.append(("CPU", Text(format_cpu_percent(live.total_cpu_percent), style="bold")))
+        entries.append(("Memory (RSS)", Text(format_size(int(live.total_memory_rss_bytes)))))
+        entries.append(("Processes", Text(str(live.process_count))))
+    entries.append(("Disk total", Text(format_size(storage.total_bytes))))
+    entries.append(
+        (
+            "Cache / Cookies / Logs",
+            Text(
+                f"{format_size(storage.cache_bytes)} / "
+                f"{format_size(storage.cookies_storage_bytes)} / "
+                f"{format_size(storage.logs_bytes)}"
+            ),
+        )
+    )
+    return entries
 
 
 def doctor_checks(paths: DataPaths) -> list[DiagnosticCheck]:

@@ -10,6 +10,7 @@ from ..cli_support import (
     emit_json,
     fail,
     fail_exception,
+    format_cpu_percent,
     format_size_bytes,
     resolve_engine,
     safe_profile_dict,
@@ -95,6 +96,12 @@ def show_command(
         fail_exception(exc)
     status = get_status(profile.data_dir, runtime_dir=runtime_path(profile))
     data = safe_profile_dict(profile, status=status)
+    from ..metrics import get_profile_metrics
+
+    metrics = get_profile_metrics(
+        profile, runtime_dir=runtime_path(profile), status=status, cpu_sample_interval=0.15
+    )
+    data["metrics"] = metrics.to_dict()
     if json_output:
         emit_json("show", data)
         return
@@ -109,6 +116,21 @@ def show_command(
         ["Last launched at:", profile.last_launched_at or "Never"],
     ]
     typer.echo(_render_table(rows))
+    live = metrics.live
+    storage = metrics.storage
+    typer.echo()
+    typer.echo("Resource usage:")
+    resource_rows: list[list[str]] = [
+        ["  CPU:", format_cpu_percent(live.total_cpu_percent) if live else "-"],
+        ["  Memory (RSS):", format_size_bytes(int(live.total_memory_rss_bytes)) if live else "-"],
+        ["  Processes:", str(live.process_count) if live else "-"],
+        ["  Disk total:", format_size_bytes(storage.total_bytes)],
+        ["    Browser data:", format_size_bytes(storage.browser_data_bytes)],
+        ["    Cache:", format_size_bytes(storage.cache_bytes)],
+        ["    Cookies:", format_size_bytes(storage.cookies_storage_bytes)],
+        ["    Logs:", format_size_bytes(storage.logs_bytes)],
+    ]
+    typer.echo(_render_table(resource_rows))
 
 
 def rename_command(

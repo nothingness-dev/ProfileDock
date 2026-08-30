@@ -11,6 +11,8 @@ from ..cli_support import (
     emit_json,
     fail,
     fail_exception,
+    format_cpu_percent,
+    format_size_bytes,
     resolve_engine,
     selected_paths,
 )
@@ -120,11 +122,18 @@ def status_command(
         1.0, "--interval", "-i", help="Poll interval in seconds when using --watch."
     ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+    metrics: bool = typer.Option(
+        False,
+        "--metrics",
+        "-m",
+        help="Include resource metrics: process-tree CPU %, resident memory, and disk footprint.",
+    ),
 ) -> None:
     """Report runtime status of one profile or all profiles.
 
     Status values: stopped, starting, running, closing, crashed, stale, error.
-    With --watch, refreshes continuously until Ctrl+C.
+    With --metrics, appends resource columns (CPU %, RSS, disk); with --watch,
+    refreshes continuously until Ctrl+C.
     """
     from ..cli import _render_table, get_status, runtime_path
 
@@ -134,6 +143,16 @@ def status_command(
         fail(
             "--watch cannot be combined with --json; poll 'profiledock status --json' from the caller instead"
         )
+
+    def _metrics_dict(prof: Any, status_value: str) -> dict[str, Any]:
+        from ..metrics import get_profile_metrics
+
+        return get_profile_metrics(
+            prof,
+            runtime_dir=runtime_path(prof),
+            status=status_value,
+            cpu_sample_interval=0.2,
+        ).to_dict()
 
     def _render_once() -> None:
         if profile_id is not None:
@@ -148,14 +167,15 @@ def status_command(
             items = []
             for prof in profiles:
                 st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
-                items.append(
-                    {
-                        "id": prof.id,
-                        "name": prof.name,
-                        "engine": resolve_engine(None, prof),
-                        "status": st,
-                    }
-                )
+                item: dict[str, Any] = {
+                    "id": prof.id,
+                    "name": prof.name,
+                    "engine": resolve_engine(None, prof),
+                    "status": st,
+                }
+                if metrics:
+                    item["metrics"] = _metrics_dict(prof, st)
+                items.append(item)
             emit_json("status", items)
             return
 
@@ -167,13 +187,40 @@ def status_command(
             prof = profiles[0]
             st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
             eng = resolve_engine(None, prof)
-            typer.echo(f"{prof.id}\t{prof.name}\t{eng}\t{st}")
+            line = f"{prof.id}\t{prof.name}\t{eng}\t{st}"
+            if metrics:
+                m = _metrics_dict(prof, st)
+                live = m["live"]
+                cpu = format_cpu_percent(live["total_cpu_percent"]) if live else "-"
+                rss = format_size_bytes(int(live["total_memory_rss_bytes"])) if live else "-"
+                disk = format_size_bytes(m["storage"]["total_bytes"])
+                line += f"\t{cpu}\t{rss}\t{disk}"
+            typer.echo(line)
         else:
             table = [["ID", "NAME", "ENGINE", "STATUS"]]
+            if metrics:
+                table = [["ID", "NAME", "ENGINE", "STATUS", "CPU%", "RSS", "PROCS", "TABS", "DISK"]]
             for prof in profiles:
                 st = get_status(prof.data_dir, runtime_dir=runtime_path(prof))
                 eng = resolve_engine(None, prof)
-                table.append([prof.id, prof.name, eng, st])
+                if metrics:
+                    m = _metrics_dict(prof, st)
+                    live = m["live"]
+                    table.append(
+                        [
+                            prof.id,
+                            prof.name,
+                            eng,
+                            st,
+                            format_cpu_percent(live["total_cpu_percent"]) if live else "-",
+                            format_size_bytes(int(live["total_memory_rss_bytes"])) if live else "-",
+                            str(live["process_count"]) if live else "-",
+                            str(live["tab_count"]) if live and live["tab_count"] is not None else "-",
+                            format_size_bytes(m["storage"]["total_bytes"]),
+                        ]
+                    )
+                else:
+                    table.append([prof.id, prof.name, eng, st])
             typer.echo(_render_table(table))
 
     try:

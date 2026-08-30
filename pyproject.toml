@@ -99,3 +99,8 @@ files = ["src/profiledock"]
 [[tool.mypy.overrides]]
 module = "playwright.*"
 ignore_missing_imports = true
+
+# psutil is an optional acceleration dependency for resource metrics.
+[[tool.mypy.overrides]]
+module = "psutil.*"
+ignore_missing_imports = true

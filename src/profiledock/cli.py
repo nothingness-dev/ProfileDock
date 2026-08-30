@@ -94,6 +94,9 @@ from .commands.config import (
 from .commands.doctor import (
     doctor_command,
 )
+from .commands.metrics import (
+    top_command,
+)
 from .commands.migration import (
     migrate_command,
 )
@@ -106,6 +109,9 @@ from .commands.profiles import (
 )
 from .data_root import DataPaths as DataPaths
 from .data_root import DataRootError, resolve_data_root
+from .metrics import LiveResourceUsage as LiveResourceUsage
+from .metrics import ProfileMetrics as ProfileMetrics
+from .metrics import StorageResourceUsage as StorageResourceUsage
 from .models import LaunchConfig as LaunchConfig
 from .models import Profile as Profile
 from .process_manager import (
@@ -384,6 +390,13 @@ app.command(name="close-tab")(close_tab_command)
 app.command(name="read")(read_page_command)
 app.command(name="eval")(eval_script_command)
 app.command(name="cookies")(export_cookies_command)
+app.command(
+    name="top",
+    epilog="""Examples:\n
+  profiledock top\n
+  profiledock top Personal --json\n
+  profiledock top --watch --interval 2""",
+)(top_command)
 app.command(name="close")(close_command)
 app.command(
     name="delete",
@@ -442,6 +455,7 @@ launch = launch_command
 close = close_command
 tabs = list_tabs_command
 list_tabs = list_tabs_command
+top = top_command
 open_tab = open_tab_command
 close_tab = close_tab_command
 read_page = read_page_command

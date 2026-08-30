@@ -62,6 +62,7 @@ profiledock list
 profiledock show PROFILE
 profiledock config show PROFILE
 profiledock status [PROFILE]
+profiledock top [PROFILE]
 profiledock launch PROFILE [--tabs N]
 profiledock close PROFILE
 profiledock rename PROFILE NEW_NAME

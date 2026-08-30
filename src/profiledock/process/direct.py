@@ -62,9 +62,7 @@ def start_direct_chrome(
     )
     from profiledock.process_manager import is_running as _is_running_impl
 
-    validate_launch_request(
-        data_dir, tabs, window_width, window_height, start_urls, executable_path, browser
-    )
+    validate_launch_request(data_dir, tabs, window_width, window_height, start_urls, executable_path, browser)
 
     browser_bin = executable_path if executable_path is not None else _system_browser_executable_impl(browser)
     if browser_bin is None or not Path(browser_bin).is_file():

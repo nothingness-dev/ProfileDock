@@ -184,10 +184,20 @@ def format_size_bytes(num_bytes: Optional[int]) -> str:
     return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 
+def format_cpu_percent(cpu_percent: Optional[float]) -> str:
+    if cpu_percent is None:
+        return "-"
+    return f"{cpu_percent:.1f}%"
+
+
 def render_table(rows: list[list[str]]) -> str:
     if not rows:
         return ""
-    col_widths = [max(len(row[col]) for row in rows) for col in range(len(rows[0]))]
+    num_cols = max(len(row) for row in rows)
+    col_widths = [
+        max((len(row[col]) for row in rows if col < len(row)), default=0)
+        for col in range(num_cols)
+    ]
     lines = []
     for row in rows:
         line = "  ".join(val.ljust(col_widths[col]) for col, val in enumerate(row))
