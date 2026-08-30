@@ -214,8 +214,17 @@ class ProfileDockApp(App[None]):
         def wrapper() -> None:
             try:
                 result = fn()
-            except Exception:
-                return
+            except Exception as exc:
+                if group == "action":
+                    from rich.text import Text
+                    result = backend.ActionResult(
+                        argv=["profiledock"],
+                        exit_code=1,
+                        body=Text(str(exc), style="bold red"),
+                        category="internal_error",
+                    )
+                else:
+                    return
             try:
                 self.call_from_thread(on_done, result)
             except Exception:

@@ -252,6 +252,10 @@ class WindowsSampler(PlatformSampler):
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         TH32CS_SNAPPROCESS = 0x2
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
 
         class _Entry(ctypes.Structure):
             _fields_ = [
@@ -292,6 +296,18 @@ class WindowsSampler(PlatformSampler):
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
 
         class _MemoryCounters(ctypes.Structure):
             _fields_ = [
@@ -374,13 +390,14 @@ class MacOSSampler(PlatformSampler):
 
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:
         try:
-            output = subprocess.run(
+            res = subprocess.run(
                 [_PS_EXECUTABLE, "-axo", "pid=,ppid=,comm="],
                 capture_output=True,
                 text=True,
                 timeout=5,
-                check=True,
-            ).stdout
+                check=False,
+            )
+            output = res.stdout
         except (OSError, subprocess.SubprocessError):
             return {}
         identities: dict[int, ProcessIdentity] = {}
@@ -398,13 +415,14 @@ class MacOSSampler(PlatformSampler):
             return {}
         pid_args = ",".join(str(pid) for pid in pids)
         try:
-            output = subprocess.run(
+            res = subprocess.run(
                 [_PS_EXECUTABLE, "-o", "pid=,rss=,vsz=,time=,etime=", "-p", pid_args],
                 capture_output=True,
                 text=True,
                 timeout=5,
-                check=True,
-            ).stdout
+                check=False,
+            )
+            output = res.stdout
         except (OSError, subprocess.SubprocessError):
             return {}
         wanted = set(pids)

@@ -93,8 +93,18 @@ def _get_process_create_time(pid: int) -> Optional[float]:
                 fields = parts[-1].strip().split()
                 if len(fields) >= 20:
                     starttime_ticks = float(fields[19])
+                    clock_ticks = float(os.sysconf("SC_CLK_TCK"))
+                    boot_epoch: float | None = None
+                    stat_file = Path("/proc/stat")
+                    if stat_file.exists():
+                        for line in stat_file.read_text(encoding="ascii", errors="replace").splitlines():
+                            if line.startswith("btime"):
+                                boot_epoch = float(line.split()[1])
+                                break
+                    if boot_epoch is not None:
+                        return boot_epoch + (starttime_ticks / clock_ticks)
                     return starttime_ticks
-        except (OSError, ValueError, IndexError):
+        except (OSError, ValueError, IndexError, AttributeError):
             pass
     return None
 
@@ -146,6 +156,8 @@ def _alive(pid: int) -> bool:
             pass
     try:
         os.kill(pid, 0)
+        return True
+    except PermissionError:
         return True
     except (OSError, ProcessLookupError):
         return False
@@ -217,6 +229,24 @@ def _list_processes() -> list[tuple[int, int, str]]:
         finally:
             kernel32.CloseHandle(snapshot)
         return entries
+
+    if sys.platform == "darwin":
+        try:
+            output = subprocess.run(
+                ["/bin/ps", "-axo", "pid=,ppid=,comm="],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            ).stdout
+            entries: list[tuple[int, int, str]] = []
+            for line in output.splitlines():
+                parts = line.strip().split(None, 2)
+                if len(parts) >= 3 and parts[0].isdigit() and parts[1].isdigit():
+                    entries.append((int(parts[0]), int(parts[1]), os.path.basename(parts[2])))
+            return entries
+        except Exception:
+            return []
 
     if not Path("/proc").is_dir():
         return []

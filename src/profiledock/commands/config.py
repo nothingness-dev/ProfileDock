@@ -136,7 +136,7 @@ def config_remove_url_command(
     """Remove one start URL from the launch preset."""
     try:
         profile = _get_manager().remove_start_url(profile_id, url)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Removed start URL '{url}' from profile '{profile.name}' ({profile.id})")
 
@@ -147,6 +147,6 @@ def config_reset_command(
     """Clear the complete launch preset, restoring inherited defaults."""
     try:
         profile = _get_manager().reset_launch_config(profile_id)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Reset launch configuration for profile '{profile.name}' ({profile.id})")

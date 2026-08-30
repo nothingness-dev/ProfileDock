@@ -359,7 +359,7 @@ def _controller(
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("127.0.0.1", 0))
-        server.listen(1)
+        server.listen(128)
         server.settimeout(0.5)
         port = server.getsockname()[1]
         with sync_playwright() as playwright:

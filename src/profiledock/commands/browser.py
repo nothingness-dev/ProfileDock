@@ -108,7 +108,7 @@ def set_engine_command(
     try:
         old_engine = _get_manager().resolve(profile_id).engine
         profile = _get_manager().set_engine(profile_id, clean_engine)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Set engine to '{clean_engine}' for profile '{profile.name}' ({profile.id})")
     if old_engine != clean_engine:

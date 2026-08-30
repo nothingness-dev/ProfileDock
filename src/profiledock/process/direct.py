@@ -207,6 +207,10 @@ def _close_direct(path: Path, state: StateDict, timeout: float) -> None:
             time.sleep(poll_interval)
             poll_interval = min(poll_interval * 1.5, 0.1)
         if _alive_impl(pid):
+            if not _is_matching_process_impl(pid, expected_create_time, require_verification=True):
+                raise ProfileRunningError(
+                    "profile process identity could not be verified; refusing to signal it"
+                )
             if sys.platform == "win32":
                 subprocess.run(
                     ["taskkill", "/PID", str(pid), "/T", "/F"],

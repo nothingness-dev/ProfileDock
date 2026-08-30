@@ -13,6 +13,7 @@ from .data_root import DataPaths, DataRootError, resolve_data_root
 from .models import Profile
 from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from .storage import StorageError
+from .validation import ValidationError
 
 _paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
 _paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared", default=False)
@@ -80,6 +81,8 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
         # DataRootError covers both mundane environment failures (missing
         # LOCALAPPDATA, invalid root) and genuine path-safety refusals; let the
         # message keywords classify it instead of blanket security_violation.
+        category = error_category(str(error))
+    elif isinstance(error, ValidationError):
         category = error_category(str(error))
     elif isinstance(error, (StorageError, OSError)):
         category = "storage_error"

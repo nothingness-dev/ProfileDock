@@ -17,6 +17,7 @@ from ..cli_support import (
 )
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..storage import StorageError
+from ..validation import ValidationError
 
 
 def _get_manager() -> ProfileManager:
@@ -46,7 +47,7 @@ def create_command(
         engine = clean_engine
     try:
         profile = _get_manager().create(name, engine=engine)
-    except (StorageError, ValueError) as exc:
+    except (StorageError, ValidationError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Created profile '{profile.name}' ({profile.id})")
 
@@ -147,7 +148,7 @@ def rename_command(
     try:
         old_name = _get_manager().resolve(profile_id).name
         profile = _get_manager().rename(profile_id, clean_name)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError) as exc:
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail_exception(exc)
     typer.echo(f"Renamed profile to '{profile.name}' ({profile.id})")
     if old_name != profile.name:
@@ -172,6 +173,13 @@ def delete_command(
         if not yes and not confirm(f"Delete profile '{profile.name}' and all browser data?"):
             raise typer.Abort()
         _get_manager().delete(profile.id)
-    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, OSError, ValueError) as exc:
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        OSError,
+        ValidationError,
+        ValueError,
+    ) as exc:
         fail_exception(exc)
     typer.echo(f"Deleted '{profile.name}'.")
