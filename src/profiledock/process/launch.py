@@ -7,7 +7,6 @@ process trees; this module is the single source of that behavior.
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from .errors import BrowserLaunchError
 from .state import _unlink_quietly, error_path, state_path
@@ -16,11 +15,11 @@ from .state import _unlink_quietly, error_path, state_path
 def validate_launch_request(
     data_dir: str,
     tabs: int,
-    window_width: Optional[int],
-    window_height: Optional[int],
-    start_urls: Optional[list[str]],
-    executable_path: Optional[Path] = None,
-    browser: Optional[str] = None,
+    window_width: int | None,
+    window_height: int | None,
+    start_urls: list[str] | None,
+    executable_path: Path | None = None,
+    browser: str | None = None,
 ) -> None:
     """Validate arguments common to every engine launch; raise before any side effect.
 
@@ -45,7 +44,7 @@ def validate_launch_request(
         )
 
 
-def prepare_runtime_dir(data_dir: str, runtime_dir: Optional[Path]) -> None:
+def prepare_runtime_dir(data_dir: str, runtime_dir: Path | None) -> None:
     """Create the private runtime directory and clear stale error reports."""
     path = state_path(data_dir, runtime_dir)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

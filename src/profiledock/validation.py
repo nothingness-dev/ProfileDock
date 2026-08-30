@@ -2,7 +2,6 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse
 
 from .browser_detection import DIRECT_BROWSER_ALIASES
@@ -53,7 +52,7 @@ def validate_browser(browser: str, engine: str, require_executable: bool = False
 VALID_ENGINES = frozenset({"direct", "playwright"})
 
 
-def validate_engine(engine: Optional[str]) -> Optional[str]:
+def validate_engine(engine: str | None) -> str | None:
     if engine is not None and engine not in VALID_ENGINES:
         raise ValueError(f"invalid engine '{engine}', must be 'direct' or 'playwright'")
     return engine
@@ -61,7 +60,7 @@ def validate_engine(engine: Optional[str]) -> Optional[str]:
 
 def validate_launch_config(
     config: LaunchConfig,
-    profile_engine: Optional[str] = None,
+    profile_engine: str | None = None,
     require_browser_executable: bool = False,
 ) -> None:
     effective_engine = config.engine or profile_engine or "direct"

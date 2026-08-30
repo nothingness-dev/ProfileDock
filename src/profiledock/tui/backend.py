@@ -28,6 +28,13 @@ from ..cli_support import format_cpu_percent
 from ..data_root import DataPaths
 from ..doctor import STATUS_FAILED, STATUS_OK, STATUS_WARNING, DiagnosticCheck, run_diagnostics
 from ..fsops import write_private_json
+from ..launch_service import (
+    LaunchPlanError,
+    build_launch_plan,
+    controller_launch_options,
+    direct_launch_options,
+    resolve_launch_tabs,
+)
 from ..logger import read_profile_logs
 from ..models import Profile
 from ..process_manager import (
@@ -118,20 +125,14 @@ class ActionResult:
 
 
 def compute_size(path_str: str) -> int | None:
-    data_dir = Path(path_str)
-    if not data_dir.is_dir():
+    # Delegates to the shared storage breakdown so its short-lived mtime cache
+    # also covers the profile rail's size polling (which otherwise re-walks
+    # every browser-data tree per refresh).
+    from ..metrics import storage_usage
+
+    if not Path(path_str).is_dir():
         return None
-    total = 0
-    try:
-        for root_dir, _, filenames in os.walk(data_dir):
-            for fname in filenames:
-                try:
-                    total += (Path(root_dir) / fname).stat().st_size
-                except OSError:
-                    continue
-    except OSError:
-        return None
-    return total
+    return storage_usage(path_str).total_bytes
 
 
 def format_size(num_bytes: int | None) -> str:
@@ -208,15 +209,9 @@ def list_profile_rows(paths: DataPaths, with_sizes: bool = False) -> list[Profil
 
 
 def effective_engine(profile: Profile) -> str:
-    config = getattr(profile, "launch_config", None)
-    if config is not None and config.engine:
-        return str(config.engine)
-    if profile.engine:
-        return str(profile.engine)
-    env_value = os.environ.get("PROFILEDOCK_DEFAULT_ENGINE", "").strip().lower()
-    if env_value in ("direct", "playwright"):
-        return env_value
-    return "direct"
+    from ..cli_support import resolve_engine
+
+    return resolve_engine(None, profile)
 
 
 def profile_card(paths: DataPaths, row: ProfileRow) -> list[tuple[str, Text]]:
@@ -409,7 +404,6 @@ def _resolve_browser(raw: str, engine: str) -> str:
 def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     manager = _manager(paths)
     profile = _require_profile(manager, str(values.get("profile", "")))
-    config = getattr(profile, "launch_config", None)
     raw_engine = str(values.get("engine") or "").strip().lower()
     engine = raw_engine if raw_engine in ("direct", "playwright") else effective_engine(profile)
     raw_tabs = str(values.get("tabs") or "").strip()
@@ -417,49 +411,40 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
         if not raw_tabs.isdigit() or int(raw_tabs) < 1:
             raise BackendError("tab count must be a positive integer", "invalid_input")
         tabs = int(raw_tabs)
-    elif config is not None and config.default_tabs:
-        tabs = config.default_tabs
     else:
-        tabs = 1
+        tabs = resolve_launch_tabs(profile, None) or 1
     raw_urls = str(values.get("urls") or "").strip()
-    stored_urls = list(config.start_urls) if config is not None and config.start_urls else []
-    urls = _parse_urls(raw_urls) if raw_urls else stored_urls
-    if len(urls) > tabs:
-        raise BackendError("number of start URLs cannot exceed the tab count", "invalid_input")
+    urls = _parse_urls(raw_urls) if raw_urls else None
     raw_browser = str(values.get("browser") or "").strip()
-    browser: str | None = (
-        _resolve_browser(raw_browser, engine)
-        if raw_browser
-        else (config.browser if config is not None else None)
-    )
+    browser: str | None = _resolve_browser(raw_browser, engine) if raw_browser else None
     flags = values.get("flags")
     extra_flags = [str(flag) for flag in flags] if isinstance(flags, list) else []
 
-    if not Path(profile.data_dir).is_dir():
-        raise BackendError("profile data directory is missing", "invalid_data_directory")
+    try:
+        plan = build_launch_plan(
+            profile,
+            engine=engine if raw_engine else None,
+            tabs=tabs,
+            urls=urls,
+            browser=browser,
+        )
+    except LaunchPlanError as exc:
+        raise BackendError(str(exc), exc.category) from exc
 
     runtime_dir = paths.runtime_dir / profile.id
-    if engine == "direct":
-        options: dict[str, Any] = {"runtime_dir": runtime_dir}
-        if browser is not None:
-            browser_path = Path(browser).expanduser()
-            if browser_path.is_file():
-                options["executable_path"] = browser_path
-            else:
-                options["browser"] = browser
-        if urls:
-            options["start_urls"] = list(urls)
-        if extra_flags:
-            options["extra_args"] = extra_flags
-        state = start_direct_chrome(profile.data_dir, tabs, **options)
+    if plan.engine == "direct":
+        options: dict[str, Any] = {
+            "runtime_dir": runtime_dir,
+            **direct_launch_options(plan, extra_args=extra_flags),
+        }
+        state = start_direct_chrome(profile.data_dir, plan.tabs, **options)
         pid = state.get("pid")
     else:
-        controller_options: dict[str, Any] = {"runtime_dir": runtime_dir}
-        if browser is not None:
-            controller_options["browser_channel"] = browser
-        if urls:
-            controller_options["start_urls"] = list(urls)
-        state = start_controller(profile.data_dir, tabs, **controller_options)
+        controller_options: dict[str, Any] = {
+            "runtime_dir": runtime_dir,
+            **controller_launch_options(plan),
+        }
+        state = start_controller(profile.data_dir, plan.tabs, **controller_options)
         pid = state.get("controller_pid") or state.get("pid")
 
     launch_warning = ""
@@ -471,12 +456,12 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     body = Text()
     body.append("Launched ", style="green")
     body.append(f"'{profile.name}'", style="bold")
-    body.append(f" (engine: {engine}) with {tabs} tab(s).")
+    body.append(f" (engine: {plan.engine}) with {plan.tabs} tab(s).")
     if pid:
         body.append(f"\nPID: {pid}", style="dim")
     if launch_warning:
         body.append(launch_warning, style="yellow")
-    if extra_flags and engine != "direct":
+    if extra_flags and plan.engine != "direct":
         body.append("\nNote: custom Chromium flags apply to the direct engine only.", style="yellow")
     return body
 

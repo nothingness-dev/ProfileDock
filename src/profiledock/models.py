@@ -1,6 +1,6 @@
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 METADATA_SCHEMA_VERSION = 1
 _SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1})
@@ -70,12 +70,12 @@ def migrate_metadata_value(value: Any) -> dict[str, Any]:
 
 @dataclass
 class LaunchConfig:
-    default_tabs: Optional[int] = None
+    default_tabs: int | None = None
     start_urls: list[str] = field(default_factory=list)
-    engine: Optional[str] = None
-    browser: Optional[str] = None
-    window_width: Optional[int] = None
-    window_height: Optional[int] = None
+    engine: str | None = None
+    browser: str | None = None
+    window_width: int | None = None
+    window_height: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,9 +144,9 @@ class Profile:
     name: str
     created_at: str
     data_dir: str
-    last_launched_at: Optional[str] = None
-    engine: Optional[str] = None
-    launch_config: Optional[LaunchConfig] = None
+    last_launched_at: str | None = None
+    engine: str | None = None
+    launch_config: LaunchConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

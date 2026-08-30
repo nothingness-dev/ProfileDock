@@ -4,7 +4,7 @@ import json
 import os
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, NoReturn
 
 import typer
 
@@ -15,7 +15,7 @@ from .profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFo
 from .storage import StorageError
 from .validation import ValidationError
 
-_paths: ContextVar[Optional[DataPaths]] = ContextVar("profiledock_data_paths", default=None)
+_paths: ContextVar[DataPaths | None] = ContextVar("profiledock_data_paths", default=None)
 _paths_prepared: ContextVar[bool] = ContextVar("profiledock_data_paths_prepared", default=False)
 _verbose: ContextVar[bool] = ContextVar("profiledock_verbose", default=False)
 _log_level: ContextVar[str] = ContextVar("profiledock_log_level", default="INFO")
@@ -56,8 +56,8 @@ def runtime_path(profile: Profile) -> Path:
 def fail(
     message: str,
     code: int = EXIT_USER_ERROR,
-    category: Optional[str] = None,
-    hint: Optional[str] = None,
+    category: str | None = None,
+    hint: str | None = None,
 ) -> NoReturn:
     selected_category = category or error_category(message)
     typer.echo(f"Error [{selected_category}]: {message}", err=True)
@@ -93,6 +93,13 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
             category = "security_violation"
         else:
             category = error_category(str(error))
+    # Structural fallback: domain exceptions may carry their own category
+    # (BackupError, RestoreError, MigrationError families). When the keyword
+    # classifier produced the generic invalid_input but the exception knows
+    # better, prefer the exception's attribute.
+    error_category_attr = getattr(error, "category", None)
+    if category == "invalid_input" and isinstance(error_category_attr, str) and error_category_attr:
+        category = error_category_attr
     fail(str(error), code=code, category=category, hint=_HINTS.get(category))
 
 
@@ -109,11 +116,12 @@ def confirm(message: str) -> bool:
     return typer.confirm(message)
 
 
-def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
+def resolve_engine_strict(cli_engine: str | None, profile: Profile) -> str:
+    """Resolve the effective engine, raising ValueError instead of exiting."""
     if cli_engine:
         clean = cli_engine.strip().lower()
         if clean not in ("direct", "playwright"):
-            fail("engine must be 'direct' or 'playwright'")
+            raise ValueError("engine must be 'direct' or 'playwright'")
         return clean
     # getattr keeps duck-typed profile stand-ins (tests) working without the attribute.
     launch_config = getattr(profile, "launch_config", None)
@@ -122,18 +130,25 @@ def resolve_engine(cli_engine: Optional[str], profile: Profile) -> str:
     profile_engine = getattr(profile, "engine", None)
     if profile_engine:
         if profile_engine not in ("direct", "playwright"):
-            fail("stored profile engine must be 'direct' or 'playwright'")
+            raise ValueError("stored profile engine must be 'direct' or 'playwright'")
         return str(profile_engine)
     env_value = os.environ.get("PROFILEDOCK_DEFAULT_ENGINE", "").strip()
     if env_value:
         env_engine = env_value.lower()
         if env_engine not in ("direct", "playwright"):
-            fail("PROFILEDOCK_DEFAULT_ENGINE must be 'direct' or 'playwright'")
+            raise ValueError("PROFILEDOCK_DEFAULT_ENGINE must be 'direct' or 'playwright'")
         return env_engine
     return "direct"
 
 
-def safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict[str, Any]:
+def resolve_engine(cli_engine: str | None, profile: Profile) -> str:
+    try:
+        return resolve_engine_strict(cli_engine, profile)
+    except ValueError as exc:
+        fail(str(exc))
+
+
+def safe_profile_dict(profile: Profile, status: str | None = None) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": profile.id,
         "name": profile.name,
@@ -150,7 +165,7 @@ def safe_profile_dict(profile: Profile, status: Optional[str] = None) -> dict[st
     return data
 
 
-def compute_profile_size(data_dir_str: str) -> Optional[int]:
+def compute_profile_size(data_dir_str: str) -> int | None:
     data_dir = Path(data_dir_str)
     if not data_dir.is_dir():
         return None
@@ -175,7 +190,7 @@ def compute_profile_size(data_dir_str: str) -> Optional[int]:
     return total
 
 
-def format_size_bytes(num_bytes: Optional[int]) -> str:
+def format_size_bytes(num_bytes: int | None) -> str:
     if num_bytes is None:
         return "Unknown"
     if num_bytes < 1024:
@@ -187,7 +202,7 @@ def format_size_bytes(num_bytes: Optional[int]) -> str:
     return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 
-def format_cpu_percent(cpu_percent: Optional[float]) -> str:
+def format_cpu_percent(cpu_percent: float | None) -> str:
     if cpu_percent is None:
         return "-"
     return f"{cpu_percent:.1f}%"

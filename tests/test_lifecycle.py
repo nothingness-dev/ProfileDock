@@ -473,3 +473,65 @@ class _QuietHandler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+
+def test_close_all_closes_running_and_counts_stopped(tmp_path):
+    from unittest.mock import patch as _patch
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "One"])
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "Two"])
+
+    # Keep the real close path from signalling anything; only count behavior.
+    def fake_close_controller(data_dir, timeout=15, runtime_dir=None):
+        return None
+
+    with (
+        _patch("profiledock.cli.manager") as mock_manager,
+        _patch("profiledock.cli.close_controller", side_effect=fake_close_controller),
+    ):
+        rows = [
+            type("Profile", (), {"id": "aaa", "name": "One", "data_dir": str(tmp_path / "a")})(),
+            type("Profile", (), {"id": "bbb", "name": "Two", "data_dir": str(tmp_path / "b")})(),
+        ]
+        mock_manager.return_value.list_profiles.return_value = rows
+        result = runner.invoke(app, ["close", "--all"])
+
+    assert result.exit_code == 0, result.output
+    assert "Closed 'One'." in result.output
+    assert "Closed 'Two'." in result.output
+    assert "2 profile(s) already stopped." not in result.output
+
+
+def test_close_all_counts_already_stopped_profiles(tmp_path):
+    from profiledock.process_manager import ProfileRunningError as _PRE
+
+    def fake_close_controller(data_dir, timeout=15, runtime_dir=None):
+        raise _PRE("profile is not running", stopped=True)
+
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.close_controller", side_effect=fake_close_controller),
+    ):
+        rows = [
+            type("Profile", (), {"id": "aaa", "name": "One", "data_dir": str(tmp_path / "a")})(),
+            type("Profile", (), {"id": "bbb", "name": "Two", "data_dir": str(tmp_path / "b")})(),
+        ]
+        mock_manager.return_value.list_profiles.return_value = rows
+        result = runner.invoke(app, ["close", "--all"])
+
+    assert result.exit_code == 0, result.output
+    assert "2 profile(s) already stopped." in result.output
+
+
+def test_close_all_with_no_profiles_is_a_clean_noop(tmp_path):
+    with patch("profiledock.cli.manager") as mock_manager:
+        mock_manager.return_value.list_profiles.return_value = []
+        result = runner.invoke(app, ["close", "--all"])
+    assert result.exit_code == 0
+    assert "No profiles found." in result.output
+
+
+def test_close_rejects_profile_and_all_together(tmp_path):
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "close", "SomeProfile", "--all"])
+    assert result.exit_code == 1
+    assert "cannot specify both" in result.output

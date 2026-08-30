@@ -16,7 +16,8 @@ OUTPUT --Esc--> BROWSE,  FORM --Esc--> BROWSE,  any --q--> exit
 
 from __future__ import annotations
 
-from typing import Any, Callable, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import App, ComposeResult

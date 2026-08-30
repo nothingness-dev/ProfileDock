@@ -92,6 +92,15 @@ Restore validates the complete archive before committing. It rejects absolute pa
 
 Conflicting IDs and names are refused. `--force` permits supported replacement but never permits active-profile overwrite or filesystem-boundary escape. Temporary extraction and quarantined replacement make restore rollback-safe.
 
+## Verify an archive
+
+```bash
+profiledock verify work-profile.tar.gz
+profiledock verify work-profile.tar.gz --json
+```
+
+`verify` checks a backup archive without restoring it: manifest schema, totals, member paths and sizes, then every file's SHA-256 against the manifest. Nothing is written to any data root, so it is safe to run against archives from untrusted sources before choosing to restore them. A non-zero exit lists the members whose content no longer matches the archive manifest.
+
 ## Migrate project-local data
 
 Before migration:

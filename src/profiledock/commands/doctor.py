@@ -9,6 +9,7 @@ from ..cli_support import (
     fail,
     selected_paths,
 )
+from ..logger import generate_correlation_id
 from ..terminal import fail_mark, ok_mark, warn_mark
 
 
@@ -99,6 +100,24 @@ def doctor_command(
         )
     checks = run_diagnostics(root)
     has_failed = any(c.status == STATUS_FAILED for c in checks)
+    from ..logger import write_log_entry
+
+    failed_ids = [c.id for c in checks if c.status == STATUS_FAILED]
+    warning_ids = [c.id for c in checks if c.status == STATUS_WARNING]
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="ERROR" if has_failed else ("WARNING" if warning_ids else "INFO"),
+        event="doctor_run",
+        correlation_id=generate_correlation_id(),
+        result="unhealthy" if has_failed else "healthy",
+        details={
+            "repair": repair,
+            "reattach_orphans": reattach_orphans,
+            "recreate_missing": recreate_missing,
+            "failed_checks": failed_ids,
+            "warning_checks": warning_ids,
+        },
+    )
     if json_output:
         payload = {
             "checks": [c.to_dict() for c in checks],

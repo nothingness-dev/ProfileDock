@@ -5,7 +5,7 @@ import shutil
 import tarfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from .data_root import (
@@ -35,21 +35,23 @@ MAX_ARCHIVE_MEMBERS = 100000
 
 
 class RestoreError(Exception):
-    pass
+    # Defaults keep keyword-classified messages working; subclasses override
+    # with stable contract-v1 categories so rewording never reclassifies them.
+    category = "storage_error"
 
 
 class InvalidArchiveError(RestoreError):
-    def __init__(self, message: str, category: str = "invalid_archive") -> None:
+    def __init__(self, message: str, category: str = "invalid_input") -> None:
         super().__init__(message)
         self.category = category
 
 
 class DecompressionSecurityError(RestoreError):
-    pass
+    category = "security_violation"
 
 
 class RestoreConflictError(RestoreError):
-    pass
+    category = "invalid_input"
 
 
 def _restore_quarantines(quarantined: list[tuple[Path, Path]]) -> list[str]:
@@ -80,7 +82,7 @@ class ArchiveProfileResult:
 
     id: str
     name: str
-    engine: Optional[str]
+    engine: str | None
     status: str
     file_count: int = 0
     total_bytes: int = 0

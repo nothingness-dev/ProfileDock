@@ -320,3 +320,107 @@ def test_backup_rejects_total_exceeding_restore_total_limit(tmp_path):
             create_backup_archive(profiles, paths, out_archive)
 
     assert not out_archive.exists()
+
+
+def test_verify_backup_archive_passes_on_valid_archive(tmp_path):
+    from profiledock.backup import verify_backup_archive
+
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "cookies.sqlite").write_text("sqlite-cookie-data", encoding="utf-8")
+    profile = Profile(
+        id="p1",
+        name="Work",
+        created_at="2026-01-01T00:00:00+00:00",
+        data_dir=str(p_data),
+        engine="direct",
+    )
+    out_archive = tmp_path / "work.tar.gz"
+    create_backup_archive([profile], paths, out_archive)
+
+    report = verify_backup_archive(out_archive)
+    assert report.checksum_failures == []
+    payload = report.to_dict()
+    assert payload["valid"] is True
+    assert payload["total_profiles"] == 1
+    assert payload["total_files"] == 1
+
+
+def test_verify_backup_archive_detects_corrupted_content(tmp_path):
+    import io as io_module
+
+    from profiledock.backup import verify_backup_archive
+
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "data.txt").write_text("original-content", encoding="utf-8")
+    profile = Profile(
+        id="p1",
+        name="Work",
+        created_at="2026-01-01T00:00:00+00:00",
+        data_dir=str(p_data),
+        engine="direct",
+    )
+    out_archive = tmp_path / "work.tar.gz"
+    create_backup_archive([profile], paths, out_archive)
+
+    # Rewrite the data member's bytes in place (same member name and size so
+    # structural checks pass but the checksum no longer matches).
+    corrupted = tmp_path / "corrupted.tar.gz"
+    with tarfile.open(out_archive, "r:gz") as src, tarfile.open(corrupted, "w:gz") as dst:
+        for member in src.getmembers():
+            fileobj = src.extractfile(member) if member.isfile() else None
+            if member.name.endswith("browser-data/data.txt"):
+                dst.addfile(member, io_module.BytesIO(b"tampered-content"))
+            else:
+                dst.addfile(member, fileobj)
+
+    report = verify_backup_archive(corrupted)
+    assert report.checksum_failures
+    assert report.checksum_failures[0].endswith("browser-data/data.txt")
+    assert report.to_dict()["valid"] is False
+
+
+def test_verify_backup_archive_missing_file_fails(tmp_path):
+    from profiledock.backup import BackupError, verify_backup_archive
+
+    with pytest.raises(BackupError, match="does not exist"):
+        verify_backup_archive(tmp_path / "missing.tar.gz")
+
+
+def test_cli_verify_reports_success_and_json(tmp_path):
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "f.txt").write_text("x", encoding="utf-8")
+    profile = Profile(
+        id="p1",
+        name="Work",
+        created_at="2026-01-01T00:00:00+00:00",
+        data_dir=str(p_data),
+        engine="direct",
+    )
+    out_archive = tmp_path / "work.tar.gz"
+    create_backup_archive([profile], paths, out_archive)
+
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "verify", str(out_archive)])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "All checksums verified." in result.output
+
+    json_result = runner.invoke(
+        app, ["--data-root", str(tmp_path), "verify", str(out_archive), "--json"]
+    )
+    assert json_result.exit_code == EXIT_SUCCESS
+    payload = json.loads(json_result.output)
+    assert payload["command"] == "verify"
+    assert payload["data"]["valid"] is True
+
+
+def test_cli_verify_missing_archive_fails(tmp_path):
+    from profiledock.cli import EXIT_USER_ERROR
+
+    result = runner.invoke(app, ["--data-root", str(tmp_path), "verify", str(tmp_path / "no.tar.gz")])
+    assert result.exit_code == EXIT_USER_ERROR
+    assert "Error [not_found]" in result.output

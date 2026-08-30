@@ -65,10 +65,12 @@ profiledock status [PROFILE]
 profiledock top [PROFILE]
 profiledock launch PROFILE [--tabs N]
 profiledock close PROFILE
+profiledock close --all
 profiledock rename PROFILE NEW_NAME
 profiledock set-engine PROFILE ENGINE
 profiledock backup PROFILE --output ARCHIVE [--exclude-cache]
 profiledock restore ARCHIVE
+profiledock verify ARCHIVE
 profiledock migrate --from-project PATH
 profiledock doctor
 profiledock logs [PROFILE]

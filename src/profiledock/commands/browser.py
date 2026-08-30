@@ -1,8 +1,7 @@
 """Browser lifecycle and inspection commands: launch, close, status, set-engine."""
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -16,6 +15,7 @@ from ..cli_support import (
     resolve_engine,
     selected_paths,
 )
+from ..launch_service import LaunchPlan, build_launch_plan, controller_launch_options, direct_launch_options
 from ..logger import generate_correlation_id, write_log_entry
 from ..process_manager import (
     BrowserLaunchError,
@@ -24,7 +24,7 @@ from ..process_manager import (
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..storage import StorageError
 from ..terminal import is_stdout_tty
-from ..validation import ValidationError, validate_browser, validate_url
+from ..validation import ValidationError
 
 if TYPE_CHECKING:
     from ..models import Profile
@@ -39,58 +39,51 @@ def _get_manager() -> ProfileManager:
 @dataclass
 class _LaunchOptions:
     profile: "Profile"
+    plan: "LaunchPlan"
     engine: str
     tabs: int
     urls: list[str]
-    browser: Optional[str]
-    width: Optional[int]
-    height: Optional[int]
+    browser: str | None
+    width: int | None
+    height: int | None
 
 
 def _resolve_launch_options(
     profile_id: str,
-    tabs: Optional[int],
-    engine: Optional[str],
-    browser: Optional[str],
-    url: Optional[list[str]],
+    tabs: int | None,
+    engine: str | None,
+    browser: str | None,
+    url: list[str] | None,
 ) -> _LaunchOptions:
-    profile = _get_manager().resolve(profile_id)
-    cfg = getattr(profile, "launch_config", None)
-    active_engine = resolve_engine(engine, profile)
+    from ..launch_service import resolve_launch_tabs
 
+    profile = _get_manager().resolve(profile_id)
     target_tabs = tabs
-    if target_tabs is None and cfg and cfg.default_tabs is not None:
-        target_tabs = cfg.default_tabs
+    if target_tabs is None:
+        target_tabs = resolve_launch_tabs(profile, None)
     if target_tabs is None:
         if _non_interactive.get():
             fail("tab count is required in non-interactive mode; use --tabs")
         target_tabs = typer.prompt("How many tabs do you want to open?", type=int)
-    if target_tabs < 1:
-        fail("tab count must be at least 1")
-
-    target_urls = list(url) if url else list(cfg.start_urls if cfg and cfg.start_urls else [])
-    target_urls = [item.strip() for item in target_urls]
-    for target_url in target_urls:
-        validate_url(target_url)
-    if len(target_urls) > target_tabs:
-        fail("number of start URLs cannot exceed the requested tab count")
-
-    target_browser = browser if browser is not None else (cfg.browser if cfg else None)
-    if target_browser is not None:
-        candidate = Path(target_browser).expanduser()
-        target_browser = str(candidate.resolve()) if candidate.is_file() else target_browser.strip().lower()
-        validate_browser(target_browser, active_engine, require_executable=True)
-
-    if not Path(profile.data_dir).is_dir():
-        fail("profile data directory is missing")
+    try:
+        plan = build_launch_plan(
+            profile,
+            engine=engine,
+            tabs=target_tabs,
+            urls=list(url) if url else None,
+            browser=browser,
+        )
+    except ValueError as exc:
+        fail(str(exc))
     return _LaunchOptions(
         profile=profile,
-        engine=active_engine,
-        tabs=target_tabs,
-        urls=target_urls,
-        browser=target_browser,
-        width=cfg.window_width if cfg else None,
-        height=cfg.window_height if cfg else None,
+        plan=plan,
+        engine=plan.engine,
+        tabs=plan.tabs,
+        urls=list(plan.urls),
+        browser=plan.browser,
+        width=plan.window_width,
+        height=plan.window_height,
     )
 
 
@@ -116,7 +109,7 @@ def set_engine_command(
 
 
 def status_command(
-    profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name."),
+    profile_id: str | None = typer.Argument(None, help="Profile ID, prefix, or name."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Continuously poll and display live status."),
     interval: float = typer.Option(
         1.0, "--interval", "-i", help="Poll interval in seconds when using --watch."
@@ -253,22 +246,22 @@ def status_command(
 
 def launch_command(
     profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
-    tabs: Optional[int] = typer.Option(
+    tabs: int | None = typer.Option(
         None, "--tabs", "-t", help="Number of tabs to open (at least 1). Prompts if no preset exists."
     ),
-    engine: Optional[str] = typer.Option(
+    engine: str | None = typer.Option(
         None,
         "--engine",
         "-e",
         help="One-launch engine override: 'direct' or 'playwright'",
     ),
-    browser: Optional[str] = typer.Option(
+    browser: str | None = typer.Option(
         None,
         "--browser",
         "-b",
         help="Browser name (chrome, chromium) or executable path for this launch.",
     ),
-    url: Optional[list[str]] = typer.Option(
+    url: list[str] | None = typer.Option(
         None,
         "--url",
         "-u",
@@ -301,10 +294,10 @@ def launch_command(
     paths = selected_paths()
     try:
         opts = _resolve_launch_options(profile_id, tabs, engine, browser, url)
+        plan = opts.plan
         profile = opts.profile
         active_engine = opts.engine
         target_tabs = opts.tabs
-        target_urls = opts.urls
         target_browser = opts.browser
         width = opts.width
         height = opts.height
@@ -322,24 +315,17 @@ def launch_command(
             browser_path=target_browser,
             details={
                 "tabs": target_tabs,
-                "url_count": len(target_urls),
+                "url_count": len(plan.urls),
                 "window_width": width,
                 "window_height": height,
             },
         )
 
         if active_engine == "direct":
-            exec_path = Path(target_browser) if target_browser and Path(target_browser).is_file() else None
-            direct_options: dict[str, Any] = {"runtime_dir": runtime_path(profile)}
-            if exec_path is not None:
-                direct_options["executable_path"] = exec_path
-            elif target_browser is not None:
-                direct_options["browser"] = target_browser
-            if target_urls:
-                direct_options["start_urls"] = target_urls
-            if width is not None and height is not None:
-                direct_options["window_width"] = width
-                direct_options["window_height"] = height
+            direct_options: dict[str, Any] = {
+                "runtime_dir": runtime_path(profile),
+                **direct_launch_options(plan),
+            }
             state = start_direct_chrome(profile.data_dir, target_tabs, **direct_options)
             write_log_entry(
                 log_dir=paths.logs_dir,
@@ -352,14 +338,10 @@ def launch_command(
                 result="success",
             )
         else:
-            controller_options: dict[str, Any] = {"runtime_dir": runtime_path(profile)}
-            if target_browser is not None:
-                controller_options["browser_channel"] = target_browser
-            if target_urls:
-                controller_options["start_urls"] = target_urls
-            if width is not None and height is not None:
-                controller_options["window_width"] = width
-                controller_options["window_height"] = height
+            controller_options: dict[str, Any] = {
+                "runtime_dir": runtime_path(profile),
+                **controller_launch_options(plan),
+            }
             state = start_controller(
                 profile.data_dir,
                 target_tabs,
@@ -410,7 +392,13 @@ def launch_command(
 
 
 def close_command(
-    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    profile_id: str | None = typer.Argument(None, help="Profile ID, unique ID prefix, or exact name."),
+    all_profiles: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Close every profile. Conflicts with a profile identifier.",
+    ),
     timeout: float = typer.Option(
         15.0,
         "--timeout",
@@ -422,12 +410,79 @@ def close_command(
     Requests graceful shutdown, waits for the browser and controller processes
     to terminate and persistent data to flush, then removes runtime state.
     Recovers crashed runtime state and terminates only identity-verified
-    orphan browser processes.
+    orphan browser processes. Use --all to close every profile at once.
     """
     from ..cli import close_controller, runtime_path
 
     if timeout <= 0:
         fail("timeout must be greater than 0")
+    if all_profiles and profile_id is not None:
+        fail("cannot specify both a profile identifier and --all")
+    if not all_profiles and profile_id is None:
+        fail("must specify a profile identifier or use --all to close all profiles")
+
+    if all_profiles:
+        manager = _get_manager()
+        paths = selected_paths()
+        corr_id = generate_correlation_id()
+        try:
+            profiles = manager.list_profiles()
+        except (StorageError, ProfileNotFoundError, AmbiguousProfileError) as exc:
+            fail_exception(exc)
+        if not profiles:
+            typer.echo("No profiles found.")
+            return
+        already_stopped = 0
+        for profile in profiles:
+            try:
+                close_controller(profile.data_dir, timeout=timeout, runtime_dir=runtime_path(profile))
+            except ProfileRunningError as exc:
+                if not exc.stopped:
+                    fail_exception(exc)
+                already_stopped += 1
+                write_log_entry(
+                    log_dir=paths.logs_dir,
+                    level="INFO",
+                    event="browser_close_skipped",
+                    profile_id=profile.id,
+                    correlation_id=corr_id,
+                    result="already_stopped",
+                    details={"mode": "close_all"},
+                )
+                continue
+            except (StorageError, BrowserLaunchError) as exc:
+                write_log_entry(
+                    log_dir=paths.logs_dir,
+                    level="ERROR",
+                    event="browser_close_failed",
+                    profile_id=profile.id,
+                    correlation_id=corr_id,
+                    result="failed",
+                    error_category=getattr(exc, "category", type(exc).__name__),
+                    details={"error": str(exc), "mode": "close_all"},
+                )
+                fail_exception(exc)
+            write_log_entry(
+                log_dir=paths.logs_dir,
+                level="INFO",
+                event="browser_closed",
+                profile_id=profile.id,
+                correlation_id=corr_id,
+                result="success",
+                details={"mode": "close_all"},
+            )
+            typer.echo(f"Closed '{profile.name}'.")
+        if already_stopped:
+            typer.echo(
+                f"{already_stopped} profile(s) already stopped."
+            )
+        return
+
+    corr_id = generate_correlation_id()
+    paths = selected_paths()
+    if profile_id is None:
+        # Guarded by fail() above when neither a profile nor --all was given.
+        fail("must specify a profile identifier or use --all to close all profiles")
     try:
         profile = _get_manager().resolve(profile_id)
         close_controller(profile.data_dir, timeout=timeout, runtime_dir=runtime_path(profile))
@@ -445,5 +500,23 @@ def close_command(
         StorageError,
         BrowserLaunchError,
     ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="browser_close_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc)},
+        )
         fail_exception(exc)
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="browser_closed",
+        profile_id=profile.id,
+        correlation_id=corr_id,
+        engine=None,
+        result="success",
+    )
     typer.echo(f"Closed '{profile.name}'.")

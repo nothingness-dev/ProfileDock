@@ -21,19 +21,20 @@ BACKUP_ARCHIVE_SCHEMA_VERSION = 1
 
 
 class BackupError(Exception):
-    pass
+    # Structural category so fail_exception survives message rewording.
+    category = "storage_error"
 
 
 class ProfileNotStoppedError(BackupError):
-    pass
+    category = "profile_active"
 
 
 class FileLockedError(BackupError):
-    pass
+    category = "storage_error"
 
 
 class TargetExistsError(BackupError):
-    pass
+    category = "invalid_input"
 
 
 BackupProfileResult = ArchiveProfileResult
@@ -295,6 +296,141 @@ def _verify_archive_structure(archive: Path) -> None:
                     raise BackupError(f"backup archive verification failed: unsafe member {member_name}")
                 if member.size != file_meta["size"]:
                     raise BackupError(f"backup archive verification failed: size mismatch for {member_name}")
+
+
+@dataclass
+class VerifyReport:
+    archive_path: str
+    format_version: int
+    profiledock_version: str
+    created_at: str
+    total_profiles: int
+    total_files: int
+    total_bytes: int
+    checksum_failures: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "archive_path": self.archive_path,
+            "format_version": self.format_version,
+            "profiledock_version": self.profiledock_version,
+            "created_at": self.created_at,
+            "total_profiles": self.total_profiles,
+            "total_files": self.total_files,
+            "total_bytes": self.total_bytes,
+            "checksum_failures": list(self.checksum_failures),
+            "valid": not self.checksum_failures,
+        }
+
+
+def verify_backup_archive(archive_path: Path) -> VerifyReport:
+    """Validate a backup archive without touching any destination data.
+
+    Runs the same structural checks as restore (manifest schema, totals,
+    member paths and sizes) and then verifies every file member's SHA-256
+    against the manifest. Content verification reads each member through the
+    streaming hasher so archives are checked without extracting to disk.
+    """
+    from .restore import (
+        MAX_MEMBER_SIZE_BYTES,
+        MAX_TOTAL_EXTRACT_BYTES,
+        _validated_archive_profile,
+    )
+
+    archive = Path(archive_path).resolve()
+    if not archive.exists() or not archive.is_file():
+        raise BackupError(f"backup archive file does not exist: {archive}")
+
+    try:
+        tar = tarfile.open(archive, "r:gz")  # noqa: SIM115 - closed by the `with tar` below
+    except Exception as exc:
+        raise BackupError(f"could not open backup archive: {exc}") from exc
+
+    checksum_failures: list[str] = []
+    manifest: dict[str, Any] = {}
+    try:
+        with tar:
+            try:
+                manifest_member = tar.getmember("backup_manifest.json")
+            except KeyError as exc:
+                raise BackupError("backup archive verification failed: missing manifest") from exc
+            if not manifest_member.isfile() or manifest_member.size > 16 * 1024 * 1024:
+                raise BackupError("backup archive verification failed: manifest is not a safe regular file")
+            manifest_file = tar.extractfile(manifest_member)
+            if manifest_file is None:
+                raise BackupError("backup archive verification failed: unreadable manifest")
+            try:
+                manifest = json.loads(manifest_file.read().decode("utf-8"))
+            except Exception as exc:
+                raise BackupError(f"corrupted manifest in archive: {exc}") from exc
+            if not isinstance(manifest, dict):
+                raise BackupError("backup manifest must be a JSON object")
+            if manifest.get("format_version") != BACKUP_ARCHIVE_SCHEMA_VERSION:
+                raise BackupError(
+                    f"unsupported backup archive format version: {manifest.get('format_version')}"
+                )
+            profiles_data = manifest.get("profiles", [])
+            if not isinstance(profiles_data, list):
+                raise BackupError("manifest profiles must be a list")
+            try:
+                profiles_data = [_validated_archive_profile(p) for p in profiles_data]
+            except Exception as exc:
+                raise BackupError(f"backup archive verification failed: {exc}") from exc
+
+            members = tar.getmembers()
+            if len(members) > 100000:
+                raise BackupError("backup archive verification failed: too many members")
+            total_bytes = 0
+            expected_members: set[str] = set()
+            for profile in profiles_data:
+                for relative_path, metadata in profile["files"].items():
+                    member_name = f"profiles/{profile['id']}/browser-data/{relative_path}"
+                    expected_members.add(member_name)
+                    try:
+                        member = tar.getmember(member_name)
+                    except KeyError as exc:
+                        raise BackupError(f"archive missing member for file '{member_name}'") from exc
+                    if not member.isfile() or member.size != metadata["size"]:
+                        raise BackupError(f"archive member size does not match manifest: {member_name}")
+                    if member.size > MAX_MEMBER_SIZE_BYTES:
+                        raise BackupError(f"archive member exceeds maximum allowed size: {member_name}")
+                    total_bytes += member.size
+            if total_bytes > MAX_TOTAL_EXTRACT_BYTES:
+                raise BackupError("total archive uncompressed size exceeds maximum allowed threshold")
+            unexpected = {m.name for m in members if m.isfile()} - expected_members - {"backup_manifest.json"}
+            if unexpected:
+                raise BackupError(f"archive contains unlisted file: {sorted(unexpected)[0]}")
+
+            for profile in profiles_data:
+                for relative_path, metadata in profile["files"].items():
+                    member_name = f"profiles/{profile['id']}/browser-data/{relative_path}"
+                    member = tar.getmember(member_name)
+                    source = tar.extractfile(member)
+                    if source is None:
+                        checksum_failures.append(f"{member_name}: unreadable member")
+                        continue
+                    with source:
+                        hasher = sha256()
+                        while True:
+                            chunk = source.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                    if hasher.hexdigest() != metadata["sha256"]:
+                        checksum_failures.append(member_name)
+    except (BackupError, OSError):
+        raise
+
+    return VerifyReport(
+        archive_path=str(archive),
+        format_version=manifest.get("format_version", BACKUP_ARCHIVE_SCHEMA_VERSION),
+        profiledock_version=str(manifest.get("profiledock_version", "unknown")),
+        created_at=str(manifest.get("created_at", "unknown")),
+        total_profiles=len(manifest.get("profiles", [])),
+        total_files=sum(int(p["file_count"]) for p in manifest.get("profiles", [])),
+        total_bytes=sum(int(p["total_bytes"]) for p in manifest.get("profiles", [])),
+        checksum_failures=checksum_failures,
+    )
 
 
 def create_backup_archive(

@@ -2,11 +2,10 @@ import os
 import re
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Optional
 
 
 class DataRootError(ValueError):
@@ -33,7 +32,7 @@ _resolved_root_cache: dict[str, Path] = {}
 
 
 @lru_cache(maxsize=1)
-def _win_long_path_fn() -> Optional[Callable[..., int]]:
+def _win_long_path_fn() -> Callable[..., int] | None:
     import ctypes
     from ctypes import wintypes
 
@@ -189,9 +188,9 @@ class DataPaths:
 
 
 def platform_data_root(
-    platform: Optional[str] = None,
-    environ: Optional[Mapping[str, str]] = None,
-    home: Optional[Path] = None,
+    platform: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
 ) -> Path:
     platform = platform or sys.platform
     environ = environ if environ is not None else os.environ
@@ -208,10 +207,10 @@ def platform_data_root(
 
 
 def resolve_data_root(
-    cli_value: Optional[Path] = None,
-    environ: Optional[Mapping[str, str]] = None,
-    platform: Optional[str] = None,
-    home: Optional[Path] = None,
+    cli_value: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    platform: str | None = None,
+    home: Path | None = None,
     prepare: bool = True,
 ) -> DataPaths:
     environ = environ if environ is not None else os.environ

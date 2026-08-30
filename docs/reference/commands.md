@@ -162,9 +162,12 @@ Playwright launches open a visible Chromium window by default; pass `--headless`
 
 ```text
 profiledock close PROFILE [--timeout SECONDS]
+profiledock close --all [--timeout SECONDS]
 ```
 
 Requests graceful Playwright context shutdown or safely terminates the verified Direct browser process. `--timeout SECONDS` bounds how long the command waits for the browser and controller to terminate and for persistent data to flush (default: 15). The command returns only after the state file is removed and the recorded browser process has exited; a stuck browser is terminated only when its recorded process identity matches. Crashed runtime state is recovered automatically, and a browser process is never signalled unless its identity matches the recorded process. Missing, stale, malformed, or unverifiable state is handled conservatively.
+
+With `--all`/`-a`, every profile is closed in turn and already-stopped profiles are counted rather than treated as errors. Specify either one profile or `--all`, not both.
 
 ## `delete`
 
@@ -229,6 +232,14 @@ profiledock restore ARCHIVE [--force] [--json]
 ```
 
 Validates archive type, paths, member count, expanded size, manifest schema, IDs, metadata, totals, sizes, and checksums before committing. Conflicting IDs or names are refused unless the supported conflict can be replaced with `--force`; active profiles are never overwritten. Extraction and metadata update are transactional.
+
+## `verify`
+
+```text
+profiledock verify ARCHIVE [--json]
+```
+
+Validates a backup archive without restoring it: manifest schema, totals, member paths and sizes, then every file's SHA-256 against the manifest. Nothing is written to any data root. Exits non-zero and lists failing members when a checksum fails; otherwise prints `All checksums verified.`
 
 ## `logs`
 

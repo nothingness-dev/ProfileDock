@@ -9,7 +9,7 @@ import os
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from ..fsops import replace_with_retry as _replace_with_retry
@@ -60,7 +60,7 @@ _PLAYWRIGHT_STATE_FIELDS = frozenset(
 )
 
 
-def _runtime_dir(data_dir: str, runtime_dir: Optional[Path]) -> Path:
+def _runtime_dir(data_dir: str, runtime_dir: Path | None) -> Path:
     if runtime_dir is not None:
         selected = runtime_dir
     else:
@@ -79,11 +79,11 @@ def _runtime_dir(data_dir: str, runtime_dir: Optional[Path]) -> Path:
     raise ValueError("runtime directory cannot be inside browser-data")
 
 
-def state_path(data_dir: str, runtime_dir: Optional[Path] = None) -> Path:
+def state_path(data_dir: str, runtime_dir: Path | None = None) -> Path:
     return _runtime_dir(data_dir, runtime_dir) / "running.json"
 
 
-def error_path(data_dir: str, runtime_dir: Optional[Path] = None) -> Path:
+def error_path(data_dir: str, runtime_dir: Path | None = None) -> Path:
     return _runtime_dir(data_dir, runtime_dir) / "controller.error"
 
 
@@ -122,7 +122,7 @@ def _atomic_private_json(path: Path, value: dict[str, Any]) -> None:
 StateDict = dict[str, Any]
 
 
-def _valid_state(value: StateDict, profile_id: Optional[str] = None) -> bool:
+def _valid_state(value: StateDict, profile_id: str | None = None) -> bool:
     if value.get("engine") != "playwright" or set(value) - _PLAYWRIGHT_STATE_FIELDS:
         return False
     if (
@@ -190,7 +190,7 @@ def _valid_direct_state(value: StateDict, profile_id: str) -> bool:
         return False
     pid = value["pid"]
     process_create_time = value.get("process_create_time")
-    # None is legal on platforms without process-create-time support (macOS);
+    # None is legal on platforms that cannot read process create times;
     # identity checks degrade to PID liveness for such states.
     if pid > 0 and process_create_time is not None and not isinstance(process_create_time, (int, float)):
         return False
@@ -286,7 +286,7 @@ def _write_error(
         pass
 
 
-def _read_error(path: Path) -> Optional[StateDict]:
+def _read_error(path: Path) -> StateDict | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict) and "error_type" in data:
@@ -296,7 +296,7 @@ def _read_error(path: Path) -> Optional[StateDict]:
     return None
 
 
-def _read_state(path: Path) -> Optional[StateDict]:
+def _read_state(path: Path) -> StateDict | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):

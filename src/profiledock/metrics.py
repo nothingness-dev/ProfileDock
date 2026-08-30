@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -136,16 +137,22 @@ def storage_usage(data_dir: str | Path) -> StorageResourceUsage:
 
     Walking is best-effort: unreadable files and symlinked/junctioned entries
     are skipped so a partially accessible profile still yields totals.
+
+    Results are memoized per (path, tree mtime) for a short window: watch loops
+    and TUI refreshes re-request the breakdown every frame, but a browser-data
+    tree's total only changes when its contents change. The mtime check is
+    cheap; a full walk is skipped while nothing underneath has been touched.
     """
     root = Path(data_dir)
     if not root.is_dir():
-        return StorageResourceUsage(
-            total_bytes=0,
-            browser_data_bytes=0,
-            cache_bytes=0,
-            cookies_storage_bytes=0,
-            logs_bytes=0,
-        )
+        return _zero_storage_usage()
+    try:
+        root_mtime = root.stat().st_mtime
+    except OSError:
+        root_mtime = 0.0
+    cached = _storage_usage_cache.get(root)
+    if cached is not None and cached[0] == root_mtime and (time.monotonic() - cached[1]) < _STORAGE_CACHE_TTL:
+        return cached[2]
     totals = {"cache": 0, "logs": 0, "cookies": 0, "browser_data": 0}
     for current, dir_names, file_names in os.walk(root, followlinks=False):
         current_path = Path(current)
@@ -162,12 +169,35 @@ def storage_usage(data_dir: str | Path) -> StorageResourceUsage:
                 continue
             totals[_categorize(relative_parts, file_name)] += size
     total = sum(totals.values())
-    return StorageResourceUsage(
+    usage = StorageResourceUsage(
         total_bytes=total,
         browser_data_bytes=totals["browser_data"],
         cache_bytes=totals["cache"],
         cookies_storage_bytes=totals["cookies"],
         logs_bytes=totals["logs"],
+    )
+    if len(_storage_usage_cache) >= 32:
+        _storage_usage_cache.clear()
+    _storage_usage_cache[root] = (root_mtime, time.monotonic(), usage)
+    return usage
+
+
+_STORAGE_CACHE_TTL = 2.0
+_storage_usage_cache: dict[Path, tuple[float, float, StorageResourceUsage]] = {}
+
+
+def reset_storage_cache() -> None:
+    """Forget memoized disk breakdowns (used by tests and long-lived embedders)."""
+    _storage_usage_cache.clear()
+
+
+def _zero_storage_usage() -> StorageResourceUsage:
+    return StorageResourceUsage(
+        total_bytes=0,
+        browser_data_bytes=0,
+        cache_bytes=0,
+        cookies_storage_bytes=0,
+        logs_bytes=0,
     )
 
 
@@ -358,3 +388,78 @@ def get_profile_metrics(
         live=live,
         storage=storage_usage(profile.data_dir),
     )
+
+
+def collect_profiles_metrics(
+    profiles: list[Any],
+    runtime_dir_for: Any,
+    cpu_sample_interval: float = 0.25,
+    sampler: PlatformSampler | None = None,
+    max_workers: int = 8,
+) -> list[ProfileMetrics]:
+    """Build metric snapshots for many profiles concurrently.
+
+    Each profile's live sampling involves a wall-clock sleep, so serial
+    collection costs ``interval * running-profiles`` per frame; fan-out keeps
+    it near ``interval`` total. The optional ``sampler`` is shared across
+    workers (samplers are stateless per call). Results are returned in input
+    order.
+    """
+    if not profiles:
+        return []
+    statuses = [""] * len(profiles)
+    for index, profile in enumerate(profiles):
+        try:
+            statuses[index] = _effective_status(profile, runtime_dir_for(profile))
+        except Exception:
+            statuses[index] = "stopped"
+    workers = min(max_workers, len(profiles))
+    if workers <= 1:
+        return [
+            get_profile_metrics(
+                profile,
+                runtime_dir=runtime_dir_for(profile),
+                status=status,
+                cpu_sample_interval=cpu_sample_interval,
+                sampler=sampler,
+            )
+            for profile, status in zip(profiles, statuses, strict=True)
+        ]
+    results: list[ProfileMetrics | None] = [None] * len(profiles)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                get_profile_metrics,
+                profile,
+                runtime_dir_for(profile),
+                status,
+                cpu_sample_interval,
+                sampler,
+            ): index
+            for index, (profile, status) in enumerate(zip(profiles, statuses, strict=True))
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception:
+                results[index] = None
+    return [
+        result
+        if result is not None
+        else ProfileMetrics(
+            profile_id=str(profile.id),
+            name=str(profile.name),
+            engine=_effective_engine(profile),
+            status="stopped",
+            live=None,
+            storage=StorageResourceUsage(0, 0, 0, 0, 0),
+        )
+        for profile, result in zip(profiles, results, strict=True)
+    ]
+
+
+def _effective_status(profile: Any, runtime_dir: Path | None) -> str:
+    from .process_manager import get_status
+
+    return get_status(str(profile.data_dir), clean_stale=False, runtime_dir=runtime_dir)

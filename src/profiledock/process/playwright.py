@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 from .errors import BrowserLaunchError, ProfileRunningError
@@ -38,11 +37,11 @@ def start_controller(
     tabs: int,
     headless: bool = False,
     startup_timeout: float = 30,
-    runtime_dir: Optional[Path] = None,
-    browser_channel: Optional[str] = None,
-    start_urls: Optional[list[str]] = None,
-    window_width: Optional[int] = None,
-    window_height: Optional[int] = None,
+    runtime_dir: Path | None = None,
+    browser_channel: str | None = None,
+    start_urls: list[str] | None = None,
+    window_width: int | None = None,
+    window_height: int | None = None,
 ) -> StateDict:
     # Late-bound so patches of profiledock.process_manager.is_running,
     # ._controller_available and ._stop_process keep applying.

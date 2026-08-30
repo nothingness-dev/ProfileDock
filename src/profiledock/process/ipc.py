@@ -8,7 +8,7 @@ responses are size-capped JSON lines.
 import json
 import socket
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .errors import BrowserLaunchError, ProfileRunningError
 from .playwright import start_controller
@@ -38,8 +38,8 @@ def _controller_available(state: StateDict) -> bool:
 def send_controller_command(
     data_dir: str,
     cmd: str,
-    args: Optional[dict[str, Any]] = None,
-    runtime_dir: Optional[Path] = None,
+    args: dict[str, Any] | None = None,
+    runtime_dir: Path | None = None,
     timeout: float = 30.0,
     auto_start_headless: bool = True,
 ) -> dict[str, Any]:

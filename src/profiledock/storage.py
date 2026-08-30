@@ -2,11 +2,11 @@ import json
 import os
 import sys
 import time as _time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import IO, Any, Callable, Optional, Union
+from typing import IO, Any
 from uuid import uuid4
 
 from .data_root import DataRootError, ensure_within_root
@@ -40,7 +40,7 @@ def _metadata_root(path: Path) -> Path:
 def _validate_metadata_paths(
     path: Path,
     profile_root: Path,
-    backup_path: Union[str, Path, None] = None,
+    backup_path: str | Path | None = None,
 ) -> Path:
     root = profile_root.expanduser().absolute().parent
     try:
@@ -85,7 +85,7 @@ def _unlock_file(fd: IO[bytes]) -> None:
 
 
 @contextmanager
-def metadata_lock(metadata_path: Union[str, Path], timeout: float = 5.0) -> Generator[None, None, None]:
+def metadata_lock(metadata_path: str | Path, timeout: float = 5.0) -> Generator[None, None, None]:
     metadata_path = Path(metadata_path)
     root = _metadata_root(metadata_path)
     try:
@@ -150,7 +150,7 @@ def _profile_root_for_metadata(path: Path) -> Path:
     return path.parent / "profiles"
 
 
-def _atomic_write(path: Path, content: str, root: Optional[Path] = None) -> None:
+def _atomic_write(path: Path, content: str, root: Path | None = None) -> None:
     if root is None:
         root = _metadata_root(path)
     try:
@@ -198,8 +198,8 @@ def _atomic_write(path: Path, content: str, root: Optional[Path] = None) -> None
 
 def _backup_metadata(
     path: Path,
-    backup_path: Union[str, Path, None] = None,
-    root: Optional[Path] = None,
+    backup_path: str | Path | None = None,
+    root: Path | None = None,
 ) -> None:
     backup_path = Path(backup_path) if backup_path is not None else path.with_suffix(".json.bak")
     root = root or _metadata_root(path)
@@ -220,7 +220,7 @@ def _load_profiles_from_bare_array(data: list[dict[str, Any]]) -> list[Profile]:
     return MetadataDocument.from_dict(migrate_metadata_value(data)).profiles
 
 
-def load_metadata(path: Union[str, Path] = "profiles.json") -> MetadataDocument:
+def load_metadata(path: str | Path = "profiles.json") -> MetadataDocument:
     path = Path(path)
     if not path.exists():
         return MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[])
@@ -234,10 +234,10 @@ def load_metadata(path: Union[str, Path] = "profiles.json") -> MetadataDocument:
 
 
 def _migrate_metadata_unlocked(
-    path: Union[str, Path],
-    profile_root: Union[str, Path],
+    path: str | Path,
+    profile_root: str | Path,
     backup: bool = True,
-    backup_path: Union[str, Path, None] = None,
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     path = Path(path)
     profile_root = Path(profile_root)
@@ -259,10 +259,10 @@ def _migrate_metadata_unlocked(
 
 
 def migrate_metadata(
-    path: Union[str, Path],
-    profile_root: Union[str, Path],
+    path: str | Path,
+    profile_root: str | Path,
     backup: bool = True,
-    backup_path: Union[str, Path, None] = None,
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     path = Path(path)
     with metadata_lock(path):
@@ -270,8 +270,8 @@ def migrate_metadata(
 
 
 def load_metadata_with_recovery(
-    path: Union[str, Path],
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path,
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     path = Path(path)
     try:
@@ -291,9 +291,9 @@ def load_metadata_with_recovery(
 
 def save_metadata(
     doc: MetadataDocument,
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> None:
     if doc.schema_version != METADATA_SCHEMA_VERSION:
         raise StorageError(f"refusing to write unsupported metadata schema version: {doc.schema_version}")
@@ -307,26 +307,26 @@ def save_metadata(
         _atomic_write(path, content, root)
 
 
-def load_profiles(path: Union[str, Path] = "profiles.json") -> list[Profile]:
+def load_profiles(path: str | Path = "profiles.json") -> list[Profile]:
     doc = load_metadata(path)
     return doc.profiles
 
 
 def save_profiles(
     profiles: list[Profile],
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> None:
     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
     save_metadata(doc, path, profile_root, backup_path)
 
 
 def atomic_update_metadata(
-    path: Union[str, Path],
-    profile_root: Union[str, Path],
+    path: str | Path,
+    profile_root: str | Path,
     updater: Callable[[MetadataDocument], MetadataDocument],
-    backup_path: Union[str, Path, None] = None,
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     path = Path(path)
     profile_root = Path(profile_root)
@@ -346,9 +346,9 @@ def atomic_update_metadata(
 
 def add_profile_atomic(
     profile: Profile,
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     def _add(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = list(doc.profiles)
@@ -360,9 +360,9 @@ def add_profile_atomic(
 
 def remove_profile_atomic(
     profile_id: str,
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     def _remove(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = [p for p in doc.profiles if p.id != profile_id]
@@ -374,9 +374,9 @@ def remove_profile_atomic(
 def _mutate_profile_atomic(
     profile_id: str,
     mutate: Callable[[Profile], Profile],
-    path: Union[str, Path],
-    profile_root: Union[str, Path],
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path,
+    profile_root: str | Path,
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     def _apply(doc: MetadataDocument) -> MetadataDocument:
         new_profiles = [mutate(p) if p.id == profile_id else p for p in doc.profiles]
@@ -388,9 +388,9 @@ def _mutate_profile_atomic(
 def rename_profile_atomic(
     profile_id: str,
     new_name: str,
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     return _mutate_profile_atomic(
         profile_id, lambda p: replace(p, name=new_name), path, profile_root, backup_path
@@ -400,9 +400,9 @@ def rename_profile_atomic(
 def mark_launched_atomic(
     profile_id: str,
     launched_at: str,
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     return _mutate_profile_atomic(
         profile_id, lambda p: replace(p, last_launched_at=launched_at), path, profile_root, backup_path
@@ -411,10 +411,10 @@ def mark_launched_atomic(
 
 def set_engine_atomic(
     profile_id: str,
-    engine: Optional[str],
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    engine: str | None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     return _mutate_profile_atomic(
         profile_id, lambda p: replace(p, engine=engine), path, profile_root, backup_path
@@ -423,10 +423,10 @@ def set_engine_atomic(
 
 def set_launch_config_atomic(
     profile_id: str,
-    launch_config: Optional[LaunchConfig],
-    path: Union[str, Path] = "profiles.json",
-    profile_root: Union[str, Path] = "profiles",
-    backup_path: Union[str, Path, None] = None,
+    launch_config: LaunchConfig | None,
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
 ) -> MetadataDocument:
     return _mutate_profile_atomic(
         profile_id, lambda p: replace(p, launch_config=launch_config), path, profile_root, backup_path

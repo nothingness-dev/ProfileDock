@@ -12,7 +12,7 @@ import json
 import os
 import socket
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from .identity import _find_browser_pid
 from .ipc import _IPC_COMMANDS, _MAX_COMMAND_BYTES
@@ -220,7 +220,7 @@ def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str
     while _context_alive(context):
         try:
             connection, _ = server.accept()
-        except (socket.timeout, OSError):
+        except (TimeoutError, OSError):
             continue
         with connection:
             try:
@@ -235,7 +235,7 @@ def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str
                         break
                     if len(command_raw) > _MAX_COMMAND_BYTES:
                         break
-            except (socket.timeout, OSError):
+            except (TimeoutError, OSError):
                 continue
             if len(command_raw) > _MAX_COMMAND_BYTES or not command_raw:
                 try:
@@ -285,9 +285,9 @@ def _launch_context(
     playwright: "Playwright",
     data_dir: str,
     headless: bool,
-    channel_override: Optional[str] = None,
-    window_width: Optional[int] = None,
-    window_height: Optional[int] = None,
+    channel_override: str | None = None,
+    window_width: int | None = None,
+    window_height: int | None = None,
 ) -> tuple["BrowserContext", str]:
     from playwright.sync_api import Error as PlaywrightError
 
@@ -321,10 +321,10 @@ def _controller(
     tabs: int,
     token: str,
     headless: bool,
-    browser_channel: Optional[str] = None,
-    window_width: Optional[int] = None,
-    window_height: Optional[int] = None,
-    start_urls: Optional[list[str]] = None,
+    browser_channel: str | None = None,
+    window_width: int | None = None,
+    window_height: int | None = None,
+    start_urls: list[str] | None = None,
 ) -> int:
     # Late-bound so patches of profiledock.process_manager._atomic_private_json
     # and ._get_process_create_time keep applying.

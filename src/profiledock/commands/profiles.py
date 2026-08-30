@@ -1,6 +1,5 @@
 """Profile lifecycle and inspection commands: create, list, show, rename, delete."""
 
-from typing import Optional
 
 import typer
 
@@ -14,7 +13,9 @@ from ..cli_support import (
     format_size_bytes,
     resolve_engine,
     safe_profile_dict,
+    selected_paths,
 )
+from ..logger import generate_correlation_id, write_log_entry
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..storage import StorageError
 from ..validation import ValidationError
@@ -28,7 +29,7 @@ def _get_manager() -> ProfileManager:
 
 def create_command(
     name: str = typer.Argument(..., help="Display name for the new profile."),
-    engine: Optional[str] = typer.Option(
+    engine: str | None = typer.Option(
         None,
         "--engine",
         "-e",
@@ -166,6 +167,8 @@ def delete_command(
     """
     from ..cli import is_running, runtime_path
 
+    corr_id = generate_correlation_id()
+    paths = selected_paths()
     try:
         profile = _get_manager().resolve(profile_id)
         if is_running(profile.data_dir, runtime_path(profile)):
@@ -181,5 +184,23 @@ def delete_command(
         ValidationError,
         ValueError,
     ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="profile_delete_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc)},
+        )
         fail_exception(exc)
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="profile_deleted",
+        profile_id=profile.id,
+        correlation_id=corr_id,
+        result="success",
+        details={"name": profile.name},
+    )
     typer.echo(f"Deleted '{profile.name}'.")

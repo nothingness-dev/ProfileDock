@@ -2,7 +2,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -45,7 +45,7 @@ def sanitize_url(url: str) -> str:
         return "[url]"
 
 
-def redact_sensitive_data(message: str, secrets: Optional[list[str]] = None) -> str:
+def redact_sensitive_data(message: str, secrets: list[str] | None = None) -> str:
     if not isinstance(message, str):
         return str(message)
     redacted = message
@@ -101,16 +101,16 @@ def write_log_entry(
     log_dir: Path,
     level: str,
     event: str,
-    profile_id: Optional[str] = None,
-    correlation_id: Optional[str] = None,
-    engine: Optional[str] = None,
-    command: Optional[str] = None,
-    result: Optional[str] = None,
-    browser_path: Optional[str] = None,
-    pid: Optional[int] = None,
-    error_category: Optional[str] = None,
-    details: Optional[dict[str, Any]] = None,
-    secrets_to_redact: Optional[list[str]] = None,
+    profile_id: str | None = None,
+    correlation_id: str | None = None,
+    engine: str | None = None,
+    command: str | None = None,
+    result: str | None = None,
+    browser_path: str | None = None,
+    pid: int | None = None,
+    error_category: str | None = None,
+    details: dict[str, Any] | None = None,
+    secrets_to_redact: list[str] | None = None,
     max_bytes: int = DEFAULT_MAX_LOG_BYTES,
     backup_count: int = DEFAULT_BACKUP_COUNT,
 ) -> None:
@@ -178,8 +178,8 @@ def write_log_entry(
 
 def read_profile_logs(
     log_dir: Path,
-    profile_id: Optional[str] = None,
-    last_n: Optional[int] = None,
+    profile_id: str | None = None,
+    last_n: int | None = None,
 ) -> list[dict[str, Any]]:
     logs: list[dict[str, Any]] = []
     if not log_dir.exists():

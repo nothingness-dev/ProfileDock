@@ -3,7 +3,7 @@ import os
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 from .backup import _is_runtime_or_log_file
@@ -29,15 +29,15 @@ from .validation import ValidationError, validate_metadata_document
 
 
 class MigrationError(Exception):
-    pass
+    category = "storage_error"
 
 
 class SourceRunningError(MigrationError):
-    pass
+    category = "profile_active"
 
 
 class ConflictError(MigrationError):
-    pass
+    category = "invalid_input"
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class SourceLayout:
     root: Path
     metadata_file: Path
     profiles_dir: Path
-    runtime_dir: Optional[Path]
+    runtime_dir: Path | None
     backup_file: Path
 
 
@@ -99,7 +99,7 @@ def _detect_source_layout(source_root: Path) -> SourceLayout:
         raise MigrationError("source project must be a real directory")
     versioned_metadata = root / "metadata" / "profiles.json"
     legacy_metadata = root / "profiles.json"
-    runtime_dir: Optional[Path]
+    runtime_dir: Path | None
     if versioned_metadata.exists() and legacy_metadata.exists():
         raise MigrationError("source contains both legacy and application-data metadata")
     if versioned_metadata.exists():

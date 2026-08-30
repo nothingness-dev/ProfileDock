@@ -5,7 +5,6 @@ validates state ownership before delegating to the engine-specific close paths.
 """
 
 from pathlib import Path
-from typing import Optional
 
 from .direct import _close_direct
 from .errors import ProfileRunningError
@@ -24,7 +23,7 @@ from .state import (
 )
 
 
-def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Path] = None) -> str:
+def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None = None) -> str:
     # Late-bound so patches of profiledock.process_manager._alive and
     # ._is_matching_process keep applying.
     from profiledock.process_manager import _alive as _alive_impl
@@ -102,7 +101,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Optional[Pa
     return "stopped"
 
 
-def is_running(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
+def is_running(data_dir: str, runtime_dir: Path | None = None) -> bool:
     return get_status(data_dir, clean_stale=True, runtime_dir=runtime_dir) in (
         "starting",
         "running",
@@ -111,7 +110,7 @@ def is_running(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
     )
 
 
-def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) -> bool:
+def is_active_for_mutation(data_dir: str, runtime_dir: Path | None = None) -> bool:
     # Late-bound so patches of profiledock.process_manager._alive,
     # ._is_matching_process and ._controller_available keep applying.
     from profiledock.process_manager import _alive as _alive_impl
@@ -148,7 +147,7 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Optional[Path] = None) ->
     )
 
 
-def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Optional[Path] = None) -> None:
+def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Path | None = None) -> None:
     # Late-bound so patches of profiledock.process_manager.is_running, ._alive
     # and ._get_process_create_time keep applying.
     from profiledock.process_manager import _alive as _alive_impl

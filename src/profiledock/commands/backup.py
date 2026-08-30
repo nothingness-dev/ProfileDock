@@ -1,16 +1,17 @@
 """Backup, restore, and structured logging commands: backup, restore, logs."""
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
+from ..cli_contract import EXIT_USER_ERROR
 from ..cli_support import (
     emit_json,
     fail,
     fail_exception,
     selected_paths,
 )
+from ..logger import generate_correlation_id, write_log_entry
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..storage import StorageError
 
@@ -22,7 +23,7 @@ def _get_manager() -> ProfileManager:
 
 
 def backup_command(
-    profile_id: Optional[str] = typer.Argument(
+    profile_id: str | None = typer.Argument(
         None, help="Profile ID, prefix, or name to backup. Omit when using --all."
     ),
     all_profiles: bool = typer.Option(
@@ -78,6 +79,7 @@ def backup_command(
     if all_profiles and profile_id is not None:
         fail("cannot specify both a profile identifier and --all")
 
+    corr_id = generate_correlation_id()
     try:
         if all_profiles:
             profiles = profile_manager.list_profiles()
@@ -107,7 +109,30 @@ def backup_command(
         BackupError,
         ValueError,
     ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="backup_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc), "output": str(output)},
+        )
         fail_exception(exc)
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="backup_created",
+        correlation_id=corr_id,
+        result="success",
+        details={
+            "output": report.output_path,
+            "profiles": report.total_profiles,
+            "files": report.total_files,
+            "bytes": report.total_bytes,
+            "exclude_cache": exclude_cache,
+        },
+    )
 
     if json_output:
         emit_json("backup", report.to_dict())
@@ -155,6 +180,7 @@ def restore_command(
     )
 
     paths = selected_paths()
+    corr_id = generate_correlation_id()
 
     try:
         report = restore_backup_archive(
@@ -169,6 +195,15 @@ def restore_command(
                 category="not_found",
                 hint="check the archive path and try again",
             )
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="restore_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc), "archive": str(archive)},
+        )
         fail_exception(exc)
     except (
         DecompressionSecurityError,
@@ -177,7 +212,30 @@ def restore_command(
         StorageError,
         ValueError,
     ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="restore_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc), "archive": str(archive)},
+        )
         fail_exception(exc)
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="restore_completed",
+        correlation_id=corr_id,
+        result="success",
+        details={
+            "archive": report.archive_path,
+            "restored": report.total_restored,
+            "files": report.total_files,
+            "bytes": report.total_bytes,
+            "force": force,
+        },
+    )
 
     if json_output:
         emit_json("restore", report.to_dict())
@@ -203,9 +261,83 @@ def restore_command(
             typer.echo(f"  = {p.name} ({p.id}) [engine: {eng_label}] - {p.message}")
 
 
+def verify_command(
+    archive: Path = typer.Argument(..., help="Path to the backup archive (.tar.gz) to verify."),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output verification report in JSON format.",
+    ),
+) -> None:
+    """Verify a backup archive without restoring it.
+
+    Checks the manifest, totals, member paths and sizes, and every file's
+    SHA-256 checksum. Exits non-zero when the archive is structurally invalid
+    or any content checksum fails.
+    """
+    from ..backup import BackupError, verify_backup_archive
+
+    paths = selected_paths()
+    corr_id = generate_correlation_id()
+    try:
+        report = verify_backup_archive(archive)
+    except BackupError as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="verify_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc), "archive": str(archive)},
+        )
+        fail_exception(exc)
+    if report.checksum_failures:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="verify_failed",
+            correlation_id=corr_id,
+            result="checksum_mismatch",
+            details={
+                "archive": str(archive),
+                "failures": report.checksum_failures[:20],
+            },
+        )
+    else:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="INFO",
+            event="verify_completed",
+            correlation_id=corr_id,
+            result="success",
+            details={"archive": str(archive), "files": report.total_files},
+        )
+
+    if json_output:
+        emit_json("verify", report.to_dict())
+        if report.checksum_failures:
+            raise typer.Exit(EXIT_USER_ERROR)
+        return
+
+    typer.echo(f"Archive: {report.archive_path}")
+    typer.echo(f"Format version: {report.format_version} (ProfileDock {report.profiledock_version})")
+    typer.echo(f"Created at: {report.created_at}")
+    typer.echo(
+        f"Total profiles: {report.total_profiles} | Files: {report.total_files}"
+        f" | Size: {report.total_bytes} bytes"
+    )
+    if report.checksum_failures:
+        typer.echo(f"Checksum failures ({len(report.checksum_failures)}):", err=True)
+        for name in report.checksum_failures:
+            typer.echo(f"  {name}", err=True)
+        raise typer.Exit(EXIT_USER_ERROR)
+    typer.echo("All checksums verified.")
+
+
 def show_logs_command(
-    profile_id: Optional[str] = typer.Argument(None, help="Profile ID, prefix, or name to filter logs."),
-    last: Optional[int] = typer.Option(None, "--last", "-n", help="Show last N log entries."),
+    profile_id: str | None = typer.Argument(None, help="Profile ID, prefix, or name to filter logs."),
+    last: int | None = typer.Option(None, "--last", "-n", help="Show last N log entries."),
     json_output: bool = typer.Option(False, "--json", help="Output logs in JSON format."),
 ) -> None:
     """Read structured ProfileDock logs, optionally for one profile.

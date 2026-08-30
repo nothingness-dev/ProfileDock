@@ -15,7 +15,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from subprocess import Popen
-from typing import IO, Any, Optional
+from typing import IO, Any
 
 from .state import _MAX_ERROR_BYTES
 
@@ -57,7 +57,7 @@ else:
         raise NotImplementedError("kernel32 is only available on Windows")
 
 
-def _get_process_create_time(pid: int) -> Optional[float]:
+def _get_process_create_time(pid: int) -> float | None:
     if pid < 1:
         return None
     if sys.platform == "win32":
@@ -84,6 +84,9 @@ def _get_process_create_time(pid: int) -> Optional[float]:
         finally:
             kernel32.CloseHandle(handle)
 
+    if sys.platform == "darwin":
+        return _macos_process_create_time(pid)
+
     proc_stat = Path(f"/proc/{pid}/stat")
     if proc_stat.exists():
         try:
@@ -109,9 +112,42 @@ def _get_process_create_time(pid: int) -> Optional[float]:
     return None
 
 
+_MACOS_DATE_FORMAT = "%a %b %d %H:%M:%S %Y"
+
+
+def _macos_process_create_time(pid: int) -> float | None:
+    """Process start time on macOS as a UTC epoch via BSD ``ps lstart``.
+
+    ``lstart`` has one-second resolution, which is well inside the 2.0s
+    identity-match tolerance used by ``_is_matching_process``. ``LC_ALL=C``
+    pins the month/day names so strptime parsing survives non-English locales.
+    """
+    try:
+        output = subprocess.run(
+            ["/bin/ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            env={**os.environ, "LC_ALL": "C"},
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not output:
+        return None
+    try:
+        import calendar
+        from datetime import datetime
+
+        local_time = datetime.strptime(output, _MACOS_DATE_FORMAT)
+        return float(calendar.timegm(local_time.timetuple()))
+    except (ValueError, OverflowError):
+        return None
+
+
 def _is_matching_process(
     pid: int,
-    expected_start_time: Optional[float],
+    expected_start_time: float | None,
     require_verification: bool = False,
 ) -> bool:
     # Late-bound so patches of profiledock.process_manager._alive and
@@ -306,7 +342,7 @@ def _find_browser_pid(controller_pid: int) -> int:
     return best_pid
 
 
-def _terminate_matching_process(pid: int, expected_create_time: Optional[float], timeout: float) -> bool:
+def _terminate_matching_process(pid: int, expected_create_time: float | None, timeout: float) -> bool:
     """Terminate a process tree only when its identity matches the recorded one.
 
     Returns True when the process is gone (or was already absent). A PID whose

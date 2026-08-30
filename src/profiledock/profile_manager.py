@@ -1,7 +1,7 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 from .data_root import (
     DataPaths,
@@ -26,15 +26,15 @@ from .validation import validate_engine, validate_launch_config
 
 
 class ProfileNotFoundError(Exception):
-    pass
+    category = "not_found"
 
 
 class AmbiguousProfileError(Exception):
-    pass
+    category = "ambiguous_profile"
 
 
 class ProfileManager:
-    def __init__(self, root: Union[str, Path, DataPaths]) -> None:
+    def __init__(self, root: str | Path | DataPaths) -> None:
         paths = root if isinstance(root, DataPaths) else resolve_data_root(Path(root))
         self.paths = paths
         self.root = paths.root
@@ -83,7 +83,7 @@ class ProfileManager:
             raise AmbiguousProfileError(f"ambiguous profile name '{identifier}' matches: {matches}")
         raise ProfileNotFoundError(f"profile not found: {identifier}")
 
-    def create(self, name: str, engine: Optional[str] = None) -> Profile:
+    def create(self, name: str, engine: str | None = None) -> Profile:
         name = name.strip()
         if not name:
             raise ValueError("profile name cannot be empty")
@@ -164,13 +164,13 @@ class ProfileManager:
         )
         return self._updated_profile(doc, profile.id)
 
-    def set_engine(self, identifier: str, engine: Optional[str]) -> Profile:
+    def set_engine(self, identifier: str, engine: str | None) -> Profile:
         validate_engine(engine)
         profile = self.resolve(identifier)
         doc = set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
         return self._updated_profile(doc, profile.id)
 
-    def _apply_launch_config(self, profile: Profile, config: Optional[LaunchConfig]) -> Profile:
+    def _apply_launch_config(self, profile: Profile, config: LaunchConfig | None) -> Profile:
         if config is not None:
             validate_launch_config(config, profile.engine, require_browser_executable=True)
         doc = set_launch_config_atomic(
@@ -178,7 +178,7 @@ class ProfileManager:
         )
         return self._updated_profile(doc, profile.id)
 
-    def set_launch_config(self, identifier: str, config: Optional[LaunchConfig]) -> Profile:
+    def set_launch_config(self, identifier: str, config: LaunchConfig | None) -> Profile:
         profile = self.resolve(identifier)
         return self._apply_launch_config(profile, config)
 

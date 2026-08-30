@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -145,7 +144,7 @@ def close_tab_command(
 
 def read_page_command(
     profile_id: str = typer.Argument(..., help="Profile ID, prefix, or name."),
-    url: Optional[str] = typer.Argument(None, help="Optional URL to navigate to before reading."),
+    url: str | None = typer.Argument(None, help="Optional URL to navigate to before reading."),
     tab: int = typer.Option(0, "--tab", "-t", help="0-based tab index to read (default: 0)."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
@@ -259,10 +258,10 @@ def eval_script_command(
 
 def export_cookies_command(
     profile_id: str = typer.Argument(..., help="Profile ID, prefix, or name."),
-    output_file: Optional[Path] = typer.Option(
+    output_file: Path | None = typer.Option(
         None, "--output", "-o", help="File to write exported JSON cookies."
     ),
-    url: Optional[list[str]] = typer.Option(None, "--url", "-u", help="URL filter(s) for cookies."),
+    url: list[str] | None = typer.Option(None, "--url", "-u", help="URL filter(s) for cookies."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
     """Export live session cookies directly from browser RAM, bypassing SQLite locks."""

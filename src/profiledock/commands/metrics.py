@@ -38,26 +38,29 @@ class _MetricsRow:
     disk_bytes: int
 
 
-def _collect_row(profile: Any, runtime_path_fn: Any, cpu_sample_interval: float) -> _MetricsRow:
-    from ..metrics import get_profile_metrics
+def _collect_rows(
+    profiles: list[Any], runtime_path_fn: Any, cpu_sample_interval: float
+) -> list[_MetricsRow]:
+    from ..metrics import collect_profiles_metrics
 
-    metrics = get_profile_metrics(
-        profile,
-        runtime_dir=runtime_path_fn(profile),
-        cpu_sample_interval=cpu_sample_interval,
-    )
-    live = metrics.live
-    return _MetricsRow(
-        profile_id=metrics.profile_id,
-        name=metrics.name,
-        engine=metrics.engine,
-        status=metrics.status,
-        cpu_percent=live.total_cpu_percent if live is not None else None,
-        memory_rss_bytes=int(live.total_memory_rss_bytes) if live is not None else None,
-        process_count=live.process_count if live is not None else None,
-        tab_count=live.tab_count if live is not None else None,
-        disk_bytes=metrics.storage.total_bytes,
-    )
+    metrics_rows = collect_profiles_metrics(profiles, runtime_path_fn, cpu_sample_interval)
+    rows: list[_MetricsRow] = []
+    for metrics in metrics_rows:
+        live = metrics.live
+        rows.append(
+            _MetricsRow(
+                profile_id=metrics.profile_id,
+                name=metrics.name,
+                engine=metrics.engine,
+                status=metrics.status,
+                cpu_percent=live.total_cpu_percent if live is not None else None,
+                memory_rss_bytes=int(live.total_memory_rss_bytes) if live is not None else None,
+                process_count=live.process_count if live is not None else None,
+                tab_count=live.tab_count if live is not None else None,
+                disk_bytes=metrics.storage.total_bytes,
+            )
+        )
+    return rows
 
 
 def _row_to_payload(row: _MetricsRow) -> dict[str, Any]:
@@ -143,7 +146,7 @@ def top_command(
     cpu_sample_interval = min(max(interval, 0.1), 0.3)
 
     def _snapshot() -> list[_MetricsRow]:
-        return [_collect_row(profile, runtime_path, cpu_sample_interval) for profile in profiles]
+        return _collect_rows(profiles, runtime_path, cpu_sample_interval)
 
     def _emit_json_frame(rows: list[_MetricsRow]) -> None:
         payload: dict[str, Any] = {

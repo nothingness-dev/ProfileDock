@@ -43,6 +43,7 @@ def migrate_command(
     --remove-source and confirmation are both supplied. Close all source
     profiles first.
     """
+    from ..logger import generate_correlation_id, write_log_entry
     from ..migration import ConflictError, MigrationError, SourceRunningError, failure_report, migrate_project
     from ..storage import StorageError
 
@@ -63,6 +64,7 @@ def migrate_command(
 
     if not json_output:
         typer.echo(f"Validating and copying from '{from_project}'...")
+    corr_id = generate_correlation_id()
     try:
         report = migrate_project(
             source_root=from_project,
@@ -70,11 +72,33 @@ def migrate_command(
             remove_source=remove_source,
         )
     except (MigrationError, ConflictError, SourceRunningError, StorageError, ValueError) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="migrate_failed",
+            correlation_id=corr_id,
+            result="failed",
+            error_category=getattr(exc, "category", type(exc).__name__),
+            details={"error": str(exc), "source": str(from_project)},
+        )
         if json_output:
             report = failure_report(from_project, paths.root, str(exc))
             emit_json("migrate", report.to_dict(), err=True)
             raise typer.Exit(EXIT_USER_ERROR) from exc
         fail_exception(exc)
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="migrate_completed",
+        correlation_id=corr_id,
+        result="success",
+        details={
+            "source": report.source_root,
+            "migrated": len(report.migrated),
+            "skipped": len(report.skipped),
+            "source_removed": report.source_removed,
+        },
+    )
 
     if json_output:
         emit_json("migrate", report.to_dict())

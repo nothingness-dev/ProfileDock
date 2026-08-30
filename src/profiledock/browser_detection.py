@@ -8,7 +8,6 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
 
 DIRECT_BROWSER_ALIASES = frozenset(
     {"chrome", "chromium", "google-chrome", "google-chrome-stable", "chromium-browser"}
@@ -82,7 +81,7 @@ def _candidate_paths(group: str) -> list[Path]:
     return candidates
 
 
-def system_browser_executable(preferred: Optional[str] = None) -> Optional[Path]:
+def system_browser_executable(preferred: str | None = None) -> Path | None:
     """Return the first existing Chrome or Chromium binary, honoring an alias."""
     group = _PREFERRED_GROUP.get(preferred.lower()) if preferred else None
     if preferred and group is None:

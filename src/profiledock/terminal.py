@@ -7,7 +7,6 @@ piped or redirected output. Machine JSON paths are untouched.
 
 import os
 import sys
-from typing import Optional
 
 _RESET = "\033[0m"
 _STYLES = {
@@ -16,7 +15,7 @@ _STYLES = {
     "yellow": "\033[33m",
 }
 
-_color_enabled: Optional[bool] = None
+_color_enabled: bool | None = None
 
 
 def is_stdout_tty() -> bool:

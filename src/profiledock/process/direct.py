@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..browser_detection import system_browser_executable as _system_browser_impl
 from .errors import BrowserLaunchError, ProfileRunningError
@@ -30,7 +30,7 @@ from .state import (
 )
 
 
-def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path]:
+def _system_browser_executable(preferred: str | None = None) -> Path | None:
     """Thin delegation kept so callers and tests can patch this name."""
     return _system_browser_impl(preferred)
 
@@ -38,12 +38,12 @@ def _system_browser_executable(preferred: Optional[str] = None) -> Optional[Path
 def start_direct_chrome(
     data_dir: str,
     tabs: int,
-    runtime_dir: Optional[Path] = None,
-    executable_path: Optional[Path] = None,
-    browser: Optional[str] = None,
-    start_urls: Optional[list[str]] = None,
-    window_width: Optional[int] = None,
-    window_height: Optional[int] = None,
+    runtime_dir: Path | None = None,
+    executable_path: Path | None = None,
+    browser: str | None = None,
+    start_urls: list[str] | None = None,
+    window_width: int | None = None,
+    window_height: int | None = None,
 ) -> StateDict:
     # Late-bound so patches of profiledock.process_manager._system_browser_executable,
     # .is_running, ._get_process_create_time, ._stop_process and
@@ -139,9 +139,9 @@ def start_direct_chrome(
         _write_error(err, "browser_launch_failed", str(exc))
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
 
-    # Platforms without process-create-time support (e.g., macOS, where /proc
-    # does not exist) record None; identity checks then degrade to PID liveness
-    # instead of failing every launch and close.
+    # Platforms that cannot read process create times record None; identity
+    # checks then degrade to PID liveness instead of failing every launch and
+    # close.
     proc_create_time = _get_process_create_time_impl(process.pid)
     state = {
         "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,

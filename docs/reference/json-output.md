@@ -170,6 +170,20 @@ Each profile result includes `id`, `name`, nullable metadata `engine`, status, f
 
 `command` is `restore`. `data` contains archive path, archive format and producing ProfileDock versions, restored counts and totals, plus `restored` and `skipped` profile result arrays.
 
+## `verify --json`
+
+`command` is `verify`. `data` contains:
+
+- `archive_path`
+- `format_version`
+- `profiledock_version`
+- `created_at`
+- `total_profiles`
+- `total_files`
+- `total_bytes`
+- `checksum_failures` — array of archive member names whose content does not match the manifest
+- `valid` — boolean, `true` when `checksum_failures` is empty
+
 ## `logs --json`
 
 `command` is `logs`. `data` is an array of structured entries:

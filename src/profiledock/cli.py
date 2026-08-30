@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -77,6 +77,7 @@ from .commands.backup import (
     backup_command,
     restore_command,
     show_logs_command,
+    verify_command,
 )
 from .commands.browser import (
     close_command,
@@ -235,6 +236,8 @@ __all__ = [
     "status",
     "status_command",
     "tabs",
+    "verify",
+    "verify_command",
 ]
 
 if TYPE_CHECKING:
@@ -305,7 +308,7 @@ def version_callback(value: bool) -> None:
 @app.callback()
 def main(
     context: typer.Context,
-    data_root: Optional[Path] = typer.Option(
+    data_root: Path | None = typer.Option(
         None,
         "--data-root",
         help="Override the ProfileDock application-data directory.",
@@ -326,7 +329,7 @@ def main(
         "--non-interactive",
         help="Never prompt; fail when required input or confirmation is missing.",
     ),
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None,
         "--version",
         "-V",
@@ -442,6 +445,12 @@ app.command(
   profiledock restore work.tar.gz --json\n
   profiledock restore work.tar.gz --force""",
 )(restore_command)
+app.command(
+    name="verify",
+    epilog="""Examples:\n
+  profiledock verify work.tar.gz\n
+  profiledock verify work.tar.gz --json""",
+)(verify_command)
 app.command(name="logs")(show_logs_command)
 
 create = create_command
@@ -471,6 +480,7 @@ doctor = doctor_command
 migrate = migrate_command
 backup = backup_command
 restore = restore_command
+verify = verify_command
 show_logs = show_logs_command
 
 if __name__ == "__main__":

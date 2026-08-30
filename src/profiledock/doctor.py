@@ -6,7 +6,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Optional
+from typing import Any
 
 from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value, utc_now
@@ -44,7 +44,7 @@ class DiagnosticCheck:
     id: str
     status: str
     summary: str
-    action: Optional[str] = None
+    action: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -61,17 +61,17 @@ def check_python_version() -> DiagnosticCheck:
     check_id = "python_version"
     ver = sys.version_info
     current_str = f"{ver[0]}.{ver[1]}.{ver[2]}"
-    if ver >= (3, 9):
+    if ver >= (3, 10):
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
-            summary=f"Python version is {current_str} (>= 3.9 required).",
+            summary=f"Python version is {current_str} (>= 3.10 required).",
         )
     return DiagnosticCheck(
         id=check_id,
         status=STATUS_FAILED,
-        summary=f"Python version {current_str} is unsupported (< 3.9).",
-        action="Upgrade Python to 3.9 or newer.",
+        summary=f"Python version {current_str} is unsupported (< 3.10).",
+        action="Upgrade Python to 3.10 or newer.",
     )
 
 
@@ -150,7 +150,7 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
         )
 
 
-def _elevated_file_hint(path: Path, exc: Exception) -> Optional[str]:
+def _elevated_file_hint(path: Path, exc: Exception) -> str | None:
     """Detect files created by an elevated process that now lock out the user.
 
     When an administrator shell runs ProfileDock, Windows assigns the created
@@ -443,7 +443,7 @@ def check_system_chrome() -> DiagnosticCheck:
 def check_browser_availability(
     pw_check: DiagnosticCheck,
     chrome_check: DiagnosticCheck,
-    direct_check: Optional[DiagnosticCheck] = None,
+    direct_check: DiagnosticCheck | None = None,
 ) -> DiagnosticCheck:
     check_id = "browser_availability"
     if direct_check is not None and direct_check.status == STATUS_OK:
