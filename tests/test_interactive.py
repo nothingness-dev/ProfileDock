@@ -224,7 +224,8 @@ class TestInteractiveApp:
             assert manager.list_profiles() == []
 
     @pytest.mark.asyncio
-    async def test_single_click_moves_selection_without_running(self):
+    async def test_double_click_opens_command_form(self):
+        """Double click opens the clicked command's form."""
         self._make_profiles()
         from profiledock.interactive import ProfileDockApp
 
@@ -233,10 +234,10 @@ class TestInteractiveApp:
             await self._settle(pilot, app_instance)
             deck = app_instance.query_one("#deck")
             assert deck.highlighted == 1
-            await pilot.click("#deck", offset=(6, 2))
+            await pilot.double_click("#deck", offset=(6, 2))
             await self._settle(pilot, app_instance)
-            assert app_instance._mode == "browse"
-            assert deck.highlighted == 2
+            assert app_instance._mode == "form"
+            assert app_instance.query_one("#form-pane").spec.id == "show"
 
     @pytest.mark.asyncio
     async def test_form_gates_deck_and_rail_then_restores_them(self):
@@ -337,14 +338,21 @@ class TestInteractiveApp:
             await pilot.pause()
             filt = app_instance.query_one("#deck-filter")
             assert filt.styles.display == "block"
+            # Label matches rank first: "engine" should surface set-engine
+            # (label) ahead of descriptions that merely mention the word.
             filt.value = "engine"
             await pilot.pause()
             deck = app_instance.query_one("#deck")
-            assert deck.option_count == 2
+            assert deck.match_count >= 2
+            # Label matches rank first: set-engine (label) outranks
+            # descriptions that merely contain the letters.
+            first = str(deck.get_option_at_index(1).id)  # index 0 is the group header
+            assert first == "set-engine"
             await pilot.press("escape")
             await pilot.pause()
             assert filt.styles.display == "none"
-            assert deck.option_count > 2
+            # Closing the filter restores the full deck (17 commands).
+            assert deck.match_count == 17
 
     @pytest.mark.asyncio
     async def test_rail_enter_opens_launch_form(self):
@@ -378,3 +386,229 @@ class TestInteractiveApp:
 def test_action_hotkeys_are_unique():
     hotkeys = [action.hotkey for action in ACTIONS]
     assert len(hotkeys) == len(set(hotkeys))
+
+
+@pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
+class TestInteractiveLifecycle:
+    """Regressions for TUI lifecycle bugs fixed in 0.17.x."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_data_root(self, tmp_path_factory, monkeypatch):
+        from profiledock import cli as pd_cli
+
+        root = tmp_path_factory.mktemp("pd-root-lc")
+        monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(root))
+        pd_cli._paths.set(None)
+        pd_cli._paths_prepared.set(False)
+        self._data_root = root
+        return root
+
+    def _make_profiles(self, count=1):
+        from profiledock.data_root import resolve_data_root
+        from profiledock.profile_manager import ProfileManager
+
+        paths = resolve_data_root(self._data_root, prepare=True)
+        manager = ProfileManager(paths)
+        for index in range(count):
+            manager.create(f"Profile{index}")
+
+    async def _settle(self, pilot, app_instance, rounds=2):
+        for _ in range(rounds):
+            await pilot.pause()
+            try:
+                await app_instance.workers.wait_for_complete()
+            except Exception:
+                pass
+        await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_q_does_not_quit_while_form_is_open(self):
+        self._make_profiles()
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.widgets.forms import FormPanel
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            await pilot.press("r")  # rename form
+            await pilot.pause()
+            await pilot.press("q")
+            await pilot.pause()
+            assert app_instance.is_running
+            assert app_instance.query_one("#form-pane", FormPanel).styles.display == "block"
+            await pilot.press("escape")
+            await pilot.pause()
+            await pilot.press("q")
+            await pilot.pause()
+            assert not app_instance.is_running
+
+    @pytest.mark.asyncio
+    async def test_q_does_not_quit_while_confirmation_modal_is_open(self):
+        self._make_profiles(count=1)
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.widgets.forms import FormPanel
+        from profiledock.tui.widgets.overlays import ConfirmModal
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            await pilot.press("x")  # delete
+            await pilot.pause()
+            app_instance.query_one("#form-pane", FormPanel).submit()
+            await pilot.pause()
+            assert isinstance(app_instance.screen, ConfirmModal)
+            await pilot.press("q")
+            await pilot.pause()
+            assert isinstance(app_instance.screen, ConfirmModal)
+            app_instance.exit()
+
+    @pytest.mark.asyncio
+    async def test_output_header_uses_cli_faithful_argv(self):
+        """The output pane argv must come from build_argv, never raw str(values)."""
+        from unittest.mock import patch as _patch
+
+        from rich.text import Text
+
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.backend import ActionResult
+
+        captured: dict[str, object] = {}
+
+        def fake_run_action(paths, action_id, values):
+            captured["argv_seen"] = None
+            # emulate run_action argv assembly through build_argv
+            from profiledock.tui.actions import ACTIONS_BY_ID, build_argv
+            from profiledock.tui.backend import EXIT_SUCCESS
+
+            spec = ACTIONS_BY_ID[action_id]
+            argv = build_argv(spec, values)
+            return ActionResult(argv=argv, exit_code=EXIT_SUCCESS, body=Text("ok"))
+
+        self._make_profiles()
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            await pilot.press("b")  # backup form
+            await pilot.pause()
+            from profiledock.tui.widgets.forms import FormPanel
+
+            with _patch.object(
+                __import__("profiledock.tui.app", fromlist=["backend"]).backend,
+                "run_action",
+                fake_run_action,
+            ):
+                form = app_instance.query_one("#form-pane", FormPanel)
+                form.submit()
+                await self._settle(pilot, app_instance, rounds=3)
+            body = app_instance.query_one("#output-body")
+            text = str(getattr(body, "content", "") or getattr(body, "renderable", ""))
+            assert "['" not in text, f"raw python list leaked into argv: {text[:120]}"
+            assert "__all__" not in text, f"sentinel leaked into argv: {text[:120]}"
+
+    @pytest.mark.asyncio
+    async def test_launch_engine_inherit_does_not_override_stored_engine(self):
+        """Choosing (inherit) must launch with the profile's stored engine."""
+        self._make_profiles(count=1)
+        from profiledock.data_root import resolve_data_root
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.profile_manager import ProfileManager
+        from profiledock.tui.widgets.forms import FormPanel
+
+        paths = resolve_data_root(self._data_root, prepare=True)
+        ProfileManager(paths).set_engine("Profile0", "playwright")
+
+        launched: dict[str, object] = {}
+
+        def fake_start_controller(data_dir, tabs, **kwargs):
+            launched["data_dir"] = data_dir
+            return {"controller_pid": 123, "pid": 123}
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            await pilot.press("o")  # launch form
+            await pilot.pause()
+            from unittest.mock import patch as _patch
+
+            import profiledock.tui.backend as backend_mod
+
+            form = app_instance.query_one("#form-pane", FormPanel)
+            # engine defaults to (inherit); submit directly
+            with _patch.object(backend_mod, "start_controller", fake_start_controller):
+                form.submit()
+                await self._settle(pilot, app_instance, rounds=3)
+        assert launched, "controller launch was not invoked"
+        # If engine had been overridden to direct, start_direct_chrome would
+        # have been called instead and the dict stayed empty.
+
+
+@pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
+@pytest.mark.asyncio
+class TestDoubleClickUX:
+    """Single click previews, double click runs (deck only)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_data_root(self, tmp_path_factory, monkeypatch):
+        from profiledock import cli as pd_cli
+
+        root = tmp_path_factory.mktemp("pd-root-dbl")
+        monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(root))
+        pd_cli._paths.set(None)
+        pd_cli._paths_prepared.set(False)
+        return root
+
+    async def test_deck_single_click_previews_only(self):
+        from profiledock.interactive import ProfileDockApp
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            for _ in range(3):
+                await pilot.pause()
+            deck = app_instance.query_one("#deck")
+            await pilot.click("#deck", offset=(6, 3))
+            await pilot.pause()
+            assert app_instance._mode == "browse"
+            assert deck.highlighted == 3
+
+    async def test_deck_double_click_runs(self):
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.widgets.forms import FormPanel
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            for _ in range(3):
+                await pilot.pause()
+            await pilot.double_click("#deck", offset=(6, 3))
+            await pilot.pause()
+            assert app_instance._mode == "form"
+            form = app_instance.query_one("#form-pane", FormPanel)
+            assert form.spec is not None and form.spec.id == "launch"
+
+    async def test_choice_select_does_not_submit_form(self):
+        """Choosing a radio option must not auto-submit single-field forms."""
+        from profiledock.data_root import resolve_data_root
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.profile_manager import ProfileManager
+        from profiledock.tui.widgets.forms import FormPanel
+
+        paths = resolve_data_root(app_instance_root(), prepare=True)
+        ProfileManager(paths).create("Pick1")
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            for _ in range(3):
+                await pilot.pause()
+            await pilot.press("c")  # create form
+            await pilot.pause()
+            form = app_instance.query_one("#form-pane", FormPanel)
+            choice = form.query_one("#choice-engine")
+            choice.set_value("playwright")
+            await pilot.pause()
+            # Form stays open; only preview updated.
+            assert app_instance._mode == "form"
+            assert form.spec is not None and form.spec.id == "create"
+
+
+def app_instance_root():
+    import os
+
+    return os.environ["PROFILEDOCK_DATA_ROOT"]

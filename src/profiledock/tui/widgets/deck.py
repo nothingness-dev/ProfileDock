@@ -10,40 +10,58 @@ from textual.message import Message
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
-from ..actions import GROUP_TITLES, ActionSpec, fuzzy_score, grouped_actions
+from ..actions import ACTIONS_BY_ID, GROUP_TITLES, ActionSpec, fuzzy_score, grouped_actions
 
 CURSOR_GLYPH = ">"
 
 
 class VimOptionList(OptionList):
-    """OptionList with vim-style navigation; clicks move focus, Enter runs."""
+    """OptionList with vim-style navigation.
+
+    ``double_click_selects`` controls mouse behavior: when False (default)
+    a single click selects like keyboard Enter; when True the first click
+    only highlights (letting the preview pane follow) and a double click
+    selects. Keyboard Enter always selects.
+    """
 
     BINDINGS: ClassVar[list[Any]] = [
         Binding("j", "cursor_down", show=False),
         Binding("k", "cursor_up", show=False),
     ]
 
+    double_click_selects = False
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._enter_armed = False
+        # Chain count of the click currently being dispatched. Textual runs
+        # every _on_click in the MRO, so the stock OptionList handler fires
+        # alongside ours and unconditionally calls action_select(); the gate
+        # below lets a single click highlight-only in double-click mode.
+        self._click_chain = 0
 
     def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
         return
 
     def reset_armed(self) -> None:
-        """Drop any pending keyboard-select arming (used across mode switches)."""
-        self._enter_armed = False
-
-    async def _on_key(self, event: events.Key) -> None:
-        """Arm the next select so only genuine keyboard Enter reaches it."""
-        if event.key == "enter":
-            self._enter_armed = True
+        """Kept for mode-switch call sites; nothing to reset without arming."""
+        return
 
     async def _on_click(self, event: events.Click) -> None:
-        """Clicks move the selection; running a command stays on Enter."""
+        """Record the click chain; selection gating happens in action_select."""
         clicked_option: int | None = event.style.meta.get("option")
-        if clicked_option is not None and not self._options[clicked_option].disabled:
+        if clicked_option is None or self._options[clicked_option].disabled:
+            return
+        self._click_chain = event.chain
+        if not self.double_click_selects and self.highlighted != clicked_option:
             self.highlighted = clicked_option
+
+    def action_select(self) -> None:
+        """Select, but in double-click mode swallow chain-1 clicks."""
+        if self.double_click_selects and self._click_chain == 1:
+            self._click_chain = 0
+            return
+        self._click_chain = 0
+        super().action_select()
 
     def _highlighted_option_id(self) -> str | None:
         index = self.highlighted
@@ -51,19 +69,6 @@ class VimOptionList(OptionList):
             return None
         option = self.get_option_at_index(index)
         return str(option.id) if option.id else None
-
-    def action_select(self) -> None:
-        """Consume at most one armed Enter; clicks route here unarmed and stay inert."""
-        armed, self._enter_armed = self._enter_armed, False
-        if not armed:
-            return
-        identifier = self._highlighted_option_id()
-        if identifier is not None:
-            self._emit_selected(identifier)
-
-    def _emit_selected(self, identifier: str) -> None:
-        """Subclasses turn the highlighted id into their Selected message."""
-        return
 
 
 def _name_width() -> int:
@@ -92,19 +97,43 @@ def _all_actions() -> list[ActionSpec]:
 
 
 def _filtered(actions: list[ActionSpec], query: str) -> list[ActionSpec]:
+    """Rank actions against a query spanning label, description, hotkey, and id.
+
+    Label matches outrank everything: typing ``la`` should surface ``launch``
+    before commands that merely contain those letters elsewhere. Subsequence
+    fuzzy matching keeps typos like ``lunch`` useful.
+    """
     if not query:
         return actions
-    scored: list[tuple[int, ActionSpec]] = []
+    scored: list[tuple[int, int, str]] = []
     for action in actions:
-        score = fuzzy_score(query, f"{action.label} {action.description}")
-        if score is not None:
-            scored.append((score, action))
-    scored.sort(key=lambda pair: (-pair[0], pair[1].label))
-    return [action for _, action in scored]
+        label_score = fuzzy_score(query, action.label)
+        if label_score is not None:
+            # Label matches rank above all others; higher fuzzy score wins.
+            key = (0, -(100000 + label_score), action.label)
+        else:
+            haystack = f"{action.label} {action.description} {action.id} {action.hotkey}"
+            anywhere = fuzzy_score(query, haystack)
+            if anywhere is None:
+                continue
+            key = (1, -anywhere, action.label)
+        scored.append(key)
+    results: list[ActionSpec] = []
+    for key in sorted(scored):
+        resolved = ACTIONS_BY_ID.get(key[2])
+        if resolved is not None:
+            results.append(resolved)
+    return results
 
 
 class CommandDeck(VimOptionList):
-    """Grouped, filterable command list with a plain selection cursor."""
+    """Grouped, filterable command list with a plain selection cursor.
+
+    Single click previews a command (the inspector follows the highlight);
+    double click runs it. Keyboard Enter always runs.
+    """
+
+    double_click_selects = True
 
     DEFAULT_CSS = """
     CommandDeck {
@@ -142,6 +171,7 @@ class CommandDeck(VimOptionList):
         self._specs: dict[str, ActionSpec] = {}
         self._highlighted_id: str | None = None
         self._query = ""
+        self.match_count = 0
 
     def on_mount(self) -> None:
         self.call_after_refresh(self.set_filter, "")
@@ -171,19 +201,27 @@ class CommandDeck(VimOptionList):
         options: list[Option] = []
         width = _name_width()
         desc_width = self._desc_width()
+        total_matches = 0
         for group_id, actions in grouped_actions():
             matches = _filtered(actions, query)
             if not matches:
                 continue
+            total_matches += len(matches)
             options.append(_group_header(group_id))
             for spec in matches:
                 self._specs[spec.id] = spec
                 options.append(Option(_command_prompt(spec, width, desc_width, False), id=spec.id))
         if not options:
-            options.append(Option("  [$text-muted]no matching commands[/]", disabled=True))
+            options.append(
+                Option(
+                    f"  [$text-muted]no commands match {query!r} — esc to clear[/]",
+                    disabled=True,
+                )
+            )
         self.clear_options()
         self.add_options(options)
         self._highlighted_id = None
+        self.match_count = total_matches
         first_command = next((index for index, option in enumerate(options) if not option.disabled), None)
         if first_command is not None:
             self.highlighted = first_command
@@ -217,7 +255,10 @@ class CommandDeck(VimOptionList):
             self._refresh_prompt(previous, False)
         self._refresh_prompt(current, True)
 
-    def _emit_selected(self, identifier: str) -> None:
-        spec = self._specs.get(identifier)
-        if spec is not None:
-            self.post_message(self.Selected(self, spec))
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        identifier = str(event.option.id) if event.option.id else None
+        if identifier is not None:
+            spec = self._specs.get(identifier)
+            if spec is not None:
+                self.post_message(self.Selected(self, spec))

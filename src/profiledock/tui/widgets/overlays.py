@@ -68,6 +68,7 @@ class ConfirmModal(ModalScreen[bool]):
         ("escape", "cancel", "Cancel"),
         ("n", "cancel", "No"),
         ("y", "confirm", "Yes"),
+        ("enter", "confirm", "Confirm"),
     ]
 
     def __init__(

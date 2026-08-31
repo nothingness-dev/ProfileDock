@@ -19,17 +19,24 @@ from textual.css.query import NoMatches
 from textual.geometry import Offset
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Checkbox, Input, Label, OptionList, Static
+from textual.widgets import Button, Checkbox, Input, Label, OptionList, Static
 from textual.widgets.option_list import Option
 
 from ...browser_detection import DIRECT_BROWSER_ALIASES
-from ..actions import CHROMIUM_FLAGS, ActionSpec, FieldKind, FieldSpec, build_argv, fuzzy_score
+from ..actions import (
+    ALL_PROFILES,
+    CHROMIUM_FLAGS,
+    ActionSpec,
+    FieldKind,
+    FieldSpec,
+    build_argv,
+    fuzzy_score,
+)
 from ..backend import BrowserInfo, ProfileRow
 from .deck import VimOptionList
 
 CURSOR_GLYPH = ">"
 KNOWN_BROWSER_NAMES = frozenset(DIRECT_BROWSER_ALIASES)
-ALL_PROFILES = "__all__"
 CUSTOM_BROWSER = "__custom__"
 
 _STATUS_COLORS = {
@@ -85,6 +92,8 @@ class ChoiceList(VimOptionList):
         padding: 0 1;
         scrollbar-size: 0 0;
         overflow-x: hidden;
+        text-wrap: nowrap;
+        text-overflow: clip;
     }
     ChoiceList:focus {
         border: none;
@@ -295,13 +304,21 @@ class ProfilePicker(Vertical):
         self._query = event.value.strip()
         self._repaint()
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter in the picker's search box commits the best visible match
+        # instead of being swallowed — otherwise single-pick forms (delete,
+        # show, launch) feel dead on pure keyboard.
         event.stop()
-        value = str(event.option.id or "")
-        if value:
-            self._value = value
-            self._repaint()
-            self.post_message(self.Changed(self, value))
+        rows = self._visible_rows()
+        if rows:
+            target = rows[0].profile_id
+        elif self._allow_all:
+            target = ALL_PROFILES
+        else:
+            return
+        self._value = target
+        self._repaint()
+        self.post_message(self.Changed(self, target))
 
 
 class FieldRow(Horizontal):
@@ -322,6 +339,12 @@ class FieldRow(Horizontal):
     FieldRow .field-stack {
         height: auto;
         width: 1fr;
+    }
+    FieldRow .field-hint {
+        max-height: 1;
+        overflow: hidden;
+        text-wrap: nowrap;
+        text-overflow: clip;
     }
     """
 
@@ -389,11 +412,27 @@ class FormPanel(VerticalScroll):
         height: auto;
         color: $error;
         margin-top: 1;
+        max-height: 3;
+        overflow: hidden;
+        text-wrap: nowrap;
+        text-overflow: clip;
     }
     #form-preview {
         height: auto;
         color: $text-muted;
         margin-top: 1;
+        max-height: 1;
+        overflow: hidden;
+        text-wrap: nowrap;
+        text-overflow: clip;
+    }
+    FormPanel .form-buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    FormPanel .form-buttons Button {
+        margin-right: 1;
+        min-width: 12;
     }
     FormPanel FieldRow.advanced {
         display: none;
@@ -485,20 +524,66 @@ class FormPanel(VerticalScroll):
         self.call_after_refresh(self._refresh_preview)
         self.call_after_refresh(self.focus_first)
 
+    @staticmethod
+    def _focus_target(widget: Widget) -> Widget | None:
+        """Resolve a field to the widget that can actually take focus.
+
+        Composite fields (ProfilePicker) are containers; calling .focus() on
+        them silently no-ops, which left picker-first forms without any focus.
+        """
+        if widget.focusable:
+            return widget
+        for descendant in widget.walk_children():
+            if isinstance(descendant, Widget) and getattr(descendant, "focusable", False):
+                return descendant
+        return None
+
     def focus_first(self) -> None:
-        if self._order:
-            self._order[0].focus()
+        """Focus the first field, retrying briefly.
+
+        ``set_context`` runs while the pane is still being shown; an immediate
+        focus() can silently no-op because the widget is not yet visible, and
+        the form then renders with no focus at all — every key dead.
+        """
+        if not self._order:
+            return
+
+        def try_focus(attempt: int) -> None:
+            if self._spec is None or self.styles.display != "block":
+                return
+            target = self._focus_target(self._order[0])
+            if target is not None:
+                target.focus()
+            if self.app.focused is target:
+                return
+            if attempt < 8:
+                self.set_timer(0.05, lambda: try_focus(attempt + 1))
+
+        try_focus(0)
+
+    def _focused_field_index(self) -> int | None:
+        """Index of the field owning focus; a focused descendant counts as its owner."""
+        focused = self.app.focused
+        if focused is None:
+            return None
+        for index, widget in enumerate(self._order):
+            if widget is focused or focused in widget.walk_children():
+                return index
+        return None
 
     def advance(self) -> None:
-        focused = self.app.focused
-        for index, widget in enumerate(self._order):
-            if widget is focused:
-                if index + 1 < len(self._order):
-                    self._order[index + 1].focus()
-                else:
-                    self.submit()
-                return
-        self.focus_first()
+        index = self._focused_field_index()
+        if index is None:
+            self.focus_first()
+            return
+        if index + 1 < len(self._order):
+            target = self._focus_target(self._order[index + 1])
+            if target is not None:
+                target.focus()
+            else:
+                self._order[index + 1].focus()
+        else:
+            self.submit()
 
     def submit(self) -> None:
         self._submitted_once = True
@@ -629,6 +714,18 @@ class FormPanel(VerticalScroll):
             widgets.append(self._build_field(field_spec, preselect_profile))
         widgets.append(Label("", id="form-validation"))
         widgets.append(Static("", id="form-preview", markup=False))
+        submit_label = f"Run {spec.label}" if not spec.destructive else f"Confirm {spec.label}"
+        widgets.append(
+            Horizontal(
+                Button(
+                    submit_label,
+                    variant="primary" if not spec.destructive else "error",
+                    id="form-submit",
+                ),
+                Button("Cancel", variant="default", id="form-cancel"),
+                classes="form-buttons",
+            )
+        )
         return widgets
 
     def _field_label(self, spec: FieldSpec) -> Label:
@@ -653,7 +750,10 @@ class FormPanel(VerticalScroll):
             return self._simple_row(spec, control)
         if spec.kind is FieldKind.ENGINE:
             entries = [(option, option) for option in (spec.options or ("direct", "playwright"))]
-            control = ChoiceList(entries, selected=spec.default or "direct", id=f"choice-{spec.name}")
+            # Prefer the spec's explicit default, then the first option —
+            # which for the launch override is "(inherit)" so the stored
+            # preset/profile/environment precedence stays untouched.
+            control = ChoiceList(entries, selected=spec.default or entries[0][0], id=f"choice-{spec.name}")
             return self._simple_row(spec, control)
         if spec.kind is FieldKind.BROWSER:
             entries = [(browser.label(), browser.path) for browser in self._browsers]
@@ -730,6 +830,13 @@ class FormPanel(VerticalScroll):
         event.stop()
         self.advance()
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "form-submit":
+            self.submit()
+        elif event.button.id == "form-cancel":
+            self.post_message(self.Cancelled(self))
+
     def on_choice_list_changed(self, event: ChoiceList.Changed) -> None:
         event.stop()
         choice_id = str(event.choice.id or "")
@@ -743,13 +850,13 @@ class FormPanel(VerticalScroll):
                     return
             except NoMatches:
                 pass
+        # Updating a choice only refreshes the preview — advancing (or worse,
+        # submitting) on select made single-option forms fire accidentally.
         self._refresh_preview()
-        self.advance()
 
     def on_profile_picker_changed(self, event: ProfilePicker.Changed) -> None:
         event.stop()
         self._refresh_preview()
-        self.advance()
 
     def on_flags_list_changed(self, event: FlagsList.Changed) -> None:
         event.stop()

@@ -446,6 +446,26 @@ def test_start_direct_chrome_validation_and_launch(tmp_path):
         assert "--disable-background-mode" in popen.call_args.args[0]
 
     with (
+        patch("profiledock.process_manager.subprocess.Popen", return_value=DummyProcess()) as popen,
+        patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
+        # The already-running guard probes pid 12345 for liveness; without a
+        # deterministic patch a real OS process with that PID breaks the test.
+        patch("profiledock.process_manager._alive", return_value=False),
+    ):
+        start_direct_chrome(
+            str(data_dir),
+            tabs=1,
+            executable_path=dummy_chrome,
+            extra_args=["--incognito", "--start-maximized"],
+        )
+        launched_args = popen.call_args.args[0]
+        assert "--incognito" in launched_args
+        assert "--start-maximized" in launched_args
+        # Extra flags come after the fixed flags and before the start URLs.
+        assert launched_args.index("--incognito") > launched_args.index("--disable-background-mode")
+        assert launched_args.index("--incognito") < launched_args.index("about:blank")
+
+    with (
         patch("profiledock.process_manager._alive", return_value=True),
         patch("profiledock.process_manager._get_process_create_time", return_value=100.0),
     ):

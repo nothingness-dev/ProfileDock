@@ -31,7 +31,7 @@ def test_resolve_ambiguous_prefix(manager):
     p1 = manager.create("Alpha")
     p2 = manager.create("Beta")
     common = ""
-    for a, b in zip(p1.id, p2.id):
+    for a, b in zip(p1.id, p2.id, strict=False):
         if a == b:
             common += a
         else:

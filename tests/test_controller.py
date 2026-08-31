@@ -1,7 +1,6 @@
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -380,7 +379,7 @@ def test_controller_wait_stops_when_context_closes():
 
     class TimeoutServer:
         def accept(self):
-            raise socket.timeout
+            raise TimeoutError
 
     context = ClosingContext()
     _wait_for_close(TimeoutServer(), context, "token")

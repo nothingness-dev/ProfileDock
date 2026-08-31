@@ -130,7 +130,7 @@ class ProfileDockApp(App[None]):
 
     BINDINGS: ClassVar[list[Any]] = [
         Binding("q", "quit_app", "Quit"),
-        Binding("ctrl+c", "quit_app", "Quit", show=False),
+        Binding("ctrl+c", "force_quit", "Quit", show=False, priority=True),
         Binding("escape", "step_back", "Back", show=False),
         Binding("t", "cycle_theme", "Theme", show=False),
         Binding("tab", "switch_pane", "Switch Pane", show=False),
@@ -152,6 +152,10 @@ class ProfileDockApp(App[None]):
         self._selected_profile_id: str | None = None
         self._pending: tuple[ActionSpec, dict[str, object]] | None = None
         self._last_spec: ActionSpec | None = None
+        # Monotonic token per refresh request; a worker holding an older
+        # token is stale and its rows are discarded on arrival.
+        self._profiles_generation = 0
+        self._cards_generation = 0
 
     # ------------------------------------------------------------------
     # layout
@@ -240,9 +244,16 @@ class ProfileDockApp(App[None]):
             return
         keep = self._selected_profile_id
         paths = self._paths
+        self._profiles_generation += 1
+        generation = self._profiles_generation
+
+        def deliver(rows: list[backend.ProfileRow]) -> None:
+            if generation == self._profiles_generation:
+                self._apply_rows(rows, keep)
+
         self._launch_worker(
             lambda: backend.list_profile_rows(paths, with_sizes=with_sizes),
-            lambda rows: self._apply_rows(rows, keep),
+            deliver,
             group="profiles",
         )
 
@@ -286,9 +297,17 @@ class ProfileDockApp(App[None]):
             return
         cards = self.query_one("#cards", TelemetryCards)
         paths = self._paths
+        self._cards_generation += 1
+        generation = self._cards_generation
+        title = f"Profile: {row.name}"
+
+        def deliver(entries: list[tuple[str, Text]]) -> None:
+            if generation == self._cards_generation:
+                cards.show_entries(title, entries)
+
         self._launch_worker(
             lambda: backend.profile_card(paths, row),
-            lambda entries: cards.show_entries(f"Profile: {row.name}", entries),
+            deliver,
             group="cards",
         )
 
@@ -449,10 +468,17 @@ class ProfileDockApp(App[None]):
         self._pending = None
         self._execute(spec, values)
 
+    def on_form_panel_cancelled(self, event: FormPanel.Cancelled) -> None:
+        self._cancel_form()
+
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "deck-filter":
-            self.query_one("#deck", CommandDeck).set_filter(event.value)
-            self._update_footer()
+            deck = self.query_one("#deck", CommandDeck)
+            deck.set_filter(event.value)
+            query = event.value.strip()
+            status = f"{deck.match_count} match(es) for {query!r}" if query else None
+            crumbs, chips = self._footer_args()
+            self.query_one("#app-footer", FooterBar).set_context(crumbs, chips, status=status)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "deck-filter":
@@ -473,9 +499,20 @@ class ProfileDockApp(App[None]):
         if action == "toggle_advanced":
             form = self.query_one("#form-pane", FormPanel)
             return self._mode == Mode.FORM and form.has_advanced
+        if action == "quit_app":
+            # Plain q must never fire while a form field, validation, or a
+            # confirmation modal is in play — a stray press would discard
+            # the whole session. Escape/ctrl+c handle those states.
+            return not isinstance(self.screen, ConfirmModal) and self._mode in (
+                Mode.BROWSE,
+                Mode.OUTPUT,
+            )
         return True
 
     def action_quit_app(self) -> None:
+        self.exit()
+
+    def action_force_quit(self) -> None:
         self.exit()
 
     async def action_exec(self, action_id: str) -> None:

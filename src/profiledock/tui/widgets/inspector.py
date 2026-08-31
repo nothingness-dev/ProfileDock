@@ -37,7 +37,13 @@ def _status_badge(status: str, pid: int | None) -> str:
 
 
 class ProfileRail(VimOptionList):
-    """Compact profile list with live status badges."""
+    """Compact profile list with live status badges.
+
+    Single click focuses a profile (telemetry follows); double click opens
+    the launch form. Keyboard Enter always opens launch.
+    """
+
+    double_click_selects = True
 
     DEFAULT_CSS = """
     ProfileRail {
@@ -141,10 +147,13 @@ class ProfileRail(VimOptionList):
             self._refresh_prompt(previous, False)
         self._refresh_prompt(current, True)
 
-    def _emit_selected(self, identifier: str) -> None:
-        row = self._rows.get(identifier)
-        if row is not None:
-            self.post_message(self.Selected(self, row))
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        identifier = str(event.option.id) if event.option.id else None
+        if identifier is not None:
+            row = self._rows.get(identifier)
+            if row is not None:
+                self.post_message(self.Selected(self, row))
 
 
 def _row_prompt(row: ProfileRow, name_width: int, highlighted: bool) -> str:

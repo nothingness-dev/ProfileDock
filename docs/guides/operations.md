@@ -129,10 +129,10 @@ Removal has separate code, environment, browser, and profile-data parts. Back up
 
 ```bash
 profiledock status
-profiledock close Work
+profiledock close --all
 ```
 
-Repeat close for every running profile.
+`close --all` closes every profile in turn; already-stopped profiles are counted rather than treated as errors.
 
 ### 2. Back up data if needed
 
@@ -140,7 +140,7 @@ Repeat close for every running profile.
 profiledock backup --all --output profiledock-final-backup.tar.gz
 ```
 
-Verify and move the archive before deleting the data root.
+Verify the archive (`profiledock verify profiledock-final-backup.tar.gz`) and move it off-machine before deleting the data root.
 
 ### 3. Remove the virtual environment
 

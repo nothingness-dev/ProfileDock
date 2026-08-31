@@ -44,6 +44,7 @@ def start_direct_chrome(
     start_urls: list[str] | None = None,
     window_width: int | None = None,
     window_height: int | None = None,
+    extra_args: list[str] | None = None,
 ) -> StateDict:
     # Late-bound so patches of profiledock.process_manager._system_browser_executable,
     # .is_running, ._get_process_create_time, ._stop_process and
@@ -118,6 +119,7 @@ def start_direct_chrome(
     ]
     if window_width is not None and window_height is not None:
         args.append(f"--window-size={window_width},{window_height}")
+    args.extend(extra_args or [])
     args.extend(urls)
 
     popen_kwargs: dict[str, Any] = {

@@ -50,6 +50,7 @@ from ..process_manager import (
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..restore import restore_backup_archive
 from ..validation import ValidationError, validate_browser, validate_url
+from .actions import ACTIONS_BY_ID, build_argv
 
 _HINTS = {
     "not_found": "run 'list' to see existing profiles",
@@ -209,9 +210,14 @@ def list_profile_rows(paths: DataPaths, with_sizes: bool = False) -> list[Profil
 
 
 def effective_engine(profile: Profile) -> str:
-    from ..cli_support import resolve_engine
+    # strict variant + graceful fallback: this runs in worker threads where a
+    # typer.Exit from the CLI wrapper would kill the refresh instead of the CLI.
+    from ..cli_support import resolve_engine_strict
 
-    return resolve_engine(None, profile)
+    try:
+        return resolve_engine_strict(None, profile)
+    except ValueError:
+        return "direct"
 
 
 def profile_card(paths: DataPaths, row: ProfileRow) -> list[tuple[str, Text]]:
@@ -404,8 +410,10 @@ def _resolve_browser(raw: str, engine: str) -> str:
 def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     manager = _manager(paths)
     profile = _require_profile(manager, str(values.get("profile", "")))
-    raw_engine = str(values.get("engine") or "").strip().lower()
-    engine = raw_engine if raw_engine in ("direct", "playwright") else effective_engine(profile)
+    raw_engine = str(values.get("engine") or "").strip()
+    # "(inherit)" or empty means no one-launch override: the stored preset,
+    # profile engine, environment, and default precedence apply unchanged.
+    engine_override = raw_engine if raw_engine in ("direct", "playwright") else None
     raw_tabs = str(values.get("tabs") or "").strip()
     if raw_tabs:
         if not raw_tabs.isdigit() or int(raw_tabs) < 1:
@@ -416,14 +424,14 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     raw_urls = str(values.get("urls") or "").strip()
     urls = _parse_urls(raw_urls) if raw_urls else None
     raw_browser = str(values.get("browser") or "").strip()
-    browser: str | None = _resolve_browser(raw_browser, engine) if raw_browser else None
+    browser: str | None = _resolve_browser(raw_browser, effective_engine(profile)) if raw_browser else None
     flags = values.get("flags")
     extra_flags = [str(flag) for flag in flags] if isinstance(flags, list) else []
 
     try:
         plan = build_launch_plan(
             profile,
-            engine=engine if raw_engine else None,
+            engine=engine_override,
             tabs=tabs,
             urls=urls,
             browser=browser,
@@ -468,7 +476,8 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
 
 def run_action(paths: DataPaths, action_id: str, values: dict[str, object]) -> ActionResult:
     """Execute one action and return a CLI-faithful result."""
-    argv = [action_id] + [str(v) for v in values.values() if str(v or "").strip()]
+    spec = ACTIONS_BY_ID.get(action_id)
+    argv = build_argv(spec, values) if spec is not None else [action_id]
     try:
         body = _dispatch(paths, action_id, values)
         return ActionResult(argv=argv, exit_code=EXIT_SUCCESS, body=body)

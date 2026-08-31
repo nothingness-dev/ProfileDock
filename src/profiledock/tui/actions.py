@@ -37,7 +37,22 @@ class FieldKind(str, Enum):
 
 @dataclass(frozen=True)
 class FieldSpec:
-    """One parameter of an action, rendered as a labeled form control."""
+    """One parameter of an action, rendered as a labeled form control.
+
+    ``argv`` controls how the value appears on the equivalent CLI command
+    line shown in the form preview and output header:
+
+    - ``"positional"``  — appended as a bare positional argument
+    - ``"flag"``        — ``--name value``
+    - ``"repeat"``      — ``--name value`` repeated for each item (list values)
+    - ``"boolean"``     — ``--name`` only when truthy
+    - ``"none"``        — not part of the CLI surface (e.g. the profile picker
+      label vs the profile itself is handled by naming; use ``none`` only for
+      purely internal fields)
+
+    Positional order follows field declaration order among ``positional``
+    fields; ``repeat``/``flag``/``boolean`` fields follow them.
+    """
 
     name: str
     label: str
@@ -49,6 +64,11 @@ class FieldSpec:
     options: tuple[str, ...] = ()
     hint: str = ""
     advanced: bool = False
+    argv: str = "auto"
+    # Explicit CLI flag spelling when the field name does not match the
+    # contract (e.g. the launch form's comma-separated "urls" field maps to
+    # the repeatable --url option).
+    flag_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,6 +109,12 @@ GROUP_TITLES: dict[str, tuple[str, str, str]] = {
 }
 
 ENGINE_OPTIONS: tuple[str, ...] = ("direct", "playwright")
+# Sentinel for "no one-launch override": the stored preset/profile/env
+# precedence applies, exactly like omitting --engine on the CLI.
+ENGINE_INHERIT = "(inherit)"
+# Sentinel for "every profile" in PROFILE_OR_ALL pickers (backup target,
+# logs filter). Maps to the CLI's --all flag rather than a literal value.
+ALL_PROFILES = "__all__"
 
 CHROMIUM_FLAGS: tuple[str, ...] = (
     "--incognito",
@@ -105,6 +131,7 @@ PROFILE_FIELD = FieldSpec(
     kind=FieldKind.PROFILE,
     required=True,
     placeholder="fuzzy-search profiles…",
+    argv="positional",
 )
 
 ACTIONS: tuple[ActionSpec, ...] = (
@@ -138,20 +165,32 @@ ACTIONS: tuple[ActionSpec, ...] = (
         fields=(
             PROFILE_FIELD,
             FieldSpec(
-                "tabs", "Tabs", FieldKind.NUMBER, placeholder="tabs to open (preset or 1)", hint="at least 1"
+                "tabs",
+                "Tabs",
+                FieldKind.NUMBER,
+                placeholder="tabs to open (preset or 1)",
+                hint="at least 1",
+                argv="flag",
             ),
             FieldSpec(
                 "engine",
                 "Engine",
                 FieldKind.ENGINE,
-                options=ENGINE_OPTIONS,
-                hint="one-launch override",
+                options=(ENGINE_INHERIT, *ENGINE_OPTIONS),
+                hint="inherit preset",
                 advanced=True,
             ),
             FieldSpec("browser", "Browser", FieldKind.BROWSER, placeholder="auto-detect", advanced=True),
             FieldSpec("flags", "Chromium flags", FieldKind.FLAGS, hint="space to toggle", advanced=True),
             FieldSpec(
-                "urls", "Start URLs", FieldKind.TEXT, placeholder="https://… (comma separated)", advanced=True
+                "urls",
+                "Start URLs",
+                FieldKind.TEXT,
+                placeholder="https://… (comma separated)",
+                hint="comma separated",
+                advanced=True,
+                argv="repeat",
+                flag_name="url",
             ),
         ),
     ),
@@ -212,7 +251,14 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="e",
         fields=(
             PROFILE_FIELD,
-            FieldSpec("engine", "Engine", FieldKind.ENGINE, required=True, options=ENGINE_OPTIONS),
+            FieldSpec(
+                "engine",
+                "Engine",
+                FieldKind.ENGINE,
+                required=True,
+                options=ENGINE_OPTIONS,
+                hint="stored profile default",
+            ),
         ),
     ),
     ActionSpec(
@@ -242,8 +288,16 @@ ACTIONS: tuple[ActionSpec, ...] = (
         glyph_fallback="~",
         hotkey="g",
         fields=(
-            FieldSpec("profile", "Profile", FieldKind.PROFILE_OR_ALL, placeholder="all profiles"),
-            FieldSpec("last", "Last N", FieldKind.NUMBER, default="25", hint="recent log entries"),
+            FieldSpec(
+                "profile",
+                "Profile",
+                FieldKind.PROFILE_OR_ALL,
+                placeholder="all profiles",
+                argv="positional",
+            ),
+            FieldSpec(
+                "last", "Last N", FieldKind.NUMBER, default="25", hint="recent log entries", argv="flag"
+            ),
         ),
     ),
     ActionSpec(
@@ -266,7 +320,14 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="p",
         fields=(
             PROFILE_FIELD,
-            FieldSpec("url", "URL", FieldKind.TEXT, required=True, placeholder="https://example.com"),
+            FieldSpec(
+                "url",
+                "URL",
+                FieldKind.TEXT,
+                required=True,
+                placeholder="https://example.com",
+                argv="positional",
+            ),
         ),
     ),
     ActionSpec(
@@ -279,7 +340,13 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="m",
         fields=(
             PROFILE_FIELD,
-            FieldSpec("url", "URL", FieldKind.TEXT, placeholder="optional URL (or active page)"),
+            FieldSpec(
+                "url",
+                "URL",
+                FieldKind.TEXT,
+                placeholder="optional URL (or active page)",
+                argv="positional",
+            ),
         ),
     ),
     ActionSpec(
@@ -292,7 +359,13 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="k",
         fields=(
             PROFILE_FIELD,
-            FieldSpec("output", "Output JSON", FieldKind.PATH, placeholder="cookies.json (stdout if empty)"),
+            FieldSpec(
+                "output",
+                "Output JSON",
+                FieldKind.PATH,
+                placeholder="cookies.json (stdout if empty)",
+                argv="flag",
+            ),
         ),
     ),
     ActionSpec(
@@ -305,7 +378,12 @@ ACTIONS: tuple[ActionSpec, ...] = (
         hotkey="b",
         fields=(
             FieldSpec(
-                "target", "Target", FieldKind.PROFILE_OR_ALL, required=True, placeholder="all profiles"
+                "target",
+                "Target",
+                FieldKind.PROFILE_OR_ALL,
+                required=True,
+                placeholder="all profiles",
+                argv="positional",
             ),
             FieldSpec(
                 "output",
@@ -313,6 +391,7 @@ ACTIONS: tuple[ActionSpec, ...] = (
                 FieldKind.PATH,
                 required=True,
                 default="profiledock-backup.tar.gz",
+                argv="flag",
             ),
             FieldSpec("exclude_cache", "Exclude cache", FieldKind.TOGGLE, toggled=True),
             FieldSpec("force", "Overwrite output", FieldKind.TOGGLE),
@@ -329,7 +408,12 @@ ACTIONS: tuple[ActionSpec, ...] = (
         destructive=True,
         fields=(
             FieldSpec(
-                "archive", "Archive", FieldKind.PATH, required=True, placeholder="path/to/backup.tar.gz"
+                "archive",
+                "Archive",
+                FieldKind.PATH,
+                required=True,
+                placeholder="path/to/backup.tar.gz",
+                argv="positional",
             ),
             FieldSpec("force", "Replace conflicts", FieldKind.TOGGLE),
         ),
@@ -393,25 +477,70 @@ def fuzzy_score(query: str, text: str) -> int | None:
     return score
 
 
+def _argv_mode(spec: FieldSpec) -> str:
+    """Resolve the effective argv rendering for a field."""
+    if spec.argv != "auto":
+        return spec.argv
+    if spec.kind in (FieldKind.TOGGLE,):
+        return "boolean"
+    if spec.kind in (FieldKind.NUMBER, FieldKind.ENGINE):
+        return "flag"
+    if spec.name in ("output", "archive"):
+        return "flag"
+    return "positional"
+
+
+def _cli_flag(spec: FieldSpec) -> str:
+    name = spec.flag_name or spec.name
+    return f"--{name.replace('_', '-')}"
+
+
 def build_argv(action: ActionSpec, values: dict[str, object]) -> list[str]:
-    """Assemble the equivalent CLI argv for the command preview line."""
-    argv = [action.id]
+    """Assemble the equivalent CLI argv for the command preview line.
+
+    Rendering follows the frozen CLI contract: positional fields in
+    declaration order, then flag/repeat/boolean options. Sentinel values
+    (``__all__``) map to their CLI spellings, and list-valued repeat fields
+    emit one flag per item.
+    """
+    argv: list[str] = [action.id]
+    tail: list[str] = []
     for spec in action.fields:
+        mode = _argv_mode(spec)
         value = values.get(spec.name)
-        if spec.kind is FieldKind.TOGGLE:
+        if mode == "boolean":
             if value:
-                argv.append(f"--{spec.name.replace('_', '-')}")
+                tail.append(_cli_flag(spec))
+            continue
+        if mode == "none":
             continue
         if spec.kind is FieldKind.FLAGS:
             flags = value if isinstance(value, list) else []
             if flags:
-                argv.append(" ".join(str(flag) for flag in flags))
+                tail.extend(str(flag) for flag in flags)
             continue
         text = str(value or "").strip()
         if not text:
             continue
-        if spec.kind is FieldKind.NUMBER or spec.name in ("output", "archive"):
-            argv.extend([f"--{spec.name}", text])
+        if spec.kind in (FieldKind.PROFILE, FieldKind.PROFILE_OR_ALL) and text == ALL_PROFILES:
+            text = ""
+        # "(inherit)" means "omit the override flag" — the CLI default
+        # precedence applies, exactly like leaving --engine off the command.
+        if spec.kind is FieldKind.ENGINE and text == ENGINE_INHERIT:
+            text = ""
+        if not text:
+            continue
+        if mode == "repeat":
+            items = value if isinstance(value, list) else [part for part in text.split(",")]
+            for item in items:
+                cleaned = str(item or "").strip()
+                if cleaned:
+                    tail.extend([_cli_flag(spec), cleaned])
+        elif mode == "flag":
+            tail.extend([_cli_flag(spec), text])
         else:
             argv.append(text)
+    argv.extend(tail)
+    if action.id == "backup" and str(values.get("target") or "").strip() == ALL_PROFILES:
+        argv.append("--all")
     return argv
