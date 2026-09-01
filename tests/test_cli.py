@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -921,3 +922,180 @@ def test_resolve_engine_rejects_invalid_environment_value():
         result = runner.invoke(app, ["status"])
     assert result.exit_code == EXIT_USER_ERROR
     assert "PROFILEDOCK_DEFAULT_ENGINE must be 'direct' or 'playwright'" in result.stderr
+
+
+def test_shot_command_success_and_json(tmp_path, monkeypatch):
+    from profiledock import cli as pd_cli
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "ShotProfile"])
+    captured: dict[str, object] = {}
+
+    def fake_send(data_dir, cmd, args, runtime_dir=None, timeout=30.0, auto_start_headless=True):
+        captured["cmd"] = cmd
+        captured["args"] = args
+        out_path = args["output"]
+        Path(out_path).write_bytes(b"\x89PNG")
+        return {"status": "ok", "output": out_path, "url": "https://example.com", "title": "Ex", "bytes": 4}
+
+    monkeypatch.setattr(pd_cli, "send_controller_command", fake_send)
+    out_file = tmp_path / "page.png"
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "ShotProfile", "--output", str(out_file)],
+    )
+    assert res.exit_code == EXIT_SUCCESS, res.output
+    assert "Screenshot saved" in res.output
+    assert captured["cmd"] == "screenshot"
+    assert captured["args"]["full_page"] is False
+    assert Path(captured["args"]["output"]) == out_file.resolve()
+
+    json_res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "ShotProfile", "--output", str(out_file), "--json"],
+    )
+    assert json_res.exit_code == EXIT_SUCCESS
+    payload = json.loads(json_res.output)
+    assert payload["command"] == "shot"
+    assert payload["data"]["bytes"] == 4
+    assert payload["data"]["full_page"] is False
+
+
+def test_shot_command_full_page_passthrough(tmp_path, monkeypatch):
+    from profiledock import cli as pd_cli
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "FullPage"])
+    captured: dict[str, object] = {}
+
+    def fake_send(data_dir, cmd, args, **kwargs):
+        captured["args"] = args
+        Path(args["output"]).write_bytes(b"\x89PNG")
+        return {"status": "ok", "output": args["output"], "url": "", "title": "", "bytes": 4}
+
+    monkeypatch.setattr(pd_cli, "send_controller_command", fake_send)
+    out_file = tmp_path / "full.png"
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "FullPage", "--output", str(out_file), "--full-page"],
+    )
+    assert res.exit_code == EXIT_SUCCESS
+    assert captured["args"]["full_page"] is True
+
+
+def test_shot_command_rejects_non_png_output(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "PngOnly"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "PngOnly", "--output", str(tmp_path / "page.jpg")],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert ".png" in res.output
+
+
+def test_shot_command_rejects_missing_output_directory(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "DirCheck"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "DirCheck", "--output", str(tmp_path / "nope" / "p.png")],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert "directory does not exist" in res.output
+
+
+def test_shot_command_rejects_invalid_url(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "UrlCheck"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "UrlCheck", "javascript:alert(1)"],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+
+
+def test_shot_command_rejects_negative_tab(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "TabCheck"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "TabCheck", "--tab", "-1"],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert "tab index" in res.output
+
+
+def test_pdf_command_success_and_json(tmp_path, monkeypatch):
+    from profiledock import cli as pd_cli
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "PdfProfile"])
+    captured: dict[str, object] = {}
+
+    def fake_send(data_dir, cmd, args, **kwargs):
+        captured["cmd"] = cmd
+        Path(args["output"]).write_bytes(b"%PDF-1.4")
+        return {"status": "ok", "output": args["output"], "url": "https://example.com", "title": "T", "bytes": 8}
+
+    monkeypatch.setattr(pd_cli, "send_controller_command", fake_send)
+    out_file = tmp_path / "page.pdf"
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "pdf", "PdfProfile", "--output", str(out_file)],
+    )
+    assert res.exit_code == EXIT_SUCCESS, res.output
+    assert "PDF saved" in res.output
+    assert captured["cmd"] == "pdf"
+
+    json_res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "pdf", "PdfProfile", "--output", str(out_file), "--json"],
+    )
+    assert json_res.exit_code == EXIT_SUCCESS
+    payload = json.loads(json_res.output)
+    assert payload["command"] == "pdf"
+    assert payload["data"]["bytes"] == 8
+
+
+def test_pdf_command_rejects_non_pdf_output(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "PdfExt"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "pdf", "PdfExt", "--output", str(tmp_path / "page.png")],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert ".pdf" in res.output
+
+
+def test_shot_unknown_profile_fails_cleanly_with_log(tmp_path):
+    """resolve() failures must produce a categorized error AND a log entry."""
+    from profiledock.cli import EXIT_USER_ERROR
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "Known"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "shot", "NoSuchProfile", "--output", str(tmp_path / "x.png")],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert "Error [not_found]" in res.output + (res.stderr or "")
+
+    from profiledock.data_root import resolve_data_root
+    from profiledock.logger import read_profile_logs
+
+    paths = resolve_data_root(Path(tmp_path), prepare=True)
+    entries = read_profile_logs(paths.logs_dir, profile_id=None, last_n=10)
+    assert any(e.get("event") == "screenshot_failed" for e in entries)
+
+
+def test_shot_default_filename_uses_profile_name(tmp_path, monkeypatch):
+    from profiledock import cli as pd_cli
+
+    created = {}
+
+    def fake_send(data_dir, cmd, args, **kwargs):
+        created["output"] = args["output"]
+        Path(args["output"]).write_bytes(b"\x89PNG")
+        return {"status": "ok", "output": args["output"], "url": "", "title": "", "bytes": 4}
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "My Fancy Profile"])
+    monkeypatch.setattr(pd_cli, "send_controller_command", fake_send)
+    monkeypatch.chdir(tmp_path)
+    res = runner.invoke(app, ["--data-root", str(tmp_path), "shot", "My Fancy Profile"])
+    assert res.exit_code == EXIT_SUCCESS, res.output
+    name = Path(created["output"]).name
+    assert name.startswith("My Fancy Profile-"), name
+    assert name.endswith(".png")

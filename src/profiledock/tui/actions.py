@@ -350,6 +350,33 @@ ACTIONS: tuple[ActionSpec, ...] = (
         ),
     ),
     ActionSpec(
+        id="shot",
+        label="shot",
+        description="Capture page screenshot",
+        group=Group.CONFIG.value,
+        glyph="󰹑",
+        glyph_fallback="S",
+        hotkey="K",
+        fields=(
+            PROFILE_FIELD,
+            FieldSpec(
+                "url",
+                "URL",
+                FieldKind.TEXT,
+                placeholder="optional URL (or active page)",
+                argv="positional",
+            ),
+            FieldSpec(
+                "output",
+                "Output PNG",
+                FieldKind.PATH,
+                placeholder="auto: <profile>-<timestamp>.png",
+                argv="flag",
+            ),
+            FieldSpec("full_page", "Full page", FieldKind.TOGGLE, hint="whole page", argv="boolean"),
+        ),
+    ),
+    ActionSpec(
         id="cookies",
         label="cookies",
         description="Export cookies from browser RAM",

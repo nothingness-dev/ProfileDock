@@ -351,8 +351,8 @@ class TestInteractiveApp:
             await pilot.press("escape")
             await pilot.pause()
             assert filt.styles.display == "none"
-            # Closing the filter restores the full deck (17 commands).
-            assert deck.match_count == 17
+            # Closing the filter restores the full deck (18 commands).
+            assert deck.match_count == 18
 
     @pytest.mark.asyncio
     async def test_rail_enter_opens_launch_form(self):

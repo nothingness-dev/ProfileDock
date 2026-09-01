@@ -66,6 +66,9 @@ profiledock top [PROFILE]
 profiledock launch PROFILE [--tabs N]
 profiledock close PROFILE
 profiledock close --all
+profiledock read PROFILE [URL]
+profiledock shot PROFILE [URL] [--full-page]
+profiledock pdf PROFILE [URL]
 profiledock rename PROFILE NEW_NAME
 profiledock set-engine PROFILE ENGINE
 profiledock backup PROFILE --output ARCHIVE [--exclude-cache]

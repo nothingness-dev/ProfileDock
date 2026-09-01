@@ -71,7 +71,9 @@ from .commands.automation import (
     export_cookies_command,
     list_tabs_command,
     open_tab_command,
+    pdf_command,
     read_page_command,
+    screenshot_command,
 )
 from .commands.backup import (
     backup_command,
@@ -215,6 +217,8 @@ __all__ = [
     "migrate_command",
     "open_tab",
     "open_tab_command",
+    "pdf",
+    "pdf_command",
     "read_page",
     "read_page_command",
     "rename",
@@ -223,6 +227,8 @@ __all__ = [
     "restore",
     "restore_command",
     "runtime_path",
+    "screenshot",
+    "screenshot_command",
     "selected_paths",
     "send_controller_command",
     "set_engine",
@@ -391,6 +397,23 @@ app.command(name="tabs")(list_tabs_command)
 app.command(name="open-tab")(open_tab_command)
 app.command(name="close-tab")(close_tab_command)
 app.command(name="read")(read_page_command)
+app.command(
+    name="shot",
+    epilog="""Examples:\n
+  profiledock shot Work\n
+  profiledock shot Work https://example.com --full-page\n
+  profiledock shot Work --output page.png --json""",
+)(screenshot_command)
+app.command(
+    name="pdf",
+    epilog="""Examples:
+
+  profiledock pdf Work
+
+  profiledock pdf Work https://example.com --output invoice.pdf
+
+  profiledock pdf Work --json""",
+)(pdf_command)
 app.command(name="eval")(eval_script_command)
 app.command(name="cookies")(export_cookies_command)
 app.command(
@@ -468,6 +491,8 @@ top = top_command
 open_tab = open_tab_command
 close_tab = close_tab_command
 read_page = read_page_command
+screenshot = screenshot_command
+pdf = pdf_command
 eval_script = eval_script_command
 cookies = export_cookies_command
 export_cookies = export_cookies_command

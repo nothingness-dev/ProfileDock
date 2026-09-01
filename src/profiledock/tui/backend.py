@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -542,6 +543,8 @@ def _dispatch(paths: DataPaths, action_id: str, values: dict[str, object]) -> Te
         return _open_tab(paths, manager, values)
     if action_id == "read":
         return _read_page(paths, manager, values)
+    if action_id == "shot":
+        return _screenshot(paths, manager, values)
     if action_id == "cookies":
         return _cookies(paths, manager, values)
     raise BackendError(f"unknown action '{action_id}'", "invalid_input")
@@ -637,6 +640,51 @@ def _read_page(paths: DataPaths, manager: ProfileManager, values: dict[str, obje
         body.append(f"# {title}\n", style="bold cyan")
         body.append(f"{page_url}\n\n", style="dim")
     body.append(content or "(empty content)")
+    return body
+
+
+def _screenshot(paths: DataPaths, manager: ProfileManager, values: dict[str, object]) -> Text:
+    profile = _resolve_profile(manager, values)
+    url_raw = str(values.get("url") or "").strip()
+    url = url_raw if url_raw else None
+    if url:
+        try:
+            validate_url(url)
+        except ValidationError as exc:
+            raise BackendError(str(exc), "invalid_input") from exc
+    output_raw = str(values.get("output") or "").strip()
+    full_page = bool(values.get("full_page"))
+    if output_raw:
+        out_path = Path(output_raw).expanduser()
+        if out_path.suffix.lower() != ".png":
+            raise BackendError("screenshot output must be a .png file", "invalid_input")
+        if out_path.exists() and out_path.is_dir():
+            raise BackendError(f"output path is a directory: {out_path}", "invalid_input")
+        if not (out_path.parent if str(out_path.parent) else Path(".")).exists():
+            raise BackendError(f"output directory does not exist: {out_path.parent}", "invalid_input")
+    else:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        out_path = Path.cwd() / f"{profile.name}-{timestamp}.png"
+    try:
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="screenshot",
+            args={"url": url, "tab": 0, "output": str(out_path.resolve()), "full_page": full_page},
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=True,
+            timeout=60.0,
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+
+    body = Text()
+    body.append("Screenshot saved: ", style="green")
+    body.append(str(res.get("output", out_path)), style="bold")
+    if res.get("title"):
+        body.append(f"\nPage: {res['title']}", style="dim")
+    if res.get("bytes"):
+        body.append(f"\nSize: {res['bytes']} bytes", style="dim")
     return body
 
 

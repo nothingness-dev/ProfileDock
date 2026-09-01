@@ -189,3 +189,113 @@ def test_cookies_json_file_output_preserves_json_stdout(tmp_path: Path):
     assert '"command": "cookies"' in result.stdout
     assert '"count": 1' in result.stdout
     assert output.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_execute_ipc_command_screenshot(tmp_path: Path):
+    mock_page = MagicMock()
+    mock_page.url = "https://example.com"
+    mock_page.title.return_value = "Example"
+
+    def fake_screenshot(path, full_page=False):
+        Path(path).write_bytes(b"\x89PNG fake bytes")
+
+    mock_page.screenshot.side_effect = fake_screenshot
+
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    out_file = tmp_path / "capture.png"
+    cmd = {
+        "cmd": "screenshot",
+        "token": "tok",
+        "args": {"output": str(out_file), "full_page": True},
+    }
+    resp, should_exit = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    assert resp["output"] == str(out_file)
+    assert resp["bytes"] == len(b"\x89PNG fake bytes")
+    assert resp["url"] == "https://example.com"
+    assert resp["title"] == "Example"
+    assert should_exit is False
+    # full_page passed through to playwright
+    assert mock_page.screenshot.call_args.kwargs["full_page"] is True
+    assert out_file.read_bytes() == b"\x89PNG fake bytes"
+
+
+def test_execute_ipc_command_screenshot_requires_output_path():
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+    cmd = {"cmd": "screenshot", "token": "tok", "args": {"output": "  "}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "output path" in resp["message"]
+
+
+def test_execute_ipc_command_screenshot_rejects_bad_url():
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+    cmd = {
+        "cmd": "screenshot",
+        "token": "tok",
+        "args": {"output": "x.png", "url": "javascript:alert(1)"},
+    }
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+
+
+def test_execute_ipc_command_screenshot_rejects_out_of_range_tab():
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+    cmd = {"cmd": "screenshot", "token": "tok", "args": {"output": "x.png", "tab": 7}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "tab index" in resp["message"]
+
+
+def test_execute_ipc_command_pdf(tmp_path: Path):
+    mock_page = MagicMock()
+    mock_page.url = "https://example.com"
+    mock_page.title.return_value = "Example"
+
+    def fake_pdf(path):
+        Path(path).write_bytes(b"%PDF-1.4 fake")
+
+    mock_page.pdf.side_effect = fake_pdf
+
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    out_file = tmp_path / "page.pdf"
+    cmd = {"cmd": "pdf", "token": "tok", "args": {"output": str(out_file)}}
+    resp, should_exit = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    assert resp["bytes"] == len(b"%PDF-1.4 fake")
+    assert resp["title"] == "Example"
+    assert should_exit is False
+
+
+def test_execute_ipc_command_pdf_requires_output_path():
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+    cmd = {"cmd": "pdf", "token": "tok", "args": {}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+
+
+def test_execute_ipc_command_pdf_rejects_bad_url():
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+    cmd = {"cmd": "pdf", "token": "tok", "args": {"output": "x.pdf", "url": "javascript:x()"}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+
+
+def test_execute_ipc_command_pdf_maps_headed_error():
+    mock_page = MagicMock()
+    mock_page.pdf.side_effect = Exception("PDF generation is only supported for Headless Chromium")
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+    cmd = {"cmd": "pdf", "token": "tok", "args": {"output": "x.pdf"}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "headless Chromium session" in resp["message"]

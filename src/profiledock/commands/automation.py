@@ -1,11 +1,13 @@
-"""Playwright session automation commands: tabs, open-tab, close-tab, read, eval, cookies."""
+"""Playwright session automation commands: tabs, open-tab, close-tab, read, shot, eval, cookies."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import typer
 
-from ..cli_support import emit_json, fail, fail_exception
+from ..cli_support import emit_json, fail, fail_exception, selected_paths
 from ..fsops import write_private_json
 from ..process_manager import (
     BrowserLaunchError,
@@ -213,6 +215,200 @@ def read_page_command(
             typer.echo(page_url)
             typer.echo()
         typer.echo(content or "(empty page content)")
+
+
+def _validate_capture_output(output: Path, extension: str, kind: str) -> Path:
+    """Shared output-path validation for shot/pdf; fails via typer.Exit."""
+    if output.suffix.lower() != extension:
+        fail(f"{kind} output must be a {extension} file")
+    if output.exists() and output.is_dir():
+        fail(f"output path is a directory: {output}")
+    parent = output.parent if str(output.parent) else Path(".")
+    if not parent.exists():
+        fail(f"output directory does not exist: {parent}")
+    return output
+
+
+def _send_capture_command(
+    profile: Any,
+    *,
+    cmd: str,
+    url: str | None,
+    tab: int,
+    output: Path,
+    extra_args: dict[str, object],
+) -> dict[str, Any]:
+    """Send a screenshot/pdf command; raises so the caller logs the failure."""
+    from ..cli import runtime_path, send_controller_command
+
+    return send_controller_command(
+        profile.data_dir,
+        cmd=cmd,
+        args={"url": url, "tab": tab, "output": str(output.resolve()), **extra_args},
+        runtime_dir=runtime_path(profile),
+        auto_start_headless=True,
+        timeout=60.0,
+    )
+
+
+def screenshot_command(
+    profile_id: str = typer.Argument(..., help="Profile ID, prefix, or name."),
+    url: str | None = typer.Argument(None, help="Optional URL to navigate to before capturing."),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="PNG file to write (default: ./<profile>-<timestamp>.png in the working directory).",
+    ),
+    tab: int = typer.Option(0, "--tab", "-t", help="0-based tab index to capture (default: 0)."),
+    full_page: bool = typer.Option(
+        False, "--full-page", "-f", help="Capture the entire scrollable page instead of the viewport."
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output capture metadata in JSON format."),
+) -> None:
+    """Capture a PNG screenshot of a page (auto-starts the profile headlessly)."""
+    from ..logger import generate_correlation_id, write_log_entry
+
+    if tab < 0:
+        fail("tab index must be at least 0")
+    if url:
+        try:
+            validate_url(url)
+        except ValidationError as exc:
+            fail_exception(exc)
+
+    paths = selected_paths()
+    corr_id = generate_correlation_id()
+    try:
+        profile = _get_manager().resolve(profile_id)
+        if output is None:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            output = Path(f"{profile.name}-{timestamp}.png")
+        output = _validate_capture_output(output.expanduser(), ".png", "screenshot")
+        res = _send_capture_command(
+            profile, cmd="screenshot", url=url, tab=tab, output=output, extra_args={"full_page": full_page}
+        )
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileRunningError,
+        BrowserLaunchError,
+        ValueError,
+    ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="screenshot_failed",
+            correlation_id=corr_id,
+            result="failed",
+            details={"error": str(exc)},
+        )
+        fail_exception(exc)
+
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="screenshot_captured",
+        profile_id=profile.id,
+        correlation_id=corr_id,
+        result="success",
+        details={"output": str(output), "full_page": full_page, "bytes": res.get("bytes", 0)},
+    )
+
+    if json_output:
+        emit_json(
+            "shot",
+            {
+                "output": res.get("output", str(output)),
+                "url": res.get("url", ""),
+                "title": res.get("title", ""),
+                "bytes": res.get("bytes", 0),
+                "full_page": full_page,
+            },
+        )
+        return
+
+    typer.echo(f"Screenshot saved: {res.get('output', output)}")
+    typer.echo(f"  Page: {res.get('title', '') or res.get('url', '')}")
+    typer.echo(f"  Size: {res.get('bytes', 0)} bytes")
+
+
+def pdf_command(
+    profile_id: str = typer.Argument(..., help="Profile ID, prefix, or name."),
+    url: str | None = typer.Argument(None, help="Optional URL to navigate to before exporting."),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="PDF file to write (default: ./<profile>-<timestamp>.pdf in the working directory).",
+    ),
+    tab: int = typer.Option(0, "--tab", "-t", help="0-based tab index to export (default: 0)."),
+    json_output: bool = typer.Option(False, "--json", help="Output export metadata in JSON format."),
+) -> None:
+    """Export a page as PDF (auto-starts the profile headlessly; headless Chromium only)."""
+    from ..logger import generate_correlation_id, write_log_entry
+
+    if tab < 0:
+        fail("tab index must be at least 0")
+    if url:
+        try:
+            validate_url(url)
+        except ValidationError as exc:
+            fail_exception(exc)
+
+    paths = selected_paths()
+    corr_id = generate_correlation_id()
+    try:
+        profile = _get_manager().resolve(profile_id)
+        if output is None:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            output = Path(f"{profile.name}-{timestamp}.pdf")
+        output = _validate_capture_output(output.expanduser(), ".pdf", "pdf")
+        res = _send_capture_command(profile, cmd="pdf", url=url, tab=tab, output=output, extra_args={})
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileRunningError,
+        BrowserLaunchError,
+        ValueError,
+    ) as exc:
+        write_log_entry(
+            log_dir=paths.logs_dir,
+            level="ERROR",
+            event="pdf_failed",
+            correlation_id=corr_id,
+            result="failed",
+            details={"error": str(exc)},
+        )
+        fail_exception(exc)
+
+    write_log_entry(
+        log_dir=paths.logs_dir,
+        level="INFO",
+        event="pdf_exported",
+        profile_id=profile.id,
+        correlation_id=corr_id,
+        result="success",
+        details={"output": str(output), "bytes": res.get("bytes", 0)},
+    )
+
+    if json_output:
+        emit_json(
+            "pdf",
+            {
+                "output": res.get("output", str(output)),
+                "url": res.get("url", ""),
+                "title": res.get("title", ""),
+                "bytes": res.get("bytes", 0),
+            },
+        )
+        return
+
+    typer.echo(f"PDF saved: {res.get('output', output)}")
+    typer.echo(f"  Page: {res.get('title', '') or res.get('url', '')}")
+    typer.echo(f"  Size: {res.get('bytes', 0)} bytes")
 
 
 def eval_script_command(

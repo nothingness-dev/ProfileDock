@@ -16,7 +16,20 @@ from .state import StateDict, _read_state, _upgrade_legacy_state, _valid_state, 
 
 _MAX_COMMAND_BYTES = 65536
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
-_IPC_COMMANDS = frozenset({"probe", "close", "tabs", "open_tab", "close_tab", "read_page", "eval", "cookies"})
+_IPC_COMMANDS = frozenset(
+    {
+        "probe",
+        "close",
+        "tabs",
+        "open_tab",
+        "close_tab",
+        "read_page",
+        "eval",
+        "cookies",
+        "screenshot",
+        "pdf",
+    }
+)
 
 
 def _controller_available(state: StateDict) -> bool:

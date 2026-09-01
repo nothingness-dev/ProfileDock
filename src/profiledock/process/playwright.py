@@ -203,7 +203,18 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
         pass
     deadline = time.monotonic() + timeout
     poll_interval = 0.02
+    controller_pid = int(state.get("controller_pid", -1))
     while path.exists() and time.monotonic() < deadline:
+        if controller_pid > 0 and not _alive_impl(controller_pid):
+            browser_pid = int(state.get("browser_pid", 0) or 0)
+            if browser_pid > 0:
+                _terminate_matching_process(
+                    browser_pid,
+                    state.get("browser_create_time"),
+                    min(max(timeout, 0.1), 5),
+                )
+            _unlink_quietly(path)
+            raise ProfileRunningError("profile is not running", stopped=True)
         time.sleep(poll_interval)
         poll_interval = min(poll_interval * 1.5, 0.1)
     if path.exists():
@@ -229,7 +240,6 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
     # flushed persistent profile data. Wait for the controller (and browser)
     # processes to fully exit so a follow-up launch never races a dying
     # browser and no Chromium or controller processes survive the command.
-    controller_pid = int(state.get("controller_pid", -1))
     if controller_pid > 0:
         while _alive_impl(controller_pid) and time.monotonic() < deadline:
             time.sleep(0.05)

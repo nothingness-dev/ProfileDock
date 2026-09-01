@@ -212,6 +212,10 @@ Optional values depend on the event. Known secrets are redacted before storage a
 
 `read --json` returns `url`, `title`, Markdown `content`, and a `links` array. Each link has `index`, `text`, and `url`.
 
+`shot --json` returns `output` (absolute PNG path), `url`, `title`, `bytes` (file size), and `full_page`.
+
+`pdf --json` returns `output` (absolute PDF path), `url`, `title`, and `bytes` (file size).
+
 `eval --json` returns an object containing the serialized `result` value.
 
 `cookies --json` returns an array of Playwright cookie objects when writing to stdout. With `--output`, data contains the absolute `output_file` and exported cookie `count`; the sensitive cookies are written only to that private JSON file.

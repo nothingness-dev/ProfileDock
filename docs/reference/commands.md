@@ -281,6 +281,22 @@ profiledock read PROFILE [URL] [--tab N] [--json]
 
 Reads page content as formatted Markdown in the terminal using the profile's persistent authenticated session. A stopped profile is started headlessly and remains active until explicitly closed.
 
+## `shot`
+
+```text
+profiledock shot PROFILE [URL] [--output FILE] [--tab N] [--full-page] [--json]
+```
+
+Captures a PNG screenshot of a page through the profile's persistent browser session. A stopped profile is started headlessly and remains active. `--output` chooses the destination file (default `./<profile>-<timestamp>.png`); `--full-page` captures the entire scrollable page instead of the current viewport. The output path must be a `.png` file in an existing directory; nothing is captured until navigation succeeds, so a failed navigation writes no file.
+
+## `pdf`
+
+```text
+profiledock pdf PROFILE [URL] [--output FILE] [--tab N] [--json]
+```
+
+Exports the page as a PDF through the profile's persistent browser session. A stopped profile is started headlessly and remains active. PDF rendering requires a headless Chromium session: if the profile is running headed, the command fails with a clear message advising a close-and-retry. `--output` chooses the destination file (default `./<profile>-<timestamp>.pdf`).
+
 ## `eval`
 
 ```text

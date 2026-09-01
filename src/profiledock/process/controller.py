@@ -203,6 +203,98 @@ def _execute_ipc_command(
         except Exception as exc:
             return ({"status": "error", "message": str(exc)}, False)
 
+    if cmd == "screenshot":
+        tab_index = args.get("tab", 0)
+        url = args.get("url")
+        output_path = args.get("output", "")
+        full_page = bool(args.get("full_page", False))
+        if not isinstance(output_path, str) or not output_path.strip():
+            return ({"status": "error", "message": "output path must be a non-empty string"}, False)
+        if url is not None and not isinstance(url, str):
+            return ({"status": "error", "message": "URL must be a string or null"}, False)
+        if url:
+            try:
+                from ..validation import validate_url
+
+                validate_url(url)
+            except Exception as exc:
+                return ({"status": "error", "message": str(exc)}, False)
+        if not context.pages:
+            context.new_page()
+        if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
+            return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
+        page = context.pages[tab_index]
+        try:
+            if url:
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            if not full_page:
+                page.bring_to_front()
+            path = output_path.strip()
+            page.screenshot(path=path, full_page=full_page)
+            size = 0
+            try:
+                size = int(os.path.getsize(path))
+            except OSError:
+                pass
+            return (
+                {
+                    "status": "ok",
+                    "output": path,
+                    "url": page.url,
+                    "title": page.title(),
+                    "bytes": size,
+                },
+                False,
+            )
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd == "pdf":
+        tab_index = args.get("tab", 0)
+        url = args.get("url")
+        output_path = args.get("output", "")
+        if not isinstance(output_path, str) or not output_path.strip():
+            return ({"status": "error", "message": "output path must be a non-empty string"}, False)
+        if url is not None and not isinstance(url, str):
+            return ({"status": "error", "message": "URL must be a string or null"}, False)
+        if url:
+            try:
+                from ..validation import validate_url
+
+                validate_url(url)
+            except Exception as exc:
+                return ({"status": "error", "message": str(exc)}, False)
+        if not context.pages:
+            context.new_page()
+        if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
+            return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
+        page = context.pages[tab_index]
+        try:
+            if url:
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            path = output_path.strip()
+            page.pdf(path=path)
+            size = 0
+            try:
+                size = int(os.path.getsize(path))
+            except OSError:
+                pass
+            return (
+                {
+                    "status": "ok",
+                    "output": path,
+                    "url": page.url,
+                    "title": page.title(),
+                    "bytes": size,
+                },
+                False,
+            )
+        except Exception as exc:
+            message = str(exc)
+            if "only supported for Headless" in message or "PDF generation" in message:
+                message = "PDF export requires a headless Chromium session; close the profile and retry"
+            return ({"status": "error", "message": message}, False)
+
     return ({"status": "error", "message": f"unknown command '{cmd}'"}, False)
 
 
