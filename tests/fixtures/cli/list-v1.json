@@ -10,13 +10,17 @@
       "last_launched_at": null,
       "engine": "playwright",
       "launch_config": {
-        "schema_version": 1,
+        "schema_version": 2,
         "default_tabs": null,
         "start_urls": [],
         "engine": "playwright",
         "browser": null,
         "window_width": null,
-        "window_height": null
+        "window_height": null,
+        "proxy": null,
+        "user_agent": null,
+        "locale": null,
+        "timezone": null
       },
       "status": "stopped"
     }

@@ -66,11 +66,15 @@ def test_launch_config_historical_fixtures_migrate_idempotently():
         migrated = migrate_launch_config(fixture(name))
         assert migrate_launch_config(migrated) == migrated
         assert LaunchConfig.from_dict(migrated).default_tabs == 3
+        # v1 configs carry the identity fields at null defaults after migration.
+        assert migrated["schema_version"] == 2
+        for field_name in ("proxy", "user_agent", "locale", "timezone"):
+            assert migrated[field_name] is None
 
 
 def test_launch_config_rejects_future_and_unknown_fields():
     value = fixture("launch-config-v1.json")
-    value["schema_version"] = 2
+    value["schema_version"] = 3
     with pytest.raises(ValueError, match="unsupported"):
         migrate_launch_config(value)
     value = fixture("launch-config-v1.json")

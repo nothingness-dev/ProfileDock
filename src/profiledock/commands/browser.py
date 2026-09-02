@@ -12,6 +12,7 @@ from ..cli_support import (
     fail_exception,
     format_cpu_percent,
     format_size_bytes,
+    redact_proxy,
     resolve_engine,
     selected_paths,
 )
@@ -54,6 +55,10 @@ def _resolve_launch_options(
     engine: str | None,
     browser: str | None,
     url: list[str] | None,
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> _LaunchOptions:
     from ..launch_service import resolve_launch_tabs
 
@@ -72,6 +77,10 @@ def _resolve_launch_options(
             tabs=target_tabs,
             urls=list(url) if url else None,
             browser=browser,
+            proxy=proxy,
+            user_agent=user_agent,
+            locale=locale,
+            timezone=timezone,
         )
     except ValueError as exc:
         fail(str(exc))
@@ -278,6 +287,23 @@ def launch_command(
         "--wait-timeout",
         help="Seconds to wait for the browser and controller to become fully ready.",
     ),
+    proxy: str | None = typer.Option(
+        None,
+        "--proxy",
+        help="Proxy for this launch, e.g. http://host:8080 or socks5://user:pass@host:1080. "
+        "Overrides the stored preset. Credentials are never written to logs.",
+    ),
+    user_agent: str | None = typer.Option(
+        None, "--user-agent", help="Custom user agent for this launch; overrides the stored preset."
+    ),
+    locale: str | None = typer.Option(
+        None, "--locale", help="Browser locale for this launch, e.g. en-GB; overrides the stored preset."
+    ),
+    timezone: str | None = typer.Option(
+        None,
+        "--timezone",
+        help="IANA timezone for this launch, e.g. Europe/Berlin; overrides the stored preset.",
+    ),
 ) -> None:
     """Launch a profile's browser with its persistent data.
 
@@ -293,7 +319,9 @@ def launch_command(
     corr_id = generate_correlation_id()
     paths = selected_paths()
     try:
-        opts = _resolve_launch_options(profile_id, tabs, engine, browser, url)
+        opts = _resolve_launch_options(
+            profile_id, tabs, engine, browser, url, proxy, user_agent, locale, timezone
+        )
         plan = opts.plan
         profile = opts.profile
         active_engine = opts.engine
@@ -303,6 +331,11 @@ def launch_command(
         height = opts.height
         if headless and active_engine != "playwright":
             fail("--headless requires the Playwright engine")
+        if plan.proxy and active_engine == "direct" and "@" in plan.proxy:
+            fail(
+                "direct engine does not support proxy credentials; use the playwright engine",
+                hint="re-run with --engine playwright, or store a credentialess proxy",
+            )
 
         write_log_entry(
             log_dir=paths.logs_dir,
@@ -318,6 +351,9 @@ def launch_command(
                 "url_count": len(plan.urls),
                 "window_width": width,
                 "window_height": height,
+                "proxy": redact_proxy(plan.proxy),
+                "locale": plan.locale,
+                "timezone": plan.timezone,
             },
         )
 

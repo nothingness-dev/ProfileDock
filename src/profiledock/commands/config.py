@@ -8,12 +8,20 @@ from ..cli_support import (
     emit_json,
     fail,
     fail_exception,
+    redact_proxy,
     resolve_engine,
 )
 from ..models import LaunchConfig
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..storage import StorageError
-from ..validation import ValidationError, validate_browser
+from ..validation import (
+    ValidationError,
+    validate_browser,
+    validate_locale,
+    validate_proxy,
+    validate_time_zone,
+    validate_user_agent,
+)
 
 
 def _get_manager() -> ProfileManager:
@@ -38,7 +46,9 @@ def config_show_command(
         fail_exception(exc)
     cfg = getattr(profile, "launch_config", None) or LaunchConfig()
     if json_output:
-        emit_json("config show", cfg.to_dict())
+        config_dict = cfg.to_dict()
+        config_dict["proxy"] = redact_proxy(config_dict.get("proxy"))
+        emit_json("config show", config_dict)
         return
     rows = [
         ["Profile:", f"{profile.name} ({profile.id})"],
@@ -50,6 +60,10 @@ def config_show_command(
             f"{cfg.window_width}x{cfg.window_height}" if cfg.window_width and cfg.window_height else "None",
         ],
         ["Start URLs:", ", ".join(cfg.start_urls) if cfg.start_urls else "None"],
+        ["Proxy:", redact_proxy(cfg.proxy) or "None (direct connection)"],
+        ["User Agent:", cfg.user_agent or "None (browser default)"],
+        ["Locale:", cfg.locale or "None (browser default)"],
+        ["Timezone:", cfg.timezone or "None (system)"],
     ]
     typer.echo(_render_table(rows))
 
@@ -111,8 +125,37 @@ def config_set_command(
                 else "(unset)"
             )
             typer.echo(f"  {old_size} -> {w}x{h}")
+        elif clean_setting == "proxy":
+            if clean_val.lower() in ("none", "unset", "clear"):
+                target: str | None = None
+            else:
+                validate_proxy(clean_val)
+                target = clean_val
+            profile_manager.update_launch_config(profile_id, proxy=target)
+            shown = redact_proxy(target) or "(cleared)"
+            typer.echo(f"Set proxy to '{shown}' for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {redact_proxy(_old('proxy') if _old('proxy') != '(unset)' else None) or '(unset)'}"
+                       f" -> {shown}")
+        elif clean_setting == "user-agent":
+            validate_user_agent(clean_val)
+            profile_manager.update_launch_config(profile_id, user_agent=clean_val)
+            typer.echo(f"Set user-agent for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {_old('user_agent')} -> {clean_val}")
+        elif clean_setting == "locale":
+            validate_locale(clean_val)
+            profile_manager.update_launch_config(profile_id, locale=clean_val)
+            typer.echo(f"Set locale to '{clean_val}' for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {_old('locale')} -> {clean_val}")
+        elif clean_setting == "timezone":
+            validate_time_zone(clean_val)
+            profile_manager.update_launch_config(profile_id, timezone=clean_val)
+            typer.echo(f"Set timezone to '{clean_val}' for profile '{profile.name}' ({profile.id})")
+            typer.echo(f"  {_old('timezone')} -> {clean_val}")
         else:
-            fail(f"unknown setting '{setting}' (valid: default-tabs, engine, browser, window-size)")
+            fail(
+                f"unknown setting '{setting}' (valid: default-tabs, engine, browser, window-size, "
+                "proxy, user-agent, locale, timezone)"
+            )
     except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
         fail_exception(exc)
 

@@ -20,7 +20,7 @@ The historical version 0 format was a bare array. Early version 1 files that omi
 
 ## Launch configuration
 
-Launch configuration schema version 1 contains `schema_version`, `default_tabs`, `start_urls`, `engine`, `browser`, `window_width`, and `window_height`. Unversioned launch configurations are version 0 and migrate to version 1 by adding the version field and explicit defaults.
+Launch configuration schema version 2 contains `schema_version`, `default_tabs`, `start_urls`, `engine`, `browser`, `window_width`, `window_height`, `proxy`, `user_agent`, `locale`, and `timezone`. Version 1 remains readable: it migrates to version 2 by adding the four identity fields at `null`. Unversioned launch configurations are version 0 and migrate to the current version by adding the version field and explicit defaults. The stored `proxy` value may embed credentials; every display surface (show, config show, logs, JSON output) redacts them to `user:***@host`.
 
 ## Runtime controller protocol
 

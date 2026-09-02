@@ -75,3 +75,65 @@ def test_profile_with_launch_config():
     assert parsed.launch_config is not None
     assert parsed.launch_config.default_tabs == 2
     assert parsed.launch_config.start_urls == ["https://test.com"]
+
+
+def test_launch_config_v2_round_trip_and_v1_migration():
+    from profiledock.models import LAUNCH_CONFIG_SCHEMA_VERSION, LaunchConfig
+
+    cfg = LaunchConfig(
+        default_tabs=2,
+        proxy="socks5://user:secret@127.0.0.1:1080",
+        user_agent="Custom UA",
+        locale="en-GB",
+        timezone="Europe/Berlin",
+    )
+    data = cfg.to_dict()
+    assert data["schema_version"] == LAUNCH_CONFIG_SCHEMA_VERSION == 2
+    restored = LaunchConfig.from_dict(data)
+    assert restored.proxy == "socks5://user:secret@127.0.0.1:1080"
+    assert restored.user_agent == "Custom UA"
+    assert restored.locale == "en-GB"
+    assert restored.timezone == "Europe/Berlin"
+
+
+def test_launch_config_v1_document_migrates_with_identity_defaults():
+    from profiledock.models import migrate_launch_config
+
+    v1 = {
+        "schema_version": 1,
+        "default_tabs": 3,
+        "start_urls": ["about:blank"],
+        "engine": "playwright",
+        "browser": None,
+        "window_width": None,
+        "window_height": None,
+    }
+    migrated = migrate_launch_config(v1)
+    assert migrated["schema_version"] == 2
+    for field in ("proxy", "user_agent", "locale", "timezone"):
+        assert migrated[field] is None
+    # Migrating twice is a no-op.
+    assert migrate_launch_config(migrated) == migrated
+
+
+def test_launch_config_rejects_bad_proxy():
+    import pytest
+
+    from profiledock.models import LaunchConfig
+
+    with pytest.raises(ValueError, match="unsupported proxy scheme"):
+        LaunchConfig.from_dict(
+            {
+                "schema_version": 2,
+                "default_tabs": None,
+                "start_urls": [],
+                "engine": None,
+                "browser": None,
+                "window_width": None,
+                "window_height": None,
+                "proxy": "ftp://x:1",
+                "user_agent": None,
+                "locale": None,
+                "timezone": None,
+            }
+        )

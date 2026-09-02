@@ -78,3 +78,68 @@ def test_validate_browser_aliases_and_paths(tmp_path):
         validate_browser("msedge", "direct")
     with pytest.raises(ValidationError, match="does not exist"):
         validate_browser(str((tmp_path / "missing.exe").resolve()), "direct", True)
+
+
+def test_validate_proxy_accepts_valid_forms():
+    from profiledock.validation import validate_proxy
+
+    validate_proxy(None)
+    validate_proxy("http://127.0.0.1:8080")
+    validate_proxy("https://proxy.example.com")
+    validate_proxy("socks5://127.0.0.1:9050")
+    validate_proxy("socks5://user:pass@127.0.0.1:1080")
+    validate_proxy("http://user@10.0.0.1:3128")
+
+
+def test_validate_proxy_rejects_invalid_forms():
+    import pytest
+
+    from profiledock.validation import ValidationError, validate_proxy
+
+    with pytest.raises(ValidationError, match="scheme"):
+        validate_proxy("127.0.0.1:8080")  # bare host:port
+    with pytest.raises(ValidationError, match="unsupported proxy scheme"):
+        validate_proxy("socks4://127.0.0.1:1080")
+    with pytest.raises(ValidationError, match="missing a host"):
+        validate_proxy("http://")
+    with pytest.raises(ValidationError, match="invalid host or port"):
+        validate_proxy("http://127.0.0.1:99999")
+    with pytest.raises(ValidationError, match="invalid host or port"):
+        validate_proxy("http://127.0.0.1:abc")
+    with pytest.raises(ValidationError):
+        validate_proxy("http://host with space:8080")
+
+
+def test_validate_identity_fields():
+    import pytest
+
+    from profiledock.validation import (
+        ValidationError,
+        validate_locale,
+        validate_time_zone,
+        validate_user_agent,
+    )
+
+    validate_user_agent(None)
+    validate_user_agent("Mozilla/5.0 (X11; Linux x86_64) Custom")
+    with pytest.raises(ValidationError):
+        validate_user_agent("   ")
+    with pytest.raises(ValidationError):
+        validate_user_agent("x" * 600)
+
+    validate_locale(None)
+    validate_locale("en")
+    validate_locale("en-GB")
+    validate_locale("zh-Hant-TW")
+    with pytest.raises(ValidationError):
+        validate_locale("not a locale!")
+    with pytest.raises(ValidationError):
+        validate_locale("e")
+
+    validate_time_zone(None)
+    validate_time_zone("Europe/Berlin")
+    validate_time_zone("America/New_York")
+    with pytest.raises(ValidationError):
+        validate_time_zone("")
+    with pytest.raises(ValidationError):
+        validate_time_zone("host")

@@ -9,13 +9,15 @@ from .data_root import _is_link
 from .models import LaunchConfig, Profile
 
 
-class ValidationError(Exception):
+class ValidationError(ValueError):
     pass
 
 
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https", "about"})
+_ALLOWED_PROXY_SCHEMES = frozenset({"http", "https", "socks5"})
 _ALLOWED_PLAYWRIGHT_CHANNELS = frozenset({"chromium", "chrome"})
 _ALLOWED_DIRECT_BROWSERS = DIRECT_BROWSER_ALIASES
+_LOCALE_RE = re.compile(r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
 
 
 def validate_url(url: str) -> None:
@@ -31,6 +33,77 @@ def validate_url(url: str) -> None:
         raise ValidationError(f"invalid URL scheme '{parsed.scheme}' (allowed: http, https, about)")
     if parsed.scheme.lower() in ("http", "https") and not parsed.netloc:
         raise ValidationError(f"invalid URL format: '{clean}'")
+
+
+def validate_proxy(proxy: str | None) -> None:
+    """Validate a proxy URL: scheme://[user:pass@]host[:port].
+
+    Deliberately strict: a bare ``host:port`` (no scheme) is rejected because
+    the engines disagree on how to interpret it, and ``socks4`` is rejected
+    because neither Playwright nor Chromium flags document reliable support.
+    Credentials are allowed in the stored value but must be redacted before
+    display (see cli_support.redact_proxy).
+    """
+    if proxy is None:
+        return
+    if not isinstance(proxy, str) or not proxy.strip():
+        raise ValidationError("proxy must be a non-empty string or null")
+    clean = proxy.strip()
+    if len(clean) > 512 or any(ord(character) < 32 for character in clean):
+        raise ValidationError("proxy contains invalid characters or is too long")
+    parsed = urlparse(clean)
+    scheme = parsed.scheme.lower()
+    if not scheme:
+        raise ValidationError(f"proxy must include a scheme (http, https, or socks5): '{clean}'")
+    if scheme not in _ALLOWED_PROXY_SCHEMES:
+        raise ValidationError(f"unsupported proxy scheme '{scheme}' (allowed: http, https, socks5)")
+    # urlparse raises ValueError when .hostname/.port are accessed on a
+    # malformed netloc; normalize every failure into ValidationError.
+    try:
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise ValidationError(f"proxy has an invalid host or port: '{clean}'") from exc
+    if hostname is None or not hostname.strip():
+        raise ValidationError(f"proxy is missing a host: '{clean}'")
+    if any(character.isspace() for character in hostname):
+        raise ValidationError(f"proxy host contains whitespace: '{clean}'")
+    if any(character in hostname for character in ("/", "?", "#", "@")):
+        raise ValidationError(f"proxy host contains invalid characters: '{clean}'")
+    if port is not None and not (1 <= port <= 65535):
+        raise ValidationError(f"proxy port out of range: '{clean}'")
+
+
+def validate_user_agent(user_agent: str | None) -> None:
+    if user_agent is None:
+        return
+    if not isinstance(user_agent, str) or not user_agent.strip():
+        raise ValidationError("user agent must be a non-empty string or null")
+    if len(user_agent) > 512 or any(ord(character) < 32 for character in user_agent):
+        raise ValidationError("user agent contains invalid characters or is too long")
+
+
+def validate_locale(locale: str | None) -> None:
+    if locale is None:
+        return
+    if not isinstance(locale, str) or not locale.strip():
+        raise ValidationError("locale must be a non-empty string or null")
+    clean = locale.strip()
+    if len(clean) > 35 or not _LOCALE_RE.match(clean):
+        raise ValidationError(f"invalid locale '{clean}' (expected forms like 'en' or 'en-GB')")
+
+
+def validate_time_zone(time_zone: str | None) -> None:
+    if time_zone is None:
+        return
+    if not isinstance(time_zone, str) or not time_zone.strip():
+        raise ValidationError("timezone must be a non-empty string or null")
+    clean = time_zone.strip()
+    if len(clean) > 64 or any(ord(character) < 32 for character in clean):
+        raise ValidationError("timezone contains invalid characters or is too long")
+    if clean.lower() == "host":
+        raise ValidationError("timezone 'host' is not a valid IANA timezone")
+    # Accept any IANA-shaped value; deep validation happens in the browser.
 
 
 def validate_browser(browser: str, engine: str, require_executable: bool = False) -> None:

@@ -373,6 +373,28 @@ def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str
                 pass
 
 
+def _playwright_proxy_options(proxy_url: str | None) -> dict[str, Any]:
+    """Map a validated proxy URL onto Playwright's proxy option.
+
+    Credentials embedded in the URL are split out into username/password;
+    they are never logged — _write_error redacts the token, and the proxy
+    string itself must be run through cli_support.redact_proxy before display.
+    """
+    if not proxy_url:
+        return {}
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(proxy_url)
+    options: dict[str, Any] = {"server": f"{parsed.scheme}://{parsed.hostname}"}
+    if parsed.port:
+        options["server"] = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+    if parsed.username:
+        options["username"] = unquote(parsed.username)
+    if parsed.password:
+        options["password"] = unquote(parsed.password)
+    return options
+
+
 def _launch_context(
     playwright: "Playwright",
     data_dir: str,
@@ -380,6 +402,10 @@ def _launch_context(
     channel_override: str | None = None,
     window_width: int | None = None,
     window_height: int | None = None,
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> tuple["BrowserContext", str]:
     from playwright.sync_api import Error as PlaywrightError
 
@@ -387,6 +413,13 @@ def _launch_context(
     if window_width is not None and window_height is not None:
         kwargs["viewport"] = {"width": window_width, "height": window_height}
         kwargs["args"] = [f"--window-size={window_width},{window_height}"]
+    kwargs.update(_playwright_proxy_options(proxy))
+    if user_agent:
+        kwargs["user_agent"] = user_agent
+    if locale:
+        kwargs["locale"] = locale
+    if timezone:
+        kwargs["timezone_id"] = timezone
 
     if channel_override:
         if Path(channel_override).is_file():
@@ -417,6 +450,10 @@ def _controller(
     window_width: int | None = None,
     window_height: int | None = None,
     start_urls: list[str] | None = None,
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> int:
     # Late-bound so patches of profiledock.process_manager._atomic_private_json
     # and ._get_process_create_time keep applying.
@@ -462,6 +499,10 @@ def _controller(
                 channel_override=browser_channel,
                 window_width=window_width,
                 window_height=window_height,
+                proxy=proxy,
+                user_agent=user_agent,
+                locale=locale,
+                timezone=timezone,
             )
             try:
                 urls = list(start_urls or [])
@@ -544,6 +585,10 @@ def main() -> None:
     parser.add_argument("--browser-channel", type=str, default=None)
     parser.add_argument("--window-size", type=str, default=None)
     parser.add_argument("--url", action="append", default=[])
+    parser.add_argument("--proxy", type=str, default=None)
+    parser.add_argument("--user-agent", type=str, default=None)
+    parser.add_argument("--locale", type=str, default=None)
+    parser.add_argument("--timezone", type=str, default=None)
     args = parser.parse_args()
 
     width = None
@@ -565,5 +610,9 @@ def main() -> None:
             window_width=width,
             window_height=height,
             start_urls=args.url or None,
+            proxy=args.proxy,
+            user_agent=args.user_agent,
+            locale=args.locale,
+            timezone=args.timezone,
         )
     )

@@ -15,7 +15,7 @@
     "rename": {"arguments": ["profile_id", "new_name"], "options": {}},
     "set-engine": {"arguments": ["profile_id", "engine"], "options": {}},
     "status": {"arguments": ["profile_id"], "options": {"watch": ["--watch", "-w"], "interval": ["--interval", "-i"], "json_output": ["--json"], "metrics": ["--metrics", "-m"]}},
-    "launch": {"arguments": ["profile_id"], "options": {"tabs": ["--tabs", "-t"], "engine": ["--engine", "-e"], "browser": ["--browser", "-b"], "url": ["--url", "-u"], "headless": ["--headless"], "wait_timeout": ["--wait-timeout"]}},
+    "launch": {"arguments": ["profile_id"], "options": {"tabs": ["--tabs", "-t"], "engine": ["--engine", "-e"], "browser": ["--browser", "-b"], "url": ["--url", "-u"], "headless": ["--headless"], "wait_timeout": ["--wait-timeout"], "proxy": ["--proxy"], "user_agent": ["--user-agent"], "locale": ["--locale"], "timezone": ["--timezone"]}},
     "close": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "timeout": ["--timeout"]}},
     "delete": {"arguments": ["profile_id"], "options": {"yes": ["--yes", "-y"]}},
     "doctor": {"arguments": [], "options": {"repair": ["--repair"], "reattach_orphans": ["--reattach-orphans"], "recreate_missing": ["--recreate-missing"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
@@ -38,7 +38,7 @@
       "options": {},
       "commands": {
         "show": {"arguments": ["profile_id"], "options": {"json_output": ["--json"]}},
-        "set": {"arguments": ["profile_id", "setting", "value"], "options": {}, "setting_values": ["default-tabs", "engine", "browser", "window-size"]},
+        "set": {"arguments": ["profile_id", "setting", "value"], "options": {}, "setting_values": ["default-tabs", "engine", "browser", "window-size", "proxy", "user-agent", "locale", "timezone"]},
         "add-url": {"arguments": ["profile_id", "url"], "options": {}},
         "remove-url": {"arguments": ["profile_id", "url"], "options": {}},
         "reset": {"arguments": ["profile_id"], "options": {}}

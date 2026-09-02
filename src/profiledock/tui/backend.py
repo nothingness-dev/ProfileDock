@@ -429,6 +429,10 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     flags = values.get("flags")
     extra_flags = [str(flag) for flag in flags] if isinstance(flags, list) else []
 
+    raw_proxy = str(values.get("proxy") or "").strip()
+    raw_user_agent = str(values.get("user_agent") or "").strip()
+    raw_locale = str(values.get("locale") or "").strip()
+    raw_timezone = str(values.get("timezone") or "").strip()
     try:
         plan = build_launch_plan(
             profile,
@@ -436,9 +440,18 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
             tabs=tabs,
             urls=urls,
             browser=browser,
+            proxy=raw_proxy or None,
+            user_agent=raw_user_agent or None,
+            locale=raw_locale or None,
+            timezone=raw_timezone or None,
         )
     except LaunchPlanError as exc:
         raise BackendError(str(exc), exc.category) from exc
+    if plan.proxy and plan.engine == "direct" and "@" in plan.proxy:
+        raise BackendError(
+            "direct engine does not support proxy credentials; use the playwright engine",
+            "invalid_input",
+        )
 
     runtime_dir = paths.runtime_dir / profile.id
     if plan.engine == "direct":
@@ -466,6 +479,12 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     body.append("Launched ", style="green")
     body.append(f"'{profile.name}'", style="bold")
     body.append(f" (engine: {plan.engine}) with {plan.tabs} tab(s).")
+    if plan.proxy:
+        from ..cli_support import redact_proxy
+
+        proxy_display = redact_proxy(plan.proxy)
+        if proxy_display is not None:
+            body.append("\nProxy: " + proxy_display, style="dim")
     if pid:
         body.append(f"\nPID: {pid}", style="dim")
     if launch_warning:

@@ -45,6 +45,7 @@ def start_direct_chrome(
     window_width: int | None = None,
     window_height: int | None = None,
     extra_args: list[str] | None = None,
+    proxy_server: str | None = None,
 ) -> StateDict:
     # Late-bound so patches of profiledock.process_manager._system_browser_executable,
     # .is_running, ._get_process_create_time, ._stop_process and
@@ -119,6 +120,8 @@ def start_direct_chrome(
     ]
     if window_width is not None and window_height is not None:
         args.append(f"--window-size={window_width},{window_height}")
+    if proxy_server:
+        args.append(f"--proxy-server={proxy_server}")
     args.extend(extra_args or [])
     args.extend(urls)
 

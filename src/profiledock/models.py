@@ -4,7 +4,9 @@ from typing import Any
 
 METADATA_SCHEMA_VERSION = 1
 _SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1})
-LAUNCH_CONFIG_SCHEMA_VERSION = 1
+LAUNCH_CONFIG_SCHEMA_VERSION = 2
+# v1 configs (five core fields, no identity options) remain readable forever:
+# migrate_launch_config fills the new fields with defaults and re-stamps v2.
 _LAUNCH_CONFIG_FIELDS = frozenset(
     {
         "schema_version",
@@ -14,6 +16,10 @@ _LAUNCH_CONFIG_FIELDS = frozenset(
         "browser",
         "window_width",
         "window_height",
+        "proxy",
+        "user_agent",
+        "locale",
+        "timezone",
     }
 )
 
@@ -27,18 +33,29 @@ def migrate_launch_config(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("launch config must be a JSON object")
     migrated = dict(value)
     if "schema_version" not in migrated:
+        # v1 bare-shape config: re-stamp as the current version with defaults
+        # for fields introduced after v1.
         migrated = {
-            "schema_version": 1,
+            "schema_version": LAUNCH_CONFIG_SCHEMA_VERSION,
             "default_tabs": migrated.get("default_tabs"),
             "start_urls": migrated.get("start_urls", []),
             "engine": migrated.get("engine"),
             "browser": migrated.get("browser"),
             "window_width": migrated.get("window_width"),
             "window_height": migrated.get("window_height"),
+            "proxy": None,
+            "user_agent": None,
+            "locale": None,
+            "timezone": None,
         }
     version = migrated.get("schema_version")
-    if type(version) is not int or version != LAUNCH_CONFIG_SCHEMA_VERSION:
+    if type(version) is not int or version < 1 or version > LAUNCH_CONFIG_SCHEMA_VERSION:
         raise ValueError(f"unsupported launch config schema version: {version}")
+    if version < LAUNCH_CONFIG_SCHEMA_VERSION:
+        # v1 versioned config: add the identity fields at their defaults.
+        for field_name in ("proxy", "user_agent", "locale", "timezone"):
+            migrated.setdefault(field_name, None)
+        migrated["schema_version"] = LAUNCH_CONFIG_SCHEMA_VERSION
     LaunchConfig.from_dict(migrated)
     return migrated
 
@@ -76,6 +93,10 @@ class LaunchConfig:
     browser: str | None = None
     window_width: int | None = None
     window_height: int | None = None
+    proxy: str | None = None
+    user_agent: str | None = None
+    locale: str | None = None
+    timezone: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +107,10 @@ class LaunchConfig:
             "browser": self.browser,
             "window_width": self.window_width,
             "window_height": self.window_height,
+            "proxy": self.proxy,
+            "user_agent": self.user_agent,
+            "locale": self.locale,
+            "timezone": self.timezone,
         }
 
     @classmethod
@@ -128,6 +153,30 @@ class LaunchConfig:
         window_height = value.get("window_height")
         if window_height is not None and (type(window_height) is not int or window_height < 100):
             raise ValueError("window_height must be an integer >= 100 or null")
+        # Identity fields (schema v2). Validation lives in validation.py so the
+        # same rules apply to per-launch CLI flags; here they run for presets.
+        from .validation import validate_locale, validate_proxy, validate_time_zone, validate_user_agent
+
+        proxy = value.get("proxy")
+        if proxy is not None:
+            if not isinstance(proxy, str):
+                raise ValueError("proxy must be a string or null")
+            validate_proxy(proxy.strip() or None)
+        user_agent = value.get("user_agent")
+        if user_agent is not None:
+            if not isinstance(user_agent, str):
+                raise ValueError("user_agent must be a string or null")
+            validate_user_agent(user_agent)
+        locale = value.get("locale")
+        if locale is not None:
+            if not isinstance(locale, str):
+                raise ValueError("locale must be a string or null")
+            validate_locale(locale)
+        timezone_field = value.get("timezone")
+        if timezone_field is not None:
+            if not isinstance(timezone_field, str):
+                raise ValueError("timezone must be a string or null")
+            validate_time_zone(timezone_field)
         return cls(
             default_tabs=default_tabs,
             start_urls=start_urls,
@@ -135,6 +184,10 @@ class LaunchConfig:
             browser=browser,
             window_width=window_width,
             window_height=window_height,
+            proxy=proxy.strip() if isinstance(proxy, str) else None,
+            user_agent=user_agent,
+            locale=locale,
+            timezone=timezone_field,
         )
 
 

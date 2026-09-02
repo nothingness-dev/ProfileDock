@@ -148,6 +148,26 @@ def resolve_engine(cli_engine: str | None, profile: Profile) -> str:
         fail(str(exc))
 
 
+def redact_proxy(value: str | None) -> str | None:
+    """Mask proxy credentials for display: user:secret@ -> user:***@."""
+    if not value or "@" not in value:
+        return value
+    scheme_split = value.split("://", 1)
+    if len(scheme_split) != 2:
+        return value
+    scheme, rest = scheme_split
+    host_split = rest.rsplit("@", 1)
+    if len(host_split) != 2:
+        return value
+    userinfo, hostport = host_split
+    if ":" in userinfo:
+        user, _ = userinfo.split(":", 1)
+        redacted = f"{user}:***"
+    else:
+        redacted = "***"
+    return f"{scheme}://{redacted}@{hostport}"
+
+
 def safe_profile_dict(profile: Profile, status: str | None = None) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": profile.id,
@@ -159,7 +179,9 @@ def safe_profile_dict(profile: Profile, status: str | None = None) -> dict[str, 
     }
     launch_config = getattr(profile, "launch_config", None)
     if launch_config is not None:
-        data["launch_config"] = launch_config.to_dict()
+        config_dict = launch_config.to_dict()
+        config_dict["proxy"] = redact_proxy(config_dict.get("proxy"))
+        data["launch_config"] = config_dict
     if status is not None:
         data["status"] = status
     return data

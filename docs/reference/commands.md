@@ -72,7 +72,7 @@ Updates the profile-level engine. A launch-config engine can still override it.
 profiledock config show PROFILE [--json]
 ```
 
-Shows the profile's launch preset. JSON uses launch-configuration schema version 1.
+Shows the profile's launch preset. JSON uses launch-configuration schema version 2; a stored proxy is redacted to `user:***@host` when it contains credentials.
 
 ## `config set`
 
@@ -88,6 +88,10 @@ Supported settings:
 | `engine` | `direct` or `playwright`. |
 | `browser` | Supported browser name or executable path. |
 | `window-size` | `WIDTHxHEIGHT`, each at least 100. |
+| `proxy` | `http://`, `https://`, or `socks5://` URL, optionally `user:pass@host:port`; `none` clears it. |
+| `user-agent` | Non-empty user-agent string (max 512 characters). |
+| `locale` | Locale tag such as `en` or `en-GB`. |
+| `timezone` | IANA timezone name such as `Europe/Berlin`. |
 
 Examples:
 
@@ -96,6 +100,10 @@ profiledock config set Work default-tabs 4
 profiledock config set Work engine playwright
 profiledock config set Work browser chromium
 profiledock config set Work window-size 1440x900
+profiledock config set Work proxy socks5://127.0.0.1:9050
+profiledock config set Work locale en-GB
+profiledock config set Work timezone Europe/Berlin
+profiledock config set Work proxy none
 ```
 
 ## `config add-url`
@@ -155,6 +163,12 @@ Options:
 | `--url URL`, `-u URL` | Start URL; repeat for multiple pages. |
 | `--headless` | Run a Playwright browser in the background without a visible window. |
 | `--wait-timeout SECONDS` | Seconds to wait for the browser and controller to become fully ready (default: 30). |
+| `--proxy URL` | Proxy for this launch: `http://`, `https://`, or `socks5://`, optionally `user:pass@host:port`. Overrides the stored preset. Requires the Playwright engine when credentials are present. |
+| `--user-agent STRING` | Custom user agent; overrides the stored preset. |
+| `--locale TAG` | Browser locale such as `en-GB`; overrides the stored preset. |
+| `--timezone ZONE` | IANA timezone such as `Europe/Berlin`; overrides the stored preset. |
+
+Proxy strings with embedded credentials are accepted by the Playwright engine and are always redacted to `user:***@host` in `show`, `config show`, and logs. The Direct engine supports only credentialess proxies via `--proxy-server`.
 
 Playwright launches open a visible Chromium window by default; pass `--headless` for a background Playwright launch. The Direct engine does not accept `--headless`. The command returns only after the controller and browser are fully ready, and a failed startup rolls back all runtime artifacts. When no tab count or preset exists, interactive mode prompts. Non-interactive mode requires `--tabs`. Start URLs cannot outnumber tabs. Duplicate launch is refused while the profile is starting or already running. Launch writes runtime state outside `browser-data` and records the launch timestamp after success.
 

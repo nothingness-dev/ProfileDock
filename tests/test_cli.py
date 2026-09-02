@@ -1099,3 +1099,116 @@ def test_shot_default_filename_uses_profile_name(tmp_path, monkeypatch):
     name = Path(created["output"]).name
     assert name.startswith("My Fancy Profile-"), name
     assert name.endswith(".png")
+
+
+def test_launch_proxy_flag_overrides_and_validates(tmp_path, monkeypatch):
+    """--proxy wins over the preset; bad proxies fail before any spawn."""
+    from profiledock.data_root import resolve_data_root
+    from profiledock.profile_manager import ProfileManager
+
+    paths = resolve_data_root(Path(tmp_path), prepare=True)
+    # Playwright engine so the (patched) controller path is exercised; the
+    # direct default would otherwise spawn a real Chrome in tests.
+    ProfileManager(paths).create("ProxyP", engine="playwright")
+    ProfileManager(paths).update_launch_config("ProxyP", proxy="http://preset:1")
+
+    calls: list[dict] = []
+
+    def fake_start_controller(data_dir, tabs, **kwargs):
+        calls.append(kwargs)
+        return {"controller_pid": 1, "pid": 1}
+
+    with (
+        patch("profiledock.cli.manager") as mock_manager,
+        patch("profiledock.cli.start_controller", side_effect=fake_start_controller),
+        patch("profiledock.cli.is_running", return_value=False),
+    ):
+        profile = ProfileManager(paths).resolve("ProxyP")
+        mock_manager.return_value.resolve.return_value = profile
+        res = runner.invoke(
+            app,
+            ["--data-root", str(tmp_path), "launch", "ProxyP", "--tabs", "1", "--proxy", "socks5://127.0.0.1:9050"],
+        )
+    assert res.exit_code == EXIT_SUCCESS, res.output
+    assert calls[0].get("proxy") == "socks5://127.0.0.1:9050"
+
+
+def test_launch_rejects_invalid_proxy_before_spawn(tmp_path):
+    with patch("profiledock.cli.manager"):
+        runner.invoke(app, ["--data-root", str(tmp_path), "create", "BadProxy"])
+        res = runner.invoke(
+            app,
+            ["--data-root", str(tmp_path), "launch", "BadProxy", "--tabs", "1", "--proxy", "127.0.0.1:8080"],
+        )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert "scheme" in res.output
+
+
+def test_launch_direct_rejects_credentialed_proxy(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "DirectCred"])
+    res = runner.invoke(
+        app,
+        [
+            "--data-root",
+            str(tmp_path),
+            "launch",
+            "DirectCred",
+            "--tabs",
+            "1",
+            "--engine",
+            "direct",
+            "--proxy",
+            "socks5://user:pass@127.0.0.1:1080",
+        ],
+    )
+    assert res.exit_code == EXIT_USER_ERROR
+    assert "credentials" in res.output
+
+
+def test_config_set_proxy_round_trip_redacted(tmp_path):
+    """Storing a credentialed proxy works; show --json never leaks the password."""
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "SecProf"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "config", "set", "SecProf", "proxy", "socks5://user:hunter2@127.0.0.1:1080"],
+    )
+    assert res.exit_code == EXIT_SUCCESS, res.output
+    assert "hunter2" not in res.output  # even the set command redacts
+
+    shown = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "SecProf", "--json"])
+    assert shown.exit_code == EXIT_SUCCESS
+    payload = json.loads(shown.output)
+    assert payload["data"]["proxy"] == "socks5://user:***@127.0.0.1:1080"
+    assert "hunter2" not in shown.output
+
+    # And the on-disk value keeps credentials for actual use.
+    from profiledock.data_root import resolve_data_root
+    from profiledock.profile_manager import ProfileManager
+
+    paths = resolve_data_root(Path(tmp_path), prepare=True)
+    profile = ProfileManager(paths).resolve("SecProf")
+    assert profile.launch_config.proxy == "socks5://user:hunter2@127.0.0.1:1080"
+
+
+def test_config_set_identity_settings(tmp_path):
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "Ident"])
+    res = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "config", "set", "Ident", "locale", "en-GB"],
+    )
+    assert res.exit_code == EXIT_SUCCESS
+    res2 = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "config", "set", "Ident", "timezone", "Europe/Berlin"],
+    )
+    assert res2.exit_code == EXIT_SUCCESS
+    res3 = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "config", "set", "Ident", "timezone", "host"],
+    )
+    assert res3.exit_code == EXIT_USER_ERROR
+    res4 = runner.invoke(
+        app,
+        ["--data-root", str(tmp_path), "config", "set", "Ident", "proxy", "none"],
+    )
+    assert res4.exit_code == EXIT_SUCCESS

@@ -16,7 +16,15 @@ from pathlib import Path
 from typing import Any
 
 from .cli_support import resolve_engine_strict
-from .validation import ValidationError, validate_browser, validate_url
+from .validation import (
+    ValidationError,
+    validate_browser,
+    validate_locale,
+    validate_proxy,
+    validate_time_zone,
+    validate_url,
+    validate_user_agent,
+)
 
 
 class LaunchPlanError(ValueError):
@@ -35,6 +43,10 @@ class LaunchPlan:
     browser: str | None
     window_width: int | None
     window_height: int | None
+    proxy: str | None = None
+    user_agent: str | None = None
+    locale: str | None = None
+    timezone: str | None = None
 
 
 def resolve_launch_engine(engine: str | None, profile: Any) -> str:
@@ -57,6 +69,13 @@ def resolve_launch_tabs(profile: Any, tabs: int | None) -> int | None:
     return None
 
 
+def _resolve_identity_field(flag_value: str | None, preset_value: str | None) -> str | None:
+    """One-launch flag wins; otherwise the stored preset applies."""
+    if flag_value is not None and flag_value.strip():
+        return flag_value.strip()
+    return preset_value
+
+
 def build_launch_plan(
     profile: Any,
     *,
@@ -64,12 +83,17 @@ def build_launch_plan(
     tabs: int | None = None,
     urls: list[str] | None = None,
     browser: str | None = None,
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> LaunchPlan:
     """Validate and resolve every launch parameter; raise before any side effect.
 
     ``tabs`` must be resolved by the caller first (the CLI prompts; the TUI
     defaults to 1) — pass :func:`resolve_launch_tabs` output or a concrete
-    value.
+    value. Identity options follow flag-over-preset precedence; the stored
+    proxy keeps its credentials (redaction is a display concern only).
     """
     cfg = getattr(profile, "launch_config", None)
     active_engine = resolve_launch_engine(engine, profile)
@@ -98,6 +122,18 @@ def build_launch_plan(
         except ValidationError as exc:
             raise LaunchPlanError(str(exc)) from exc
 
+    target_proxy = _resolve_identity_field(proxy, cfg.proxy if cfg else None)
+    target_user_agent = _resolve_identity_field(user_agent, cfg.user_agent if cfg else None)
+    target_locale = _resolve_identity_field(locale, cfg.locale if cfg else None)
+    target_timezone = _resolve_identity_field(timezone, cfg.timezone if cfg else None)
+    try:
+        validate_proxy(target_proxy)
+        validate_user_agent(target_user_agent)
+        validate_locale(target_locale)
+        validate_time_zone(target_timezone)
+    except ValidationError as exc:
+        raise LaunchPlanError(str(exc)) from exc
+
     if not Path(profile.data_dir).is_dir():
         raise LaunchPlanError("profile data directory is missing")
 
@@ -108,6 +144,10 @@ def build_launch_plan(
         browser=target_browser,
         window_width=cfg.window_width if cfg else None,
         window_height=cfg.window_height if cfg else None,
+        proxy=target_proxy,
+        user_agent=target_user_agent,
+        locale=target_locale,
+        timezone=target_timezone,
     )
 
 
@@ -127,6 +167,15 @@ def direct_launch_options(
     if plan.window_width is not None and plan.window_height is not None:
         options["window_width"] = plan.window_width
         options["window_height"] = plan.window_height
+    if plan.proxy is not None:
+        # Chromium flags cannot express proxy credentials; the direct engine
+        # only supports credentialess proxies. Playwright is the supported
+        # path when authentication is required.
+        if "@" in plan.proxy:
+            raise LaunchPlanError(
+                "direct engine does not support proxy credentials; use the playwright engine"
+            )
+        options["proxy_server"] = plan.proxy
     if extra_args:
         options["extra_args"] = list(extra_args)
     return options
@@ -142,4 +191,12 @@ def controller_launch_options(plan: LaunchPlan) -> dict[str, Any]:
     if plan.window_width is not None and plan.window_height is not None:
         options["window_width"] = plan.window_width
         options["window_height"] = plan.window_height
+    if plan.proxy is not None:
+        options["proxy"] = plan.proxy
+    if plan.user_agent is not None:
+        options["user_agent"] = plan.user_agent
+    if plan.locale is not None:
+        options["locale"] = plan.locale
+    if plan.timezone is not None:
+        options["timezone"] = plan.timezone
     return options

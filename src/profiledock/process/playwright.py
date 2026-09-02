@@ -42,6 +42,10 @@ def start_controller(
     start_urls: list[str] | None = None,
     window_width: int | None = None,
     window_height: int | None = None,
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> StateDict:
     # Late-bound so patches of profiledock.process_manager.is_running,
     # ._controller_available and ._stop_process keep applying.
@@ -100,6 +104,14 @@ def start_controller(
     ]
     if headless:
         command.append("--headless")
+    if proxy:
+        command.extend(["--proxy", proxy])
+    if user_agent:
+        command.extend(["--user-agent", user_agent])
+    if locale:
+        command.extend(["--locale", locale])
+    if timezone:
+        command.extend(["--timezone", timezone])
     try:
         process = subprocess.Popen(
             command,

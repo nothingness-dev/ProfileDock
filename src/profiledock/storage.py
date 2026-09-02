@@ -248,9 +248,12 @@ def _migrate_metadata_unlocked(
     try:
         migrated = migrate_metadata_value(data)
         doc = MetadataDocument.from_dict(migrated)
-        validate_metadata_document(doc.profiles, profile_root)
     except ValueError as exc:
         raise MetadataCorruptedError(f"metadata is corrupted: {exc}") from exc
+    # Validation failures (duplicate ids, bad timestamps, unsafe dirs) must
+    # surface as themselves, not be swallowed into "corrupted metadata" —
+    # ValidationError is a ValueError subclass, so keep it outside this guard.
+    validate_metadata_document(doc.profiles, profile_root)
     if migrated != data:
         if backup:
             _backup_metadata(path, backup_path, root)
