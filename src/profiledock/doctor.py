@@ -7,8 +7,19 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
-from .data_root import DataPaths, _is_link, ensure_tree_safe, ensure_within_root, validate_path_component
+from .data_root import (
+    DataPaths,
+    DataRootError,
+    _is_link,
+    ensure_tree_safe,
+    ensure_within_root,
+    resolve_data_root,
+    validate_path_component,
+)
+from .fsops import rmtree_with_retry
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value, utc_now
 from .process_manager import (
     _system_browser_executable,
@@ -599,7 +610,10 @@ def check_orphan_directories(root: Path) -> DiagnosticCheck:
 
     orphans: list[str] = []
     for item in profiles_dir.iterdir():
-        if item.is_dir() and item.name not in known_ids:
+        # Dot-prefixed directories are transient operation state
+        # (.deleting-*, .quarantine_*, .temp_restore_*, .m-*), not orphaned
+        # profiles; --reattach-orphans skips them too.
+        if item.is_dir() and not item.name.startswith(".") and item.name not in known_ids:
             orphans.append(item.name)
 
     if not orphans:
@@ -642,8 +656,125 @@ def check_version_consistency() -> DiagnosticCheck:
         )
 
 
+def check_disk_space(root: Path) -> DiagnosticCheck:
+    check_id = "disk_space"
+    try:
+        usage = shutil.disk_usage(root)
+    except OSError:
+        # Absence of information is not a failure; report probe status.
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_OK,
+            summary="Disk space could not be determined (probe skipped).",
+        )
+    free_mb = usage.free / (1024 * 1024)
+    if free_mb < 100:
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_FAILED,
+            summary=f"Disk holding the data root is critically low on space ({free_mb:.0f} MB free).",
+            action="Free disk space; browser profiles and backups need room to grow.",
+        )
+    if free_mb < 1024:
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_WARNING,
+            summary=f"Disk holding the data root is low on space ({free_mb:.0f} MB free).",
+            action="Consider freeing disk space; Chromium profiles can grow to several GB.",
+        )
+    return DiagnosticCheck(
+        id=check_id,
+        status=STATUS_OK,
+        summary=f"Disk space is adequate ({free_mb / 1024:.1f} GB free).",
+    )
+
+
+def check_metadata_lock_state(
+    metadata_path: Path | None = None, probe_timeout: float = 0.5
+) -> DiagnosticCheck:
+    check_id = "metadata_lock_state"
+    if metadata_path is None:
+        try:
+            metadata_path = resolve_data_root(prepare=False).profiles_file
+        except (DataRootError, OSError):
+            return DiagnosticCheck(
+                id=check_id,
+                status=STATUS_OK,
+                summary="Metadata lock probe skipped (data root cannot be resolved).",
+            )
+    lock_path = metadata_path.with_suffix(".lock")
+    try:
+        with metadata_lock(metadata_path, timeout=probe_timeout):
+            return DiagnosticCheck(
+                id=check_id,
+                status=STATUS_OK,
+                summary="Metadata lock is free.",
+            )
+    except MetadataLockedError:
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_FAILED,
+            summary=f"Metadata lock is held by another process ({lock_path}).",
+            action=(
+                "Close other running ProfileDock commands; if none are active and the lock "
+                "persists across reboots, remove the stale profiles.lock file."
+            ),
+        )
+
+
+def check_proxy_timezone_consistency(root: Path) -> DiagnosticCheck:
+    check_id = "proxy_timezone_consistency"
+    paths = DataPaths.from_root(root)
+    profiles_file = paths.profiles_file
+    if not profiles_file.exists():
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_OK,
+            summary="No profiles configured yet.",
+        )
+    try:
+        doc = load_metadata(profiles_file)
+    except Exception:
+        # Metadata validity is reported by metadata_schema; nothing to check.
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_OK,
+            summary="Skipped (metadata unreadable; reported by the metadata check).",
+        )
+
+    mismatches: list[str] = []
+    for profile in doc.profiles:
+        config = profile.launch_config
+        if config is None or not config.proxy:
+            continue
+        if not config.timezone:
+            mismatches.append(f"{profile.name} ({profile.id}): proxy set, timezone unset")
+            continue
+        try:
+            ZoneInfo(config.timezone.strip())
+        except Exception:
+            mismatches.append(f"{profile.name} ({profile.id}): invalid IANA timezone '{config.timezone}'")
+
+    if not mismatches:
+        return DiagnosticCheck(
+            id=check_id,
+            status=STATUS_OK,
+            summary="Proxied profiles declare a coherent timezone.",
+        )
+    return DiagnosticCheck(
+        id=check_id,
+        status=STATUS_WARNING,
+        summary=f"Proxy/timezone mismatch risk: {'; '.join(mismatches)}",
+        action=(
+            "Set a timezone matching the proxy exit IP with "
+            "'profiledock config set <profile> timezone <IANA-zone>' — the most common geo leak."
+        ),
+    )
+
+
 def run_diagnostics(root: Path) -> list[DiagnosticCheck]:
     checks: list[DiagnosticCheck] = []
+    paths = DataPaths.from_root(root)
 
     checks.append(check_python_version())
     checks.append(check_data_root_writable(root))
@@ -668,6 +799,9 @@ def run_diagnostics(root: Path) -> list[DiagnosticCheck]:
     checks.append(stale_chk)
     checks.append(check_orphan_directories(root))
     checks.append(check_version_consistency())
+    checks.append(check_disk_space(root))
+    checks.append(check_metadata_lock_state(paths.profiles_file))
+    checks.append(check_proxy_timezone_consistency(root))
 
     return checks
 
@@ -725,7 +859,7 @@ def repair_environment(
                     if temp_path.is_dir() and not _is_link(temp_path):
                         try:
                             ensure_tree_safe(temp_path, paths.root)
-                            shutil.rmtree(temp_path, ignore_errors=False)
+                            rmtree_with_retry(temp_path)
                             cleaned_temps += 1
                         except OSError:
                             pass
@@ -791,6 +925,14 @@ def repair_environment(
                 if not profiles_are_stopped(doc.profiles):
                     raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
+                    # Preserve the corrupt primary before it is overwritten:
+                    # the backup may be stale, and the unreadable file is the
+                    # only evidence for diagnosing the corruption.
+                    corrupt_primary = profiles_file.with_name(f".{profiles_file.name}.corrupt-{uuid4().hex}")
+                    try:
+                        _atomic_write(corrupt_primary, profiles_file.read_text(encoding="utf-8"), paths.root)
+                    except OSError:
+                        pass
                     _atomic_write(
                         profiles_file,
                         json.dumps(doc.to_dict(), indent=2) + "\n",
@@ -809,6 +951,11 @@ def repair_environment(
                 if not profiles_are_stopped(profiles):
                     raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
+                    corrupt_primary = profiles_file.with_name(f".{profiles_file.name}.corrupt-{uuid4().hex}")
+                    try:
+                        _atomic_write(corrupt_primary, profiles_file.read_text(encoding="utf-8"), paths.root)
+                    except OSError:
+                        pass
                     doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=profiles)
                     _atomic_write(
                         profiles_file,
@@ -826,97 +973,140 @@ def repair_environment(
             pass
 
     if profiles_file.exists():
+        validated_doc: MetadataDocument | None = None
         try:
-            doc = load_metadata(profiles_file)
-            validate_metadata_document(doc.profiles, profiles_dir)
-            if recreate_missing_directories:
-                recreated_count = 0
-                recreated_paths: list[Path] = []
-                try:
-                    for p in doc.profiles:
-                        p_data_path = Path(p.data_dir)
-                        if not p_data_path.exists():
-                            if is_active_for_mutation(p.data_dir, paths.runtime_dir / p.id):
-                                raise StorageError("cannot recreate data for an active profile")
-                            ensure_within_root(p_data_path, paths.root)
-                            rollback_path = (
-                                p_data_path.parent if not p_data_path.parent.exists() else p_data_path
-                            )
-                            p_data_path.mkdir(parents=True, mode=0o700, exist_ok=False)
-                            recreated_paths.append(rollback_path)
-                            recreated_count += 1
-                except Exception:
-                    for recreated in reversed(recreated_paths):
-                        if recreated.exists():
-                            ensure_tree_safe(recreated, paths.root)
-                            shutil.rmtree(recreated, ignore_errors=True)
-                    raise
-                if recreated_count > 0:
-                    repairs.append(
-                        DiagnosticCheck(
-                            id="repair_recreate_missing_directories",
-                            status=STATUS_OK,
-                            summary=f"Recreated {recreated_count} missing profile browser-data directory(ies).",
-                        )
-                    )
-
-            if reattach_orphans and profiles_dir.exists():
-                known_ids = {p.id for p in doc.profiles}
-                known_names = {p.name for p in doc.profiles}
-                reattached_profiles: list[Profile] = []
-                for entry in sorted(profiles_dir.iterdir()):
-                    if (
-                        entry.is_dir()
-                        and not _is_link(entry)
-                        and not entry.name.startswith(".")
-                        and entry.name not in known_ids
-                    ):
-                        validate_path_component(entry.name, "profile id")
-                        ensure_within_root(entry, paths.root)
-                        data_dir_path = entry / "browser-data"
-                        if data_dir_path.is_dir():
-                            ensure_tree_safe(data_dir_path, paths.root)
-                            if is_active_for_mutation(str(data_dir_path), paths.runtime_dir / entry.name):
-                                raise StorageError("cannot reattach an active profile")
-                            base_name = f"Recovered-{entry.name}"
-                            candidate_name = base_name
-                            counter = 1
-                            while candidate_name in known_names:
-                                candidate_name = f"{base_name}-{counter}"
-                                counter += 1
-                            known_names.add(candidate_name)
-
-                            reattached_p = Profile(
-                                id=entry.name,
-                                name=candidate_name,
-                                created_at=utc_now(),
-                                data_dir=str(data_dir_path.resolve()),
-                                engine=None,
-                            )
-                            reattached_profiles.append(reattached_p)
-
-                if reattached_profiles:
-                    new_profiles = list(doc.profiles) + reattached_profiles
-                    new_doc = MetadataDocument(
-                        schema_version=METADATA_SCHEMA_VERSION,
-                        profiles=new_profiles,
-                    )
-                    validate_metadata_document(new_doc.profiles, profiles_dir)
-                    with metadata_lock(profiles_file):
-                        _backup_metadata(profiles_file, backup_file, paths.root)
-                        _atomic_write(
-                            profiles_file,
-                            json.dumps(new_doc.to_dict(), indent=2) + "\n",
-                            paths.root,
-                        )
-                    repairs.append(
-                        DiagnosticCheck(
-                            id="repair_reattach_orphans",
-                            status=STATUS_OK,
-                            summary=f"Reattached {len(reattached_profiles)} orphan profile directory(ies) to metadata.",
-                        )
-                    )
+            validated_doc = load_metadata(profiles_file)
+            validate_metadata_document(validated_doc.profiles, profiles_dir)
         except Exception:
-            pass
+            # Plain metadata validation failure is reported by the
+            # metadata_schema check; only destructive repair work below
+            # surfaces its own failures.
+            validated_doc = None
+        if validated_doc is not None and (recreate_missing_directories or reattach_orphans):
+            try:
+                _repair_recreate_and_reattach(
+                    validated_doc,
+                    paths,
+                    profiles_file,
+                    backup_file,
+                    recreate_missing_directories=recreate_missing_directories,
+                    reattach_orphans=reattach_orphans,
+                    repairs=repairs,
+                )
+            except Exception as exc:
+                # A requested repair that could not run must be visible, not
+                # silent: the user asked doctor to fix things, so a swallowed
+                # failure looks like success.
+                repairs.append(
+                    DiagnosticCheck(
+                        id="repair_recreate_or_reattach_failed",
+                        status=STATUS_FAILED,
+                        summary=f"Requested repair could not complete: {exc}",
+                        action="Resolve the reported issue (e.g. close running profiles) and re-run 'profiledock doctor --repair'.",
+                    )
+                )
 
     return repairs
+
+
+def _repair_recreate_and_reattach(
+    doc: MetadataDocument,
+    paths: DataPaths,
+    profiles_file: Path,
+    backup_file: Path,
+    recreate_missing_directories: bool,
+    reattach_orphans: bool,
+    repairs: list[DiagnosticCheck],
+) -> None:
+    """Recreate missing browser-data dirs and/or reattach orphan directories.
+
+    Raises on failure so the caller can report it; successful work is
+    appended to ``repairs`` as it commits.
+    """
+    profiles_dir = paths.profiles_dir
+    if recreate_missing_directories:
+        recreated_count = 0
+        recreated_paths: list[Path] = []
+        try:
+            for p in doc.profiles:
+                p_data_path = Path(p.data_dir)
+                if not p_data_path.exists():
+                    if is_active_for_mutation(p.data_dir, paths.runtime_dir / p.id):
+                        raise StorageError("cannot recreate data for an active profile")
+                    ensure_within_root(p_data_path, paths.root)
+                    rollback_path = p_data_path.parent if not p_data_path.parent.exists() else p_data_path
+                    p_data_path.mkdir(parents=True, mode=0o700, exist_ok=False)
+                    recreated_paths.append(rollback_path)
+                    recreated_count += 1
+        except Exception:
+            for recreated in reversed(recreated_paths):
+                if recreated.exists():
+                    ensure_tree_safe(recreated, paths.root)
+                    shutil.rmtree(recreated, ignore_errors=True)
+            raise
+        if recreated_count > 0:
+            repairs.append(
+                DiagnosticCheck(
+                    id="repair_recreate_missing_directories",
+                    status=STATUS_OK,
+                    summary=f"Recreated {recreated_count} missing profile browser-data directory(ies).",
+                )
+            )
+
+    if reattach_orphans and profiles_dir.exists():
+        known_ids = {p.id for p in doc.profiles}
+        known_names = {p.name for p in doc.profiles}
+        reattached_profiles: list[Profile] = []
+        for entry in sorted(profiles_dir.iterdir()):
+            if (
+                entry.is_dir()
+                and not _is_link(entry)
+                and not entry.name.startswith(".")
+                and entry.name not in known_ids
+            ):
+                validate_path_component(entry.name, "profile id")
+                ensure_within_root(entry, paths.root)
+                data_dir_path = entry / "browser-data"
+                if data_dir_path.is_dir():
+                    ensure_tree_safe(data_dir_path, paths.root)
+                    if is_active_for_mutation(str(data_dir_path), paths.runtime_dir / entry.name):
+                        raise StorageError("cannot reattach an active profile")
+                    base_name = f"Recovered-{entry.name}"
+                    candidate_name = base_name
+                    counter = 1
+                    while candidate_name in known_names:
+                        candidate_name = f"{base_name}-{counter}"
+                        counter += 1
+                    known_names.add(candidate_name)
+
+                    reattached_profiles.append(
+                        Profile(
+                            id=entry.name,
+                            name=candidate_name,
+                            created_at=utc_now(),
+                            data_dir=str(data_dir_path.resolve()),
+                            engine=None,
+                        )
+                    )
+
+        if reattached_profiles:
+            new_profiles = list(doc.profiles) + reattached_profiles
+            new_doc = MetadataDocument(
+                schema_version=METADATA_SCHEMA_VERSION,
+                profiles=new_profiles,
+            )
+            validate_metadata_document(new_doc.profiles, profiles_dir)
+            with metadata_lock(profiles_file):
+                _backup_metadata(profiles_file, backup_file, paths.root)
+                _atomic_write(
+                    profiles_file,
+                    json.dumps(new_doc.to_dict(), indent=2) + "\n",
+                    paths.root,
+                )
+            repairs.append(
+                DiagnosticCheck(
+                    id="repair_reattach_orphans",
+                    status=STATUS_OK,
+                    summary=f"Reattached {len(reattached_profiles)} orphan profile directory(ies) to metadata.",
+                )
+            )

@@ -18,7 +18,7 @@
     "launch": {"arguments": ["profile_id"], "options": {"tabs": ["--tabs", "-t"], "engine": ["--engine", "-e"], "browser": ["--browser", "-b"], "url": ["--url", "-u"], "headless": ["--headless"], "wait_timeout": ["--wait-timeout"], "proxy": ["--proxy"], "user_agent": ["--user-agent"], "locale": ["--locale"], "timezone": ["--timezone"]}},
     "close": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "timeout": ["--timeout"]}},
     "delete": {"arguments": ["profile_id"], "options": {"yes": ["--yes", "-y"]}},
-    "doctor": {"arguments": [], "options": {"repair": ["--repair"], "reattach_orphans": ["--reattach-orphans"], "recreate_missing": ["--recreate-missing"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
+    "doctor": {"arguments": [], "options": {"repair": ["--repair"], "reattach_orphans": ["--reattach-orphans"], "recreate_missing": ["--recreate-missing"], "yes": ["--yes", "-y"], "json_output": ["--json"], "strict": ["--strict"]}},
     "migrate": {"arguments": [], "options": {"from_project": ["--from-project"], "remove_source": ["--remove-source"], "yes": ["--yes", "-y"], "json_output": ["--json"]}},
     "backup": {"arguments": ["profile_id"], "options": {"all_profiles": ["--all", "-a"], "output": ["--output", "-o"], "force": ["--force", "-f"], "exclude_cache": ["--exclude-cache", "-C"], "json_output": ["--json"]}},
     "restore": {"arguments": ["archive"], "options": {"force": ["--force", "-f"], "json_output": ["--json"]}},

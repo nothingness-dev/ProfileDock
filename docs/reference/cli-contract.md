@@ -49,6 +49,8 @@ Relative overrides resolve from the process working directory. Unsafe filesystem
 - `1`: user, operational, validation, confirmation, storage, security, profile-resolution, or browser error.
 - `2`: command-line syntax or usage error generated before command execution.
 
+`doctor` exits `0` when no check reports `failed` (warnings are tolerated). With `--strict`, `doctor` exits `1` when any check reports `warning` as well; its `--json` document reports this separately in `strict_healthy` while `healthy` keeps the failure-only meaning.
+
 Human success output, prompts, and JSON success documents use standard output. Operational errors use standard error and leave standard output empty. A machine-readable migration failure report uses the normal versioned JSON envelope on standard error and also leaves standard output empty. Usage diagnostics use Typer's usage-error stream behavior.
 
 Operational errors begin with `Error [<category>]:`. Version 1 categories are:

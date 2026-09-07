@@ -129,7 +129,7 @@ The config `engine` is the stored preset and may be `null`; it is not replaced b
 
 ## `doctor --json`
 
-`command` is `doctor`. `data` contains `checks`, `repairs`, and `healthy`:
+`command` is `doctor`. `data` contains `checks`, `repairs`, `healthy`, and `strict_healthy`:
 
 ```json
 {
@@ -141,11 +141,14 @@ The config `engine` is the stored preset and may be `null`; it is not replaced b
     }
   ],
   "repairs": [],
-  "healthy": true
+  "healthy": true,
+  "strict_healthy": true
 }
 ```
 
-Each diagnostic has `id`, `status`, and `summary`, with optional `action`. Status is `ok`, `warning`, or `failed`.
+Each diagnostic has `id`, `status`, and `summary`, with optional `action`. Status is `ok`, `warning`, or `failed`. Each repair entry has the same shape.
+
+`healthy` is `true` when no check status is `failed`; warnings do not affect it. `strict_healthy` is `true` only when no check is `failed` **and** none is `warning`. Both fields are always present. Under `--strict`, the exit code follows `strict_healthy` (exit 1 when it is `false`); without `--strict`, the exit code follows `healthy`. This keeps `healthy`'s meaning stable for existing consumers while scripts can opt into warning strictness.
 
 ## `migrate --json`
 

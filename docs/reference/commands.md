@@ -206,8 +206,9 @@ Options:
 | `--recreate-missing` | With `--repair`, recreate missing empty browser-data directories. |
 | `--yes`, `-y` | Skip repair confirmation where supported. |
 | `--json` | Emit a versioned diagnostic report. |
+| `--strict` | Exit non-zero when any check reports a warning, not only failures. |
 
-Checks Python, storage, metadata, browser availability, runtime state, directories, orphan data, and version consistency. Repairs include stale-state cleanup (including unreadable running-state files), temporary-operation cleanup, valid metadata recovery, legacy metadata migration, and explicitly requested directory repairs. Active or ambiguous profile state blocks unsafe mutation. Requesting `--recreate-missing` or `--reattach-orphans` with `--json` without `--yes` fails on stderr instead of prompting; supply `--yes` for automated runs.
+Checks Python, storage, metadata, browser availability, runtime state, directories, orphan data, version consistency, free disk space on the data root, metadata-lock availability, and proxy/timezone coherence of profile presets. Repairs include stale-state cleanup (including unreadable running-state files), temporary-operation cleanup, valid metadata recovery (the unreadable primary is preserved under a diagnostic name before recovery), legacy metadata migration, and explicitly requested directory repairs. Active or ambiguous profile state blocks unsafe mutation; a requested repair that cannot complete is reported as a failed repair instead of being silently skipped. Requesting `--recreate-missing` or `--reattach-orphans` with `--json` without `--yes` fails on stderr instead of prompting; supply `--yes` for automated runs.
 
 ## `migrate`
 

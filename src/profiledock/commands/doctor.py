@@ -38,6 +38,11 @@ def doctor_command(
         help="Confirm actions without interactive prompt.",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit non-zero when any check reports a warning (not only failures).",
+    ),
 ) -> None:
     """Check installation and data health; repair safe issues with --repair.
 
@@ -85,6 +90,7 @@ def doctor_command(
                 ],
                 "repairs": [],
                 "healthy": False,
+                "strict_healthy": False,
             }
             emit_json("doctor", payload, err=True)
             raise typer.Exit(EXIT_USER_ERROR)
@@ -118,20 +124,32 @@ def doctor_command(
             "warning_checks": warning_ids,
         },
     )
+    has_warning = any(c.status == STATUS_WARNING for c in checks)
+    # --strict treats warnings as unhealthy for the exit code; the JSON
+    # "healthy" field keeps its failure-only meaning, strictness travels in
+    # "strict_healthy" so existing consumers stay compatible.
+    strict_failed = has_failed or (strict and has_warning)
     if json_output:
         payload = {
             "checks": [c.to_dict() for c in checks],
             "repairs": [r.to_dict() for r in repairs],
             "healthy": not has_failed,
+            "strict_healthy": not strict_failed,
         }
         emit_json("doctor", payload)
-        if has_failed:
+        if strict_failed:
             raise typer.Exit(EXIT_USER_ERROR)
         return
     if repairs:
         typer.echo("Repairs performed:")
         for r in repairs:
-            typer.echo(f"  [repaired] {r.summary}")
+            if r.status == STATUS_OK:
+                mark = "[repaired]"
+            elif r.status == STATUS_WARNING:
+                mark = "[warning]"
+            else:
+                mark = "[failed]"
+            typer.echo(f"  {mark} {r.summary}")
         typer.echo("")
     table = [["", "CHECK", "STATUS", "SUMMARY"]]
     for c in checks:
@@ -151,5 +169,5 @@ def doctor_command(
         typer.echo("\nSuggested Actions:")
         for c in has_actions:
             typer.echo(f"  - {c.id}: {c.action}")
-    if has_failed:
+    if strict_failed:
         raise typer.Exit(EXIT_USER_ERROR)

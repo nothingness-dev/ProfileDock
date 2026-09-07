@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "typer>=0.12",
     "rich>=13.0",
+    "tzdata>=2025.2; platform_system == 'Windows'",
 ]
 
 [tool.setuptools.dynamic]

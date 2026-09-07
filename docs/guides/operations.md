@@ -13,13 +13,16 @@ Use `--json` on supported commands for automation. Human output may improve with
 
 ## Doctor
 
-`profiledock doctor` checks Python compatibility, data-root writability, directory permissions, metadata and backup validity, profile paths, browser availability, runtime permissions and state, orphan directories, and package-version consistency.
+`profiledock doctor` checks Python compatibility, data-root writability, directory permissions, metadata and backup validity, profile paths, browser availability, runtime permissions and state, orphan directories, package-version consistency, free disk space on the data root, metadata-lock availability, and proxy/timezone coherence of profile presets.
 
 ```bash
 profiledock doctor
 profiledock doctor --json
 profiledock doctor --repair
+profiledock doctor --strict
 ```
+
+With `--strict`, doctor exits non-zero when any check reports a warning (by default only failures affect the exit code); in `--json` output, strictness is reported separately in `strict_healthy` while `healthy` keeps its failure-only meaning.
 
 Explicit directory repairs:
 
