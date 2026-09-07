@@ -333,7 +333,7 @@ ACTIONS: tuple[ActionSpec, ...] = (
         group=Group.CONFIG.value,
         glyph="󰃖",
         glyph_fallback="t",
-        hotkey="t",
+        hotkey="a",
         fields=(PROFILE_FIELD,),
     ),
     ActionSpec(
@@ -409,7 +409,7 @@ ACTIONS: tuple[ActionSpec, ...] = (
         group=Group.DATA.value,
         glyph="󰆓",
         glyph_fallback="k",
-        hotkey="k",
+        hotkey="f",
         fields=(
             PROFILE_FIELD,
             FieldSpec(
@@ -474,22 +474,6 @@ ACTIONS: tuple[ActionSpec, ...] = (
 )
 
 ACTIONS_BY_ID: dict[str, ActionSpec] = {action.id: action for action in ACTIONS}
-
-QUIT_ACTION_ID = "__quit__"
-
-
-def group_icon(group_id: str) -> str:
-    nerd, fallback, _title = GROUP_TITLES[group_id]
-    if icons_enabled() and ord(nerd) > 0x100:
-        return nerd
-    return fallback
-
-
-def action_for_hotkey(key: str) -> ActionSpec | None:
-    for action in ACTIONS:
-        if action.hotkey == key:
-            return action
-    return None
 
 
 def grouped_actions() -> list[tuple[str, list[ActionSpec]]]:

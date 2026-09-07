@@ -16,7 +16,7 @@ from .data_root import (
     validate_path_component,
 )
 from .fsops import replace_with_retry as _replace_with_retry
-from .fsops import sha256_file
+from .fsops import rmtree_with_retry, sha256_file
 from .models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile, migrate_metadata_value
 from .process_manager import _alive, is_active_for_mutation
 from .storage import (
@@ -26,6 +26,15 @@ from .storage import (
     metadata_lock,
 )
 from .validation import ValidationError, validate_metadata_document
+
+
+def _ignore_runtime_files(directory: str, names: list[str]) -> set[str]:
+    """copytree ignore callback sharing backup's runtime-exclusion rule.
+
+    Uses ``_is_runtime_or_log_file`` so migrated copies and backup archives
+    skip the same transient files instead of maintaining a second list.
+    """
+    return {name for name in names if _is_runtime_or_log_file(str(Path(directory) / name))}
 
 
 class MigrationError(Exception):
@@ -349,7 +358,7 @@ def _remove_source(layout: SourceLayout, profiles: list[Profile]) -> None:
         if is_directory:
             try:
                 ensure_tree_safe(quarantine, layout.root)
-                shutil.rmtree(quarantine, ignore_errors=False)
+                rmtree_with_retry(quarantine)
             except (DataRootError, OSError):
                 pass
         else:
@@ -476,9 +485,7 @@ def migrate_project(
                 shutil.copytree(
                     Path(profile.data_dir),
                     temporary_data,
-                    ignore=shutil.ignore_patterns(
-                        "running.json", "controller.error", "profiles.lock", "*.tmp"
-                    ),
+                    ignore=_ignore_runtime_files,
                 )
                 if _directory_manifest(temporary_data) != manifests[profile.id]:
                     raise MigrationError(f"verification failed after copying data for {profile.id}")

@@ -60,7 +60,7 @@ def fail(
     hint: str | None = None,
 ) -> NoReturn:
     selected_category = category or error_category(message)
-    typer.echo(f"Error [{selected_category}]: {message}", err=True)
+    typer.echo(f"Error [{selected_category}]: {redact_proxy(message)}", err=True)
     if hint:
         typer.echo(f"Next steps: {hint}", err=True)
     raise typer.Exit(code)
@@ -235,8 +235,7 @@ def render_table(rows: list[list[str]]) -> str:
         return ""
     num_cols = max(len(row) for row in rows)
     col_widths = [
-        max((len(row[col]) for row in rows if col < len(row)), default=0)
-        for col in range(num_cols)
+        max((len(row[col]) for row in rows if col < len(row)), default=0) for col in range(num_cols)
     ]
     lines = []
     for row in rows:

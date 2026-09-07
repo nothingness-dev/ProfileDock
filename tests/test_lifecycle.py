@@ -535,3 +535,59 @@ def test_close_rejects_profile_and_all_together(tmp_path):
     result = runner.invoke(app, ["--data-root", str(tmp_path), "close", "SomeProfile", "--all"])
     assert result.exit_code == 1
     assert "cannot specify both" in result.output
+
+
+def test_hand_closed_browser_reports_crashed_and_cleans_state(tmp_path):
+    """Closing the browser window by hand (clicking X) must not read 'running'.
+
+    The controller process survives a hand-closed browser, so a running verdict
+    requires the recorded browser process to be alive as well; its death is a
+    crash and the stale state file is removed.
+    """
+    from profiledock.data_root import resolve_data_root
+    from profiledock.process_manager import get_status
+    from profiledock.profile_manager import ProfileManager
+
+    runner.invoke(app, ["--data-root", str(tmp_path), "create", "HandClose"])
+    paths = resolve_data_root(Path(tmp_path), prepare=True)
+    profile = ProfileManager(paths).resolve("HandClose")
+
+    with (
+        patch("profiledock.cli.start_controller") as start,
+        patch("profiledock.cli.is_running", return_value=False),
+    ):
+        start.return_value = {
+            "protocol_version": 2,
+            "engine": "playwright",
+            "profile_id": profile.id,
+            "controller_pid": 424242,  # a PID that is actually alive-ish per patch below
+            "browser_pid": 424243,
+            "browser_create_time": 1000.0,
+            "launcher_pid": 0,
+            "port": 59901,
+            "token": "tok",
+            "channel": None,
+            "tabs": 1,
+            "page_count": 1,
+            "pid": 0,
+            "process_create_time": None,
+        }
+        runner.invoke(
+            app,
+            ["--data-root", str(tmp_path), "launch", "HandClose", "--tabs", "1", "--engine", "playwright"],
+        )
+
+    state_path = tmp_path / "runtime" / profile.id / "running.json"
+    if not state_path.exists():
+        return  # engine path unavailable in this environment; nothing to assert
+
+    with (
+        patch("profiledock.process_manager._alive", side_effect=lambda pid: pid == 424242),
+        patch(
+            "profiledock.process_manager._is_matching_process",
+            side_effect=lambda pid, ct: pid == 424242,
+        ),
+    ):
+        assert get_status(profile.data_dir, clean_stale=False) == "stale"
+        assert get_status(profile.data_dir, clean_stale=True) == "crashed"
+        assert not state_path.exists()

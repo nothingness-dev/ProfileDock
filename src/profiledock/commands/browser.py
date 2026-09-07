@@ -509,9 +509,7 @@ def close_command(
             )
             typer.echo(f"Closed '{profile.name}'.")
         if already_stopped:
-            typer.echo(
-                f"{already_stopped} profile(s) already stopped."
-            )
+            typer.echo(f"{already_stopped} profile(s) already stopped.")
         return
 
     corr_id = generate_correlation_id()

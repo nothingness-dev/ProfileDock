@@ -715,3 +715,80 @@ def test_start_direct_chrome_operates_without_playwright(tmp_path):
             state = start_direct_chrome(str(data_dir), tabs=1, executable_path=executable)
             assert state["pid"] == 54321
             assert state["engine"] == "direct"
+
+
+def test_controller_spawn_detaches_into_its_own_process_group(tmp_path):
+    """Regression: the controller inherited the launcher's process group.
+
+    A controller sharing the launcher's group dies together with it (terminal
+    SIGHUP / CTRL_CLOSE_EVENT) with no chance to run its finally-block, leaving
+    the whole Chromium tree orphaned. It must be spawned detached into a fresh
+    session (POSIX) / detached process group (Windows), mirroring the direct
+    engine, so teardown signals reach the group and terminal death does not
+    propagate.
+    """
+    import subprocess
+
+    from profiledock.process_manager import BrowserLaunchError, start_controller
+
+    data_dir = tmp_path / "profile-detach" / "browser-data"
+    data_dir.mkdir(parents=True)
+
+    captured_kwargs: dict = {}
+
+    class DummyProcess:
+        pid = 424242
+        returncode = 1
+        stderr = None  # _stderr_message tolerates a closed/None pipe
+
+        def poll(self):
+            return 1  # pretend the (dummy) controller exited immediately
+
+    def capture_popen(command, **kwargs):
+        captured_kwargs.update(kwargs)
+        return DummyProcess()
+
+    with (
+        patch("profiledock.process_manager.subprocess.Popen", side_effect=capture_popen),
+        patch("profiledock.process_manager._stop_process"),
+    ):
+        with pytest.raises(BrowserLaunchError):
+            start_controller(str(data_dir), 1, headless=True, startup_timeout=2)
+
+    if sys.platform == "win32":
+        flags = captured_kwargs.get("creationflags", 0)
+        assert flags & getattr(subprocess, "DETACHED_PROCESS", 0x00000008), (
+            "controller must be spawned detached on Windows"
+        )
+        assert flags & getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200), (
+            "controller must get its own process group on Windows"
+        )
+    else:
+        assert captured_kwargs.get("start_new_session") is True, (
+            "controller must be spawned into a fresh session on POSIX"
+        )
+
+
+def test_stop_process_kills_the_whole_process_group_posix():
+    """Regression: _stop_process degraded to single-PID kill on POSIX.
+
+    The controller now runs as its own process-group leader (see
+    test_controller_spawn_detaches_into_its_own_process_group), so a
+    group-kill must be issued; a lone SIGTERM to the controller PID would
+    orphan the node driver and Chromium children.
+    """
+    from profiledock.process_manager import _stop_process
+
+    process = type("Process", (), {"pid": 4242, "poll": lambda self: None})()
+    with (
+        patch("profiledock.process.identity.sys.platform", "linux"),
+        # _stop_process and _signal_posix_process_group both live in
+        # identity.py, so the intra-module call resolves in that namespace.
+        patch("profiledock.process.identity._signal_posix_process_group") as signal_group,
+        patch("profiledock.process_manager.subprocess.run") as run,
+    ):
+        # SIGTERM path: group signal, then communicate() reaps it.
+        process.communicate = lambda timeout: (b"", b"")  # type: ignore[method-assign]
+        _stop_process(process)  # type: ignore[arg-type]
+        signal_group.assert_called_once()
+        run.assert_not_called()

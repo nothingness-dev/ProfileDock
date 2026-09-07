@@ -52,7 +52,10 @@ testpaths = ["tests"]
 timeout = 120
 # Project-local scratch root so runs never collide with a locked global
 # pytest-of-<user> directory (observed as WinError 5 on some Windows setups).
-addopts = "--basetemp=.tmp/pytest"
+# The cache lives under .tmp/ too: OneDrive sync locks .pytest_cache at the
+# repo root (WinError 5 when the cache provider writes nodeids).
+addopts = "--basetemp=.tmp/pytest --cache-clear"
+cache_dir = ".tmp/pytest-cache"
 markers = [
     "browser: end-to-end tests that launch a real Chromium or Chrome process",
 ]

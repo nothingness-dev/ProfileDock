@@ -62,6 +62,15 @@ def redact_sensitive_data(message: str, secrets: list[str] | None = None) -> str
         redacted,
         flags=re.IGNORECASE,
     )
+    # Proxy URLs with embedded credentials: scheme://user:pass@host -> user:***@host.
+    # The password part may itself contain '@' (the split is at the LAST one),
+    # so only '/' and whitespace terminate it.
+    redacted = re.sub(
+        r"((?:https?|socks5)://)([^@/\s:]+):([^/\s]+)@",
+        r"\1\2:***@",
+        redacted,
+        flags=re.IGNORECASE,
+    )
     redacted = re.sub(
         r'("token"|"secret"|"password"|"cookie"|"auth"|"key")\s*:\s*"[^"]+"',
         r'\1: "[redacted]"',

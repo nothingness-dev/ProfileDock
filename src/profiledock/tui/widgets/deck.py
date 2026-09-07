@@ -47,13 +47,23 @@ class VimOptionList(OptionList):
         return
 
     async def _on_click(self, event: events.Click) -> None:
-        """Record the click chain; selection gating happens in action_select."""
+        """Single-click highlights; selecting happens here, gated by mode.
+
+        This overrides the stock OptionList handler (Textual dispatches every
+        _on_click in the MRO, and the stock one would select unconditionally),
+        so the select call lives here: immediate for single-click lists, and
+        for double-click lists only when the click chain reaches 2.
+        """
         clicked_option: int | None = event.style.meta.get("option")
         if clicked_option is None or self._options[clicked_option].disabled:
             return
         self._click_chain = event.chain
-        if not self.double_click_selects and self.highlighted != clicked_option:
-            self.highlighted = clicked_option
+        if self.double_click_selects and event.chain < 2:
+            if self.highlighted != clicked_option:
+                self.highlighted = clicked_option
+            return
+        self.highlighted = clicked_option
+        self.action_select()
 
     def action_select(self) -> None:
         """Select, but in double-click mode swallow chain-1 clicks."""

@@ -1029,7 +1029,13 @@ def test_pdf_command_success_and_json(tmp_path, monkeypatch):
     def fake_send(data_dir, cmd, args, **kwargs):
         captured["cmd"] = cmd
         Path(args["output"]).write_bytes(b"%PDF-1.4")
-        return {"status": "ok", "output": args["output"], "url": "https://example.com", "title": "T", "bytes": 8}
+        return {
+            "status": "ok",
+            "output": args["output"],
+            "url": "https://example.com",
+            "title": "T",
+            "bytes": 8,
+        }
 
     monkeypatch.setattr(pd_cli, "send_controller_command", fake_send)
     out_file = tmp_path / "page.pdf"
@@ -1127,7 +1133,16 @@ def test_launch_proxy_flag_overrides_and_validates(tmp_path, monkeypatch):
         mock_manager.return_value.resolve.return_value = profile
         res = runner.invoke(
             app,
-            ["--data-root", str(tmp_path), "launch", "ProxyP", "--tabs", "1", "--proxy", "socks5://127.0.0.1:9050"],
+            [
+                "--data-root",
+                str(tmp_path),
+                "launch",
+                "ProxyP",
+                "--tabs",
+                "1",
+                "--proxy",
+                "socks5://127.0.0.1:9050",
+            ],
         )
     assert res.exit_code == EXIT_SUCCESS, res.output
     assert calls[0].get("proxy") == "socks5://127.0.0.1:9050"
@@ -1170,7 +1185,15 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "SecProf"])
     res = runner.invoke(
         app,
-        ["--data-root", str(tmp_path), "config", "set", "SecProf", "proxy", "socks5://user:hunter2@127.0.0.1:1080"],
+        [
+            "--data-root",
+            str(tmp_path),
+            "config",
+            "set",
+            "SecProf",
+            "proxy",
+            "socks5://user:hunter2@127.0.0.1:1080",
+        ],
     )
     assert res.exit_code == EXIT_SUCCESS, res.output
     assert "hunter2" not in res.output  # even the set command redacts

@@ -25,7 +25,7 @@ from rich.text import Text
 from ..backup import create_backup_archive
 from ..browser_detection import browser_rows
 from ..cli_contract import EXIT_SUCCESS, EXIT_USER_ERROR, error_category
-from ..cli_support import format_cpu_percent
+from ..cli_support import format_cpu_percent, redact_proxy
 from ..data_root import DataPaths
 from ..doctor import STATUS_FAILED, STATUS_OK, STATUS_WARNING, DiagnosticCheck, run_diagnostics
 from ..fsops import write_private_json
@@ -504,7 +504,7 @@ def run_action(paths: DataPaths, action_id: str, values: dict[str, object]) -> A
     except BackendError as exc:
         body = Text()
         body.append(f"Error [{exc.category}]: ", style="bold red")
-        body.append(exc.message)
+        body.append(redact_proxy(exc.message) or exc.message)
         if exc.hint:
             body.append(f"\nNext steps: {exc.hint}", style="dim")
         return ActionResult(
@@ -518,13 +518,13 @@ def run_action(paths: DataPaths, action_id: str, values: dict[str, object]) -> A
         category = "profile_active" if isinstance(exc, ProfileRunningError) else "browser_launch_failed"
         body = Text()
         body.append(f"Error [{category}]: ", style="bold red")
-        body.append(str(exc))
+        body.append(redact_proxy(str(exc)) or str(exc))
         return ActionResult(argv=argv, exit_code=EXIT_USER_ERROR, body=body, category=category)
     except (OSError, ValueError) as exc:
         category = error_category(str(exc))
         body = Text()
         body.append(f"Error [{category}]: ", style="bold red")
-        body.append(str(exc))
+        body.append(redact_proxy(str(exc)) or str(exc))
         return ActionResult(argv=argv, exit_code=EXIT_USER_ERROR, body=body, category=category)
 
 

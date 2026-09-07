@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import time
 from hashlib import sha256
 from pathlib import Path
@@ -38,6 +39,30 @@ def replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None
                 raise
             time.sleep(poll_interval)
             poll_interval = min(poll_interval * 1.5, 0.05)
+
+
+def rmtree_with_retry(directory: Path, timeout: float = 5.0) -> None:
+    """rmtree that rides out transient Windows sharing violations.
+
+    Antivirus scanners, search indexers and just-terminated browser processes
+    hold handles on files for a short window after a directory becomes
+    deletable; the first rmtree attempt then fails with PermissionError even
+    though removal would succeed moments later. Retry until the deadline
+    before surfacing the error. Directory entries already removed stay removed.
+    """
+    deadline = time.monotonic() + timeout
+    poll_interval = 0.02
+    while True:
+        try:
+            shutil.rmtree(directory, ignore_errors=False)
+            return
+        except FileNotFoundError:
+            return
+        except (PermissionError, OSError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 0.2)
 
 
 def write_all(fd: int, payload: bytes) -> None:

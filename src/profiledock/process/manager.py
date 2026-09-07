@@ -93,6 +93,16 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None
         port = int(state.get("port", 0))
         if not port:
             return "starting"
+        # A hand-closed browser window (clicking the X) leaves the controller
+        # process alive; "running" therefore requires the recorded browser
+        # process too. When browser_pid is missing/unreadable the controller
+        # alone decides, preserving compatibility with older state files.
+        browser_pid = int(state.get("browser_pid", 0) or 0)
+        if browser_pid > 0 and not _is_matching_process_impl(browser_pid, state.get("browser_create_time")):
+            if clean_stale:
+                _unlink_quietly(path)
+                return "crashed"
+            return "stale"
         return "running"
     if err.exists():
         err_data = _read_error(err)
@@ -140,6 +150,18 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Path | None = None) -> bo
         return True
     controller_pid = int(upgraded.get("controller_pid", -1))
     launcher_pid = int(upgraded.get("launcher_pid", -1))
+    # Mirror get_status: a hand-closed browser leaves the controller alive but
+    # the profile is not truly active; IPC attach below cleans such states up.
+    from profiledock.process_manager import _is_matching_process as _matching_impl
+
+    browser_pid = int(upgraded.get("browser_pid", 0) or 0)
+    if (
+        controller_pid > 0
+        and _alive_impl(controller_pid)
+        and browser_pid > 0
+        and not _matching_impl(browser_pid, upgraded.get("browser_create_time"))
+    ):
+        return False
     return (
         _alive_impl(controller_pid)
         or _controller_available_impl(upgraded)

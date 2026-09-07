@@ -304,6 +304,19 @@ class ProfilePicker(Vertical):
         self._query = event.value.strip()
         self._repaint()
 
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        # Clicking (or Enter on) a profile in the list commits it — without
+        # this the picker highlights but the value stays on the previous
+        # selection, so forms like close/delete act on the wrong profile.
+        event.stop()
+        value = str(event.option.id or "")
+        if value:
+            self._value = value
+            self._query = ""
+            self.query_one("ProfilePicker Input", Input).value = ""
+            self._repaint()
+            self.post_message(self.Changed(self, value))
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         # Enter in the picker's search box commits the best visible match
         # instead of being swallowed — otherwise single-pick forms (delete,
@@ -549,7 +562,7 @@ class FormPanel(VerticalScroll):
             return
 
         def try_focus(attempt: int) -> None:
-            if self._spec is None or self.styles.display != "block":
+            if self._spec is None or not self._order or self.styles.display != "block":
                 return
             target = self._focus_target(self._order[0])
             if target is not None:

@@ -134,8 +134,10 @@ def config_set_command(
             profile_manager.update_launch_config(profile_id, proxy=target)
             shown = redact_proxy(target) or "(cleared)"
             typer.echo(f"Set proxy to '{shown}' for profile '{profile.name}' ({profile.id})")
-            typer.echo(f"  {redact_proxy(_old('proxy') if _old('proxy') != '(unset)' else None) or '(unset)'}"
-                       f" -> {shown}")
+            typer.echo(
+                f"  {redact_proxy(_old('proxy') if _old('proxy') != '(unset)' else None) or '(unset)'}"
+                f" -> {shown}"
+            )
         elif clean_setting == "user-agent":
             validate_user_agent(clean_val)
             profile_manager.update_launch_config(profile_id, user_agent=clean_val)

@@ -17,7 +17,7 @@ from .data_root import (
     validate_path_component,
 )
 from .fsops import replace_with_retry as _replace_with_retry
-from .fsops import sha256_file
+from .fsops import rmtree_with_retry, sha256_file
 from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_launch_config
 from .process_manager import is_active_for_mutation
 from .storage import (
@@ -559,7 +559,7 @@ def restore_backup_archive(
                     for q_dir, _ in quarantined_existing:
                         try:
                             ensure_tree_safe(q_dir, data_paths.root)
-                            shutil.rmtree(q_dir, ignore_errors=False)
+                            rmtree_with_retry(q_dir)
                         except (DataRootError, OSError):
                             pass
 
@@ -569,7 +569,7 @@ def restore_backup_archive(
                         if final_dir.exists():
                             try:
                                 ensure_tree_safe(final_dir, data_paths.root)
-                                shutil.rmtree(final_dir, ignore_errors=False)
+                                rmtree_with_retry(final_dir)
                             except (DataRootError, OSError) as rmtree_exc:
                                 cleanup_failures.append(
                                     f"could not remove partially restored '{final_dir.name}': {rmtree_exc}"
@@ -586,7 +586,7 @@ def restore_backup_archive(
                 if temp_restore_root.exists():
                     try:
                         ensure_tree_safe(temp_restore_root, data_paths.root)
-                        shutil.rmtree(temp_restore_root, ignore_errors=False)
+                        rmtree_with_retry(temp_restore_root)
                     except (DataRootError, OSError):
                         pass
 

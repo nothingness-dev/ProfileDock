@@ -413,7 +413,9 @@ def _launch_context(
     if window_width is not None and window_height is not None:
         kwargs["viewport"] = {"width": window_width, "height": window_height}
         kwargs["args"] = [f"--window-size={window_width},{window_height}"]
-    kwargs.update(_playwright_proxy_options(proxy))
+    proxy_options = _playwright_proxy_options(proxy)
+    if proxy_options:
+        kwargs["proxy"] = proxy_options
     if user_agent:
         kwargs["user_agent"] = user_agent
     if locale:
@@ -454,6 +456,7 @@ def _controller(
     user_agent: str | None = None,
     locale: str | None = None,
     timezone: str | None = None,
+    _install_signal_handlers: bool = True,
 ) -> int:
     # Late-bound so patches of profiledock.process_manager._atomic_private_json
     # and ._get_process_create_time keep applying.
@@ -465,6 +468,27 @@ def _controller(
     )
 
     err = path.parent / "controller.error"
+
+    # A graceful termination signal must reach the context teardown below
+    # instead of killing the process with default disposition, which would
+    # orphan Chromium and leave running.json behind. Raising SystemExit from
+    # the handler unwinds through the try/finally blocks that close the
+    # context and unlink the state file. Armed before anything else so even
+    # early-exit paths (missing playwright) still die by teardown semantics.
+    if _install_signal_handlers:
+        import signal as signal_module
+
+        def _terminate(_signum: int, _frame: Any) -> None:
+            raise SystemExit(f"controller terminated by signal {_signum}")
+
+        for _sig_name in ("SIGTERM", "SIGINT"):
+            _sig = getattr(signal_module, _sig_name, None)
+            if _sig is not None:
+                try:
+                    signal_module.signal(_sig, _terminate)
+                except (OSError, ValueError):
+                    pass
+
     initial_state = _read_state(path) or {}
     if browser_channel is None and isinstance(initial_state.get("browser_channel"), str):
         browser_channel = initial_state["browser_channel"]

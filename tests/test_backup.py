@@ -409,9 +409,7 @@ def test_cli_verify_reports_success_and_json(tmp_path):
     assert result.exit_code == EXIT_SUCCESS
     assert "All checksums verified." in result.output
 
-    json_result = runner.invoke(
-        app, ["--data-root", str(tmp_path), "verify", str(out_archive), "--json"]
-    )
+    json_result = runner.invoke(app, ["--data-root", str(tmp_path), "verify", str(out_archive), "--json"])
     assert json_result.exit_code == EXIT_SUCCESS
     payload = json.loads(json_result.output)
     assert payload["command"] == "verify"

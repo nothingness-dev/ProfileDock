@@ -359,6 +359,15 @@ def check_playwright_chromium() -> DiagnosticCheck:
 
         with sync_playwright() as p:
             exec_path = p.chromium.executable_path
+            # executable_path is computed locally, so the driver's init task
+            # never completes; exiting then leaves a pending asyncio task that
+            # dumps "Task was destroyed but it is pending" noise at exit. One
+            # cheap round-trip (a failing connect is enough) pumps the loop
+            # and lets the session shut down cleanly.
+            try:
+                p.chromium.connect_over_cdp("http://127.0.0.1:1", timeout=200)
+            except Exception:
+                pass
             if exec_path and Path(exec_path).exists():
                 return DiagnosticCheck(
                     id=check_id,

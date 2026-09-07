@@ -42,6 +42,43 @@ def test_delete_removes_metadata_when_profile_directory_is_missing(manager):
     assert manager.list_profiles() == []
 
 
+def test_delete_retries_directory_removal_while_files_are_locked(manager, monkeypatch):
+    """Regression: quarantine rmtree had no Windows file-lock retry.
+
+    An antivirus/indexer/scanner holding a handle on a just-released file
+    makes the first rmtree attempt fail with PermissionError; without a
+    retry the delete command errored even though the metadata removal had
+    already committed, stranding the .deleting-* quarantine directory.
+    """
+    import shutil as shutil_module
+    import time as time_module
+
+    from profiledock import profile_manager as pm_module
+
+    profile = manager.create("LockedTree")
+    profile_id = profile.id
+
+    real_rmtree = shutil_module.rmtree
+    attempts = {"count": 0}
+
+    def flaky_rmtree(path, *args, **kwargs):
+        # delete() renames the profile root to .deleting-<id>-<hex> before
+        # removing it; the transient lock hits that quarantine path.
+        if f".deleting-{profile_id}-" in str(path) and attempts["count"] < 2:
+            attempts["count"] += 1
+            raise PermissionError(5, "Access is denied (transient AV scan)")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(pm_module.shutil, "rmtree", flaky_rmtree)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+
+    manager.delete(profile.id)
+    assert attempts["count"] == 2, "delete gave up instead of retrying through transient locks"
+    assert manager.list_profiles() == []
+    leftovers = list(manager.profiles_dir.glob(f".deleting-{profile_id}-*"))
+    assert not leftovers, f"quarantine dir survived deletion: {leftovers}"
+
+
 def test_malformed_running_state_is_preserved(manager):
     profile = manager.create("Personal")
     path = state_path(profile.data_dir)

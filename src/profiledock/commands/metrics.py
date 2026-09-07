@@ -38,9 +38,7 @@ class _MetricsRow:
     disk_bytes: int
 
 
-def _collect_rows(
-    profiles: list[Any], runtime_path_fn: Any, cpu_sample_interval: float
-) -> list[_MetricsRow]:
+def _collect_rows(profiles: list[Any], runtime_path_fn: Any, cpu_sample_interval: float) -> list[_MetricsRow]:
     from ..metrics import collect_profiles_metrics
 
     metrics_rows = collect_profiles_metrics(profiles, runtime_path_fn, cpu_sample_interval)

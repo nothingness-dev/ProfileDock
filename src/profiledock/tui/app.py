@@ -28,7 +28,7 @@ from textual.widgets import Input, Label
 
 from ..data_root import DataPaths
 from . import backend, theme
-from .actions import ACTIONS, ACTIONS_BY_ID, GROUP_TITLES, ActionSpec
+from .actions import ACTIONS, ACTIONS_BY_ID, GROUP_TITLES, ActionSpec, build_argv
 from .widgets import (
     CommandDeck,
     CommandPreview,
@@ -190,7 +190,14 @@ class ProfileDockApp(App[None]):
         self._check_size()
         self.refresh_profiles(with_sizes=True)
         self._prefetch_browsers()
-        self.set_interval(5, self._periodic_refresh)
+        # Adaptive polling: statuses flip in near-realtime while any profile
+        # is running (a hand-closed window should register within a second),
+        # and the cadence backs off when everything is stopped. The timer
+        # must stay running — _periodic_refresh swaps its interval only when
+        # it observes a running/idle transition, which a paused timer never
+        # gets the chance to do.
+        self._fast_poll = False
+        self._poll_handle = self.set_interval(5.0, self._periodic_refresh)
 
     @staticmethod
     def _resolve_paths() -> DataPaths | None:
@@ -215,6 +222,7 @@ class ProfileDockApp(App[None]):
         fn: Callable[[], Any],
         on_done: Callable[[Any], None],
         group: str,
+        fallback_argv: list[str] | None = None,
     ) -> None:
         def wrapper() -> None:
             try:
@@ -222,10 +230,13 @@ class ProfileDockApp(App[None]):
             except Exception as exc:
                 if group == "action":
                     from rich.text import Text
+
+                    from ..cli_support import redact_proxy
+
                     result = backend.ActionResult(
-                        argv=["profiledock"],
+                        argv=fallback_argv or ["profiledock"],
                         exit_code=1,
-                        body=Text(str(exc), style="bold red"),
+                        body=Text(redact_proxy(str(exc)) or str(exc), style="bold red"),
                         category="internal_error",
                     )
                 else:
@@ -267,12 +278,24 @@ class ProfileDockApp(App[None]):
         self._rows = rows
         rail = self.query_one("#rail", ProfileRail)
         rail.set_rows(rows, keep_id=keep or self._selected_profile_id)
+        # The kept id may have vanished (deleted elsewhere / stale): resync the
+        # selection to whatever the rail actually highlights now.
+        current = rail.current_row
+        if current is not None and current.profile_id != self._selected_profile_id:
+            self._selected_profile_id = current.profile_id
         self._update_header()
         self._show_cards()
 
     def _periodic_refresh(self) -> None:
-        if not self._busy:
-            self.refresh_profiles(with_sizes=False)
+        if self._busy:
+            return
+        any_running = any(row.status in ("running", "starting", "closing") for row in self._rows)
+        if any_running != self._fast_poll:
+            self._fast_poll = any_running
+            interval = 1.0 if any_running else 5.0
+            self._poll_handle.stop()
+            self._poll_handle = self.set_interval(interval, self._periodic_refresh)
+        self.refresh_profiles(with_sizes=False)
 
     def _update_header(self) -> None:
         header = self.query_one("#app-header", HeaderBar)
@@ -394,10 +417,12 @@ class ProfileDockApp(App[None]):
         self._busy = True
         output.set_busy(f"running profiledock {spec.label} …")
         paths = self._paths
+        fallback_argv = build_argv(spec, values)
         self._launch_worker(
             lambda: backend.run_action(paths, spec.id, values),
             self._apply_result,
             group="action",
+            fallback_argv=fallback_argv,
         )
 
     def _apply_result(self, result: backend.ActionResult) -> None:

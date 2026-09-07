@@ -10,6 +10,7 @@ from .data_root import (
     resolve_data_root,
     validate_path_component,
 )
+from .fsops import rmtree_with_retry
 from .models import LaunchConfig, MetadataDocument, Profile, utc_now
 from .process_manager import ProfileRunningError, is_active_for_mutation
 from .storage import (
@@ -142,10 +143,10 @@ class ProfileManager:
             raise
         if quarantine is not None:
             ensure_tree_safe(quarantine, self.root)
-            shutil.rmtree(quarantine, ignore_errors=False)
+            rmtree_with_retry(quarantine)
         if runtime_path.exists():
             ensure_tree_safe(runtime_path, self.root)
-            shutil.rmtree(runtime_path, ignore_errors=False)
+            rmtree_with_retry(runtime_path)
         return profile
 
     def _updated_profile(self, doc: MetadataDocument, profile_id: str) -> Profile:

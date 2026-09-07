@@ -35,13 +35,6 @@ except ImportError:  # pragma: no cover - exercised only without the extra
         return DEFAULT_THEME
 
 
-def _glyph(name: str) -> str:
-    spec = next((action for action in ACTIONS if action.id == name), None)
-    if spec is None:
-        return "*"
-    return spec.icon
-
-
 def _menu_items() -> list[tuple[str, str, tuple[str, ...], bool]]:
     """Historical MENU_ITEMS shape: (command, description, prompts, destructive)."""
     items: list[tuple[str, str, tuple[str, ...], bool]] = []
@@ -61,7 +54,6 @@ def _menu_items() -> list[tuple[str, str, tuple[str, ...], bool]]:
 
 
 MENU_ITEMS: list[tuple[str, str, tuple[str, ...], bool]] = _menu_items()
-QUIT_LABEL = "quit"
 
 
 def run_interactive() -> int:

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from .errors import BrowserLaunchError, ProfileRunningError
@@ -113,12 +114,25 @@ def start_controller(
     if timezone:
         command.extend(["--timezone", timezone])
     try:
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
+        popen_kwargs: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE,
+        }
+        if sys.platform == "win32":
+            # Detach the controller from the launcher's console and give it
+            # its own process group: terminal death (CTRL_CLOSE_EVENT) then
+            # cannot kill it mid-teardown, and group-scoped termination
+            # reaches the node driver + Chromium children.
+            popen_kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+            )
+        else:
+            # Fresh session on POSIX: the controller becomes a process-group
+            # leader, so terminal SIGHUP does not propagate and
+            # _signal_posix_process_group kills the whole tree.
+            popen_kwargs["start_new_session"] = True
+        process = subprocess.Popen(command, **popen_kwargs)
         deadline = time.monotonic() + startup_timeout
         poll_interval = 0.02
         try:
@@ -226,6 +240,8 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
                     min(max(timeout, 0.1), 5),
                 )
             _unlink_quietly(path)
+            if close_sent:
+                return
             raise ProfileRunningError("profile is not running", stopped=True)
         time.sleep(poll_interval)
         poll_interval = min(poll_interval * 1.5, 0.1)

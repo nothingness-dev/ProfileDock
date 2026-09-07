@@ -207,3 +207,81 @@ def test_browser_attempt_errors_identify_the_missing_channel():
         _launch_context(instance, "unused", True)
     assert "Playwright Chromium" in str(raised.value)
     assert "playwright install chromium" in str(raised.value)
+
+
+def test_fail_exception_redacts_proxy_credentials(tmp_path, monkeypatch, capsys):
+    """An exception message carrying proxy credentials must never reach output."""
+    import typer
+
+    from profiledock import cli as pd_cli
+    from profiledock.process_manager import BrowserLaunchError
+
+    monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(tmp_path))
+    pd_cli._paths.set(None)
+    pd_cli._paths_prepared.set(False)
+
+    secret = "SuperSecret99"
+    exc = BrowserLaunchError(f"boom socks5://user:{secret}@127.0.0.1:1080")
+    with pytest.raises(typer.Exit):
+        pd_cli.fail_exception(exc)
+    captured = capsys.readouterr()
+    assert secret not in captured.err + captured.out
+    assert "user:***@127.0.0.1:1080" in captured.err
+
+
+def test_log_details_redact_proxy_credentials(tmp_path):
+    from profiledock.logger import write_log_entry
+
+    log_dir = tmp_path / "logs"
+    write_log_entry(
+        log_dir=log_dir,
+        level="ERROR",
+        event="browser_launch_failed",
+        correlation_id="c1",
+        result="failed",
+        details={"error": "launch failed for socks5://user:TopSecret77@10.0.0.1:9050"},
+    )
+    log_text = (log_dir / "profiledock.log").read_text(encoding="utf-8")
+    assert "TopSecret77" not in log_text
+    assert "user:***@10.0.0.1:9050" in log_text
+
+
+def test_tui_error_body_redacts_proxy_credentials(tmp_path, monkeypatch):
+    """TUI action errors carrying proxy credentials must render redacted."""
+
+    from textual.widgets import OptionList  # noqa: F401 - ensures textual present
+
+    from profiledock import cli as pd_cli
+    from profiledock.data_root import resolve_data_root
+    from profiledock.process_manager import BrowserLaunchError
+    from profiledock.profile_manager import ProfileManager
+    from profiledock.tui.backend import ActionResult, run_action
+
+    monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(tmp_path))
+    pd_cli._paths.set(None)
+    pd_cli._paths_prepared.set(False)
+    paths = resolve_data_root(prepare=True)
+    manager = ProfileManager(paths)
+    manager.create("TLT", engine="playwright")
+
+    from unittest.mock import patch as _patch
+
+    def boom(data_dir, tabs, **kw):
+        raise BrowserLaunchError("connect failed socks5://user:UiLeak44@127.0.0.1:1080")
+
+    with _patch("profiledock.tui.backend.start_controller", side_effect=boom):
+        result = run_action(paths, "launch", {"profile": "TLT", "tabs": "1", "engine": "playwright"})
+    assert isinstance(result, ActionResult)
+    assert result.exit_code != 0
+    body_text = str(result.body)
+    assert "UiLeak44" not in body_text
+    assert "user:***@127.0.0.1:1080" in body_text
+
+
+def test_logger_regex_handles_at_inside_password():
+    from profiledock.logger import redact_sensitive_data
+
+    text = "connect socks5://user:se@cret@host:1"
+    redacted = redact_sensitive_data(text)
+    assert "se@cret" not in redacted
+    assert "user:***@host:1" in redacted

@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -222,6 +223,106 @@ def test_channel_included_in_controller_state(controller_env):
     assert "channel" in state
     assert state["channel"] in ("chromium", "chrome")
     _close(data_dir, owned_pids, state["pid"])
+
+
+def test_launch_with_http_proxy_and_credentials(controller_env):
+    """Regression: proxy options were splatted as top-level launch kwargs.
+
+    launch_persistent_context takes proxy as a nested dict; passing
+    server=/username= as kwargs raises TypeError (unexpected keyword
+    argument 'server'), so a proxied launch never started.
+    """
+    from profiledock.process_manager import start_controller
+
+    manager, profile, data_dir, owned_pids = controller_env
+    state = start_controller(
+        str(data_dir),
+        1,
+        headless=True,
+        proxy="http://user:pw@127.0.0.1:18080",
+    )
+    owned_pids.add(state["pid"])
+    assert state["page_count"] == 1
+    _close(data_dir, owned_pids, state["pid"])
+
+
+def test_sigterm_to_controller_cleans_up_browser_and_state(controller_env):
+    """Regression: SIGTERM killed the controller with default disposition.
+
+    A graceful termination signal (system shutdown, process manager, kill)
+    must run the controller's teardown: context.close() flushes profile data,
+    the Chromium process exits, and running.json is removed. With default
+    disposition the browser was orphaned and state left behind.
+    """
+    if sys.platform == "win32":
+        pytest.skip("POSIX signal semantics; Windows relies on taskkill without /F")
+
+    manager, profile, data_dir, owned_pids = controller_env
+    state = _start(data_dir, owned_pids, tabs=1)
+    controller_pid = state["pid"]
+    browser_pid = state["browser_pid"]
+    assert browser_pid > 0
+
+    os.kill(controller_pid, signal.SIGTERM)
+
+    assert _wait_until(lambda: not _process_alive(controller_pid), timeout=15)
+    assert _wait_until(lambda: not _process_alive(browser_pid), timeout=15), (
+        "browser process survived controller SIGTERM"
+    )
+    assert _wait_until(lambda: not state_path(str(data_dir)).exists(), timeout=5)
+    owned_pids.discard(controller_pid)
+
+
+def test_controller_installs_graceful_termination_handlers(tmp_path, monkeypatch):
+    """The controller entry point must arm SIGTERM/SIGINT teardown handlers.
+
+    Without them a graceful kill uses the default disposition and skips
+    context.close() entirely, orphaning Chromium. The test drives
+    main()-level arming directly, so it is cross-platform.
+    """
+    import argparse
+    import signal as signal_module
+
+    from profiledock.process import controller as controller_module
+
+    armed: list[int] = []
+
+    monkeypatch.setattr(
+        signal_module,
+        "signal",
+        lambda num, handler: armed.append(num) or signal_module.SIG_DFL,
+    )
+    # Block the playwright import so the real _controller exits early via the
+    # playwright_unavailable path — signal arming happens before that exit.
+    real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "playwright.sync_api":
+            raise ImportError("playwright missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", blocked_import)
+
+    class FakeArgs:
+        controller = tmp_path / "running.json"
+        data_dir = str(tmp_path / "browser-data")
+        tabs = 1
+        token = "x" * 32
+        headless = True
+        browser_channel = None
+        window_size = None
+        url = []
+        proxy = None
+        user_agent = None
+        locale = None
+        timezone = None
+
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", lambda self, *a, **k: FakeArgs())
+
+    with pytest.raises(SystemExit):
+        controller_module.main()
+    assert signal_module.SIGTERM in armed
+    assert signal_module.SIGINT in armed
 
 
 def test_start_controller_preserves_native_exit_diagnostic(controller_env):

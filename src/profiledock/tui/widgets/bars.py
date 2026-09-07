@@ -8,7 +8,6 @@ from typing import Any
 from rich.table import Table
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -37,14 +36,9 @@ class HeaderBar(Static):
     }
     """
 
-    workspace: reactive[str] = reactive("[0] Default")
-
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._metrics: tuple[int, int, str, str] = (0, 0, "-", "auto")
-
-    def set_workspace(self, label: str) -> None:
-        self.workspace = label
 
     def set_metrics(self, running: int, total: int, storage: str, engine: str) -> None:
         self._metrics = (running, total, storage, engine)
@@ -54,12 +48,8 @@ class HeaderBar(Static):
         running, total, storage, engine = self._metrics
         app_theme = str(self.app.theme)
         line = Table.grid(expand=True)
-        line.add_column(justify="left", ratio=1)
-        line.add_column(justify="center", ratio=2)
+        line.add_column(justify="center", ratio=1)
         line.add_column(justify="right", ratio=1)
-
-        badge_style = f"bold {_contrast(app_theme)} on {_token('pd-amber', app_theme)}"
-        badge = Text(f" {self.workspace} ", style=badge_style)
 
         title = Text()
         title.append("ProfileDock", style="bold")
@@ -77,7 +67,7 @@ class HeaderBar(Static):
         metrics.append("Engine: ", style=_token("pd-muted", app_theme))
         metrics.append(engine, style="bold")
 
-        line.add_row(badge, title, metrics)
+        line.add_row(title, metrics)
         return line
 
 

@@ -88,10 +88,6 @@ def next_theme(current: str) -> str:
     return THEME_CYCLE[index]
 
 
-def theme_label(theme_name: str) -> str:
-    return theme_name
-
-
 def is_dark(theme_name: str | None = None) -> bool:
     """Whether the given (or configured) theme uses a dark background."""
     selected = theme_name or configured_theme()

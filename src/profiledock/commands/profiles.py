@@ -1,6 +1,5 @@
 """Profile lifecycle and inspection commands: create, list, show, rename, delete."""
 
-
 import typer
 
 from ..cli_support import (

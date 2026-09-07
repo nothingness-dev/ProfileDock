@@ -612,3 +612,107 @@ def app_instance_root():
     import os
 
     return os.environ["PROFILEDOCK_DATA_ROOT"]
+
+
+@pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
+@pytest.mark.asyncio
+class TestSelectionAndRealtimeRegressions:
+    """Regressions: picker click commits, statuses poll in realtime."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_data_root(self, tmp_path_factory, monkeypatch):
+        from profiledock import cli as pd_cli
+
+        root = tmp_path_factory.mktemp("pd-root-sel")
+        monkeypatch.setenv("PROFILEDOCK_DATA_ROOT", str(root))
+        pd_cli._paths.set(None)
+        pd_cli._paths_prepared.set(False)
+        self._data_root = root
+        return root
+
+    def _make_profiles(self, count=3):
+        from profiledock.data_root import resolve_data_root
+        from profiledock.profile_manager import ProfileManager
+
+        paths = resolve_data_root(self._data_root, prepare=True)
+        manager = ProfileManager(paths)
+        # Names use letters outside hex (t, z): a search query for one name
+        # can never fuzzy-match another profile's random hex id, keeping the
+        # best-match deterministic across runs.
+        names = ("TargetZ", "OtherA", "OtherB")
+        for index in range(count):
+            manager.create(names[index])
+        return paths
+
+    async def _settle(self, pilot, app_instance, rounds=2):
+        for _ in range(rounds):
+            await pilot.pause()
+            try:
+                await app_instance.workers.wait_for_complete()
+            except Exception:
+                pass
+        await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_picker_click_commits_selection(self):
+        """Clicking a profile row in the form picker must change the value."""
+        self._make_profiles()
+        from textual.widgets import Input
+
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.widgets.forms import FormPanel, ProfilePicker
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance, rounds=3)
+            assert len(app_instance._rows) == 3
+            await pilot.press("w")  # close form opens with picker focused
+            await pilot.pause()
+            form = app_instance.query_one("#form-pane", FormPanel)
+            picker = form.query_one("#picker-profile", ProfilePicker)
+            initial = picker.value
+            # Commit a different profile through the same OptionSelected
+            # handler a click takes, pinned to the actual row ids.
+            listing = picker.query_one("ProfilePicker VimOptionList")
+            other = next(row.profile_id for row in app_instance._rows if row.profile_id != initial)
+            from textual.widgets import OptionList
+
+            listing.post_message(
+                OptionList.OptionSelected(
+                    listing, listing.get_option_at_index(listing.get_option_index(other)), 0
+                )
+            )
+            await pilot.pause()
+            assert picker.value == other, "picker selection did not commit"
+            # search + enter still commits the best match
+            inp = picker.query_one("ProfilePicker Input", Input)
+            inp.focus()
+            await pilot.press(*"TargetZ")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert "TargetZ" in {row.name for row in app_instance._rows if row.profile_id == picker.value}
+
+    @pytest.mark.asyncio
+    async def test_poll_speeds_up_when_running(self):
+        self._make_profiles(1)
+        from profiledock.interactive import ProfileDockApp
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            assert app_instance._fast_poll is False
+            # Simulate a running profile appearing in rows.
+            from profiledock.tui.backend import ProfileRow
+
+            app_instance._rows = [ProfileRow(app_instance._rows[0].profile, status="running")]
+            app_instance._busy = False
+            app_instance._periodic_refresh()
+            await pilot.pause()
+            assert app_instance._fast_poll is True
+            assert app_instance._poll_handle._interval == 1.0
+            app_instance._rows = []
+            app_instance._periodic_refresh()
+            await pilot.pause()
+            assert app_instance._fast_poll is False
+            assert app_instance._poll_handle._interval == 5.0

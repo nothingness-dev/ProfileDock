@@ -151,9 +151,7 @@ def build_launch_plan(
     )
 
 
-def direct_launch_options(
-    plan: LaunchPlan, extra_args: list[str] | None = None
-) -> dict[str, Any]:
+def direct_launch_options(plan: LaunchPlan, extra_args: list[str] | None = None) -> dict[str, Any]:
     """Assemble keyword options for :func:`start_direct_chrome` from a plan."""
     options: dict[str, Any] = {}
     if plan.browser is not None:
