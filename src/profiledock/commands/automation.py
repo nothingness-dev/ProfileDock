@@ -1,27 +1,169 @@
 """Playwright session automation commands: tabs, open-tab, close-tab, read, shot, eval, cookies."""
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import typer
 
 from ..cli_support import emit_json, fail, fail_exception, selected_paths
-from ..fsops import write_private_json
+from ..data_root import _is_link
+from ..fsops import replace_with_retry, write_all, write_private_json
 from ..process_manager import (
     BrowserLaunchError,
     ProfileRunningError,
 )
 from ..profile_manager import AmbiguousProfileError, ProfileManager, ProfileNotFoundError
 from ..storage import StorageError
-from ..validation import ValidationError, validate_url
+from ..validation import ValidationError, validate_cookie_url_filter, validate_url
 
 
 def _get_manager() -> ProfileManager:
     from ..cli import manager
 
     return manager()
+
+
+def _apply_cookie_filters(
+    cookies: list[dict[str, Any]],
+    *,
+    domains: list[str] | None,
+    session_only: bool,
+) -> list[dict[str, Any]]:
+    """Client-side cookie filtering shared by the cookies command.
+
+    Domain filters mirror cookie-domain scoping: a cookie's domain attribute
+    (leading dot included) matches when it equals the filter or ends with
+    '.' + filter. Session-only keeps cookies whose expires is -1, Playwright's
+    marker for a session cookie.
+    """
+    result = cookies
+    if domains:
+        lowered = [d.strip().lower().lstrip(".") for d in domains if d.strip()]
+        result = [
+            c
+            for c in result
+            if any(
+                (str(c.get("domain", "")).lower().lstrip(".") == d)
+                or str(c.get("domain", "")).lower().lstrip(".").endswith("." + d)
+                for d in lowered
+            )
+        ]
+    if session_only:
+        result = [c for c in result if c.get("expires", -1) == -1]
+    return result
+
+
+def _cookie_domain_summary(cookies: list[dict[str, Any]]) -> str:
+    """One-line domain breakdown for the human export summary."""
+    counts: dict[str, int] = {}
+    for c in cookies:
+        domain = str(c.get("domain", "")).lstrip(".") or "(none)"
+        counts[domain] = counts.get(domain, 0) + 1
+    if not counts:
+        return ""
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{domain} ({count})" for domain, count in ordered)
+
+
+_NETSCAPE_FIELDS = ("domain", "include_subdomains", "path", "secure", "expires", "name", "value")
+
+
+def _parse_cookie_file(raw: str, source: Path) -> list[dict[str, Any]]:
+    """Parse a cookie file: JSON array (a previous export) or Netscape cookies.txt.
+
+    Format detection: content starting with '[' is JSON; otherwise Netscape.
+    Netscape expires 0 denotes a session cookie and maps to Playwright's -1.
+    Parsing finishes before the cookie list is sent to the browser.
+    """
+    stripped = raw.lstrip()
+    if stripped.startswith("["):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON: {exc}") from exc
+        if not isinstance(data, list) or not all(isinstance(c, dict) for c in data):
+            raise ValueError("JSON cookie file must be an array of cookie objects")
+        for index, cookie in enumerate(data):
+            if not str(cookie.get("name", "")).strip() or not isinstance(cookie.get("value"), str):
+                raise ValueError(f"malformed cookie entry at index {index}: name and value are required")
+            if not cookie.get("domain") and not cookie.get("url"):
+                raise ValueError(f"malformed cookie entry at index {index}: 'domain' (or 'url') is required")
+        return data
+
+    cookies: list[dict[str, Any]] = []
+    for line_no, line in enumerate(raw.splitlines(), start=1):
+        http_only = line.startswith("#HttpOnly_")
+        if http_only:
+            line = line[len("#HttpOnly_") :]
+        if not line.strip() or (line.startswith("#") and not http_only):
+            continue
+        parts = line.split("\t")
+        if len(parts) != len(_NETSCAPE_FIELDS):
+            raise ValueError(f"malformed cookie entry at line {line_no}: expected 7 tab-separated fields")
+        domain, include_sub, path, secure, expires, name, value = parts
+        if not domain or not name or include_sub not in {"TRUE", "FALSE"} or secure not in {"TRUE", "FALSE"}:
+            raise ValueError(f"malformed cookie entry at line {line_no}: invalid domain, name, or flag")
+        domain = ("." if include_sub == "TRUE" else "") + domain.lstrip(".")
+        try:
+            expires_int = int(expires)
+        except ValueError as exc:
+            raise ValueError(f"malformed cookie entry at line {line_no}: invalid expiry {expires!r}") from exc
+
+        cookies.append(
+            {
+                "domain": domain,
+                "path": path or "/",
+                "secure": secure.upper() == "TRUE",
+                "httpOnly": http_only,
+                "expires": -1 if expires_int == 0 else expires_int,
+                "name": name,
+                "value": value,
+            }
+        )
+    return cookies
+
+
+def _cookies_to_netscape(cookies: list[dict[str, Any]]) -> list[str]:
+    """Render cookies as Netscape cookies.txt lines for ecosystem interop."""
+    lines = ["# Netscape HTTP Cookie File", "# Generated by ProfileDock"]
+    for c in cookies:
+        domain = str(c.get("domain", ""))
+        include_sub = "TRUE" if domain.startswith(".") else "FALSE"
+        if c.get("httpOnly"):
+            domain = "#HttpOnly_" + domain
+        path = str(c.get("path", "/")) or "/"
+        secure = "TRUE" if c.get("secure") else "FALSE"
+        expires = c.get("expires", -1)
+        expires_field = "0" if expires == -1 else str(int(expires))
+        fields = (domain, include_sub, path, secure, expires_field, c.get("name", ""), c.get("value", ""))
+        if any(any(char in str(field) for char in "\t\r\n") for field in fields):
+            raise ValueError("cookie fields cannot contain tabs or newlines in Netscape format")
+        lines.append("\t".join(str(field) for field in fields))
+    return lines
+
+
+def _write_private_text(path: Path, text: str) -> None:
+    """Atomic 0600 text write mirroring write_private_json's safety rules."""
+    target = path.expanduser().absolute()
+    if _is_link(target) or (target.exists() and not target.is_file()):
+        raise OSError(f"unsafe output target: {target}")
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+    try:
+        fd = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            write_all(fd, text.encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        replace_with_retry(temporary, target)
+    except OSError as exc:
+        raise OSError(f"cannot write '{target}': {exc.strerror or exc}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def list_tabs_command(
@@ -457,16 +599,57 @@ def export_cookies_command(
     output_file: Path | None = typer.Option(
         None, "--output", "-o", help="File to write exported JSON cookies."
     ),
-    url: list[str] | None = typer.Option(None, "--url", "-u", help="URL filter(s) for cookies."),
+    url: list[str] | None = typer.Option(
+        None,
+        "--url",
+        "-u",
+        help="URL filter(s); full URLs only (scheme required). Use --domain for bare domains.",
+    ),
+    domain: list[str] | None = typer.Option(
+        None,
+        "--domain",
+        "-d",
+        help="Domain filter(s); a cookie matches when its domain equals or ends with the filter.",
+    ),
+    session_only: bool = typer.Option(
+        False, "--session-only", help="Exclude persistent cookies (those with an expiry timestamp)."
+    ),
+    load_file: Path | None = typer.Option(
+        None,
+        "--load",
+        "-l",
+        help="Import cookies from a JSON export or a Netscape cookies.txt file instead of exporting.",
+    ),
+    redact_values: bool = typer.Option(
+        False,
+        "--redact-values",
+        help="Replace cookie values with empty strings for a metadata-only preview.",
+    ),
+    format: str = typer.Option(
+        "json", "--format", "-f", help="Export format: 'json' (default) or 'netscape' (cookies.txt)."
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
-    """Export live session cookies directly from browser RAM, bypassing SQLite locks."""
+    """Export live session cookies from browser RAM, or import cookies with --load."""
     from ..cli import runtime_path, send_controller_command
+
+    if load_file is not None and output_file is not None:
+        fail("--load and --output are mutually exclusive")
+    if load_file is not None and (url or domain or session_only or redact_values):
+        fail("--load cannot be combined with export filters")
+
+    normalized_format = format.lower()
+    if normalized_format not in {"json", "netscape"}:
+        fail(f"unsupported format '{format}' (expected 'json' or 'netscape')")
+
+    if load_file is not None:
+        _import_cookies(profile_id, load_file, json_output=json_output)
+        return
 
     if url:
         for u in url:
             try:
-                validate_url(u)
+                validate_cookie_url_filter(u)
             except ValidationError as exc:
                 fail_exception(exc)
 
@@ -489,17 +672,37 @@ def export_cookies_command(
     ) as exc:
         fail_exception(exc)
 
-    cookies_list = res.get("cookies", [])
+    cookies_list = _apply_cookie_filters(res.get("cookies", []), domains=domain, session_only=session_only)
+    if redact_values:
+        cookies_list = [{**c, "value": ""} for c in cookies_list]
+
+    try:
+        lines = _cookies_to_netscape(cookies_list) if normalized_format == "netscape" else None
+    except ValueError as exc:
+        fail_exception(exc)
+
     if output_file:
         try:
-            write_private_json(output_file, cookies_list)
+            if lines is not None:
+                _write_private_text(output_file, "\n".join(lines) + ("\n" if lines else ""))
+            else:
+                write_private_json(output_file, cookies_list)
             if json_output:
                 emit_json(
                     "cookies",
-                    {"output_file": str(output_file.expanduser().absolute()), "count": len(cookies_list)},
+                    {
+                        "output_file": str(output_file.expanduser().absolute()),
+                        "count": len(cookies_list),
+                        "format": normalized_format,
+                    },
                 )
             else:
-                typer.echo(f"Exported {len(cookies_list)} cookie(s) to '{output_file}'.")
+                typer.echo(
+                    f"Exported {len(cookies_list)} cookie(s) to '{output_file}' ({normalized_format})."
+                )
+                summary = _cookie_domain_summary(cookies_list)
+                if summary:
+                    typer.echo(f"  Domains: {summary}")
         except OSError as exc:
             fail(f"could not write cookies to '{output_file}': {exc}")
         return
@@ -508,4 +711,50 @@ def export_cookies_command(
         emit_json("cookies", cookies_list)
         return
 
-    typer.echo(json.dumps(cookies_list, indent=2))
+    if lines is not None:
+        typer.echo("\n".join(lines))
+    else:
+        typer.echo(json.dumps(cookies_list, indent=2))
+
+
+def _import_cookies(profile_id: str, load_file: Path, *, json_output: bool) -> None:
+    """Load cookies from a JSON export or Netscape cookies.txt into the profile."""
+    from ..cli import runtime_path, send_controller_command
+
+    source = load_file.expanduser()
+    if not source.is_file():
+        fail(f"cannot read cookie file: '{source}' does not exist or is not a file")
+    try:
+        raw = source.read_text(encoding="utf-8")
+        set_cookies = _parse_cookie_file(raw, source)
+    except (UnicodeError, ValueError, OSError) as exc:
+        fail(f"invalid cookie file '{source}': {exc}")
+
+    try:
+        profile = _get_manager().resolve(profile_id)
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="set_cookies",
+            args={"set_cookies": set_cookies},
+            runtime_dir=runtime_path(profile),
+            auto_start_headless=True,
+        )
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileRunningError,
+        BrowserLaunchError,
+        ValueError,
+    ) as exc:
+        fail_exception(exc)
+
+    added = int(res.get("added", len(set_cookies)))
+    total = int(res.get("total_cookies", added))
+    if json_output:
+        emit_json(
+            "cookies",
+            {"output_file": str(source.absolute()), "count": added, "loaded": added, "total_cookies": total},
+        )
+        return
+    typer.echo(f"Imported {added} cookie(s) into '{profile.name}' (jar now holds {total}).")

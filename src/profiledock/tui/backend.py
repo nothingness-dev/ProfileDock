@@ -122,14 +122,8 @@ class ActionResult:
         return self.exit_code == EXIT_SUCCESS
 
 
-# ---------------------------------------------------------------------------
-# formatting helpers
-
-
 def compute_size(path_str: str) -> int | None:
-    # Delegates to the shared storage breakdown so its short-lived mtime cache
-    # also covers the profile rail's size polling (which otherwise re-walks
-    # every browser-data tree per refresh).
+
     from ..metrics import storage_usage
 
     if not Path(path_str).is_dir():
@@ -170,10 +164,6 @@ def _kv_table(title: str) -> Table:
     return table
 
 
-# ---------------------------------------------------------------------------
-# queries
-
-
 def _manager(paths: DataPaths) -> ProfileManager:
     return ProfileManager(paths)
 
@@ -211,8 +201,7 @@ def list_profile_rows(paths: DataPaths, with_sizes: bool = False) -> list[Profil
 
 
 def effective_engine(profile: Profile) -> str:
-    # strict variant + graceful fallback: this runs in worker threads where a
-    # typer.Exit from the CLI wrapper would kill the refresh instead of the CLI.
+
     from ..cli_support import resolve_engine_strict
 
     try:
@@ -290,9 +279,6 @@ def doctor_checks(paths: DataPaths) -> list[DiagnosticCheck]:
 def recent_logs(paths: DataPaths, profile_id: str | None, last_n: int) -> list[dict[str, Any]]:
     return read_profile_logs(paths.logs_dir, profile_id=profile_id, last_n=last_n)
 
-
-# ---------------------------------------------------------------------------
-# browser detection
 
 _browser_version_cache: dict[str, str] = {}
 
@@ -373,10 +359,6 @@ def detect_browsers() -> list[BrowserInfo]:
     return found
 
 
-# ---------------------------------------------------------------------------
-# command execution
-
-
 def _require_profile(manager: ProfileManager, identifier: str) -> Profile:
     try:
         return manager.resolve(identifier)
@@ -412,8 +394,7 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
     manager = _manager(paths)
     profile = _require_profile(manager, str(values.get("profile", "")))
     raw_engine = str(values.get("engine") or "").strip()
-    # "(inherit)" or empty means no one-launch override: the stored preset,
-    # profile engine, environment, and default precedence apply unchanged.
+
     engine_override = raw_engine if raw_engine in ("direct", "playwright") else None
     raw_tabs = str(values.get("tabs") or "").strip()
     if raw_tabs:
@@ -708,8 +689,57 @@ def _screenshot(paths: DataPaths, manager: ProfileManager, values: dict[str, obj
 
 
 def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object]) -> Text:
+    from ..commands.automation import (
+        _apply_cookie_filters,
+        _cookie_domain_summary,
+        _cookies_to_netscape,
+        _parse_cookie_file,
+        _write_private_text,
+    )
+
     profile = _resolve_profile(manager, values)
     output_raw = str(values.get("output") or "").strip()
+    load_raw = str(values.get("load") or "").strip()
+    format_name = str(values.get("format") or "json").strip().lower()
+    if format_name not in {"json", "netscape"}:
+        raise BackendError(
+            f"unsupported format '{format_name}' (expected 'json' or 'netscape')", "invalid_input"
+        )
+    use_netscape = format_name == "netscape"
+
+    if load_raw:
+        if output_raw:
+            raise BackendError("--load and --output are mutually exclusive", "invalid_input")
+        if values.get("domain") or values.get("session_only") or values.get("redact_values"):
+            raise BackendError("--load cannot be combined with export filters", "invalid_input")
+        source = Path(load_raw).expanduser()
+        if not source.is_file():
+            raise BackendError(
+                f"cannot read cookie file: '{source}' does not exist or is not a file", "invalid_input"
+            )
+        try:
+            set_cookies = _parse_cookie_file(source.read_text(encoding="utf-8"), source)
+        except (ValueError, OSError) as exc:
+            raise BackendError(f"invalid cookie file '{source}': {exc}", "invalid_input") from exc
+        try:
+            res = send_controller_command(
+                profile.data_dir,
+                cmd="set_cookies",
+                args={"set_cookies": set_cookies},
+                runtime_dir=paths.runtime_dir / profile.id,
+                auto_start_headless=True,
+            )
+        except Exception as exc:
+            category = getattr(exc, "category", None) or error_category(str(exc))
+            raise BackendError(str(exc), category) from exc
+        added = int(res.get("added", len(set_cookies)))
+        total = int(res.get("total_cookies", added))
+        return (
+            Text("Imported ", style="green")
+            .append(f"{added}", style="bold")
+            .append(f" cookie(s) into '{profile.name}' (jar now holds {total}).")
+        )
+
     try:
         res = send_controller_command(
             profile.data_dir,
@@ -722,19 +752,37 @@ def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object
         category = getattr(exc, "category", None) or error_category(str(exc))
         raise BackendError(str(exc), category) from exc
 
-    cookies_list = res.get("cookies", [])
+    domain_raw = str(values.get("domain") or "").strip()
+    domains = [d.strip() for d in domain_raw.split(",") if d.strip()] if domain_raw else None
+    cookies_list = _apply_cookie_filters(
+        res.get("cookies", []),
+        domains=domains,
+        session_only=bool(values.get("session_only")),
+    )
+    if bool(values.get("redact_values")):
+        cookies_list = [{**c, "value": ""} for c in cookies_list]
+
     if output_raw:
         out_path = Path(output_raw).expanduser()
         try:
-            write_private_json(out_path, cookies_list)
+            if use_netscape:
+                _write_private_text(out_path, "\n".join(_cookies_to_netscape(cookies_list)) + "\n")
+            else:
+                write_private_json(out_path, cookies_list)
             body = Text("Exported ", style="green")
             body.append(f"{len(cookies_list)}", style="bold")
-            body.append(f" cookie(s) to '{out_path}'.")
+            body.append(f" cookie(s) to '{out_path}' ({'netscape' if use_netscape else 'json'}).")
             return body
         except OSError as exc:
             raise BackendError(f"could not write cookies to '{out_path}': {exc}", "storage_error") from exc
 
-    return Text(json.dumps(cookies_list, indent=2))
+    if use_netscape:
+        return Text("\n".join(_cookies_to_netscape(cookies_list)))
+    body = Text(json.dumps(cookies_list, indent=2))
+    summary = _cookie_domain_summary(cookies_list)
+    if summary:
+        body.append(f"\nDomains: {summary}", style="dim")
+    return body
 
 
 def _render_list(rows: list[ProfileRow]) -> Text:

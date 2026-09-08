@@ -323,10 +323,18 @@ Evaluates a JavaScript expression in the active page context and prints the seri
 ## `cookies`
 
 ```text
-profiledock cookies PROFILE [--output FILE] [--url URL] [--json]
+profiledock cookies PROFILE [--output FILE] [--url URL] [--domain DOMAIN] [--session-only] [--redact-values] [--format json|netscape] [--load FILE] [--json]
 ```
 
-Exports live session cookies directly from browser RAM, bypassing SQLite filesystem locks. Cookie output is sensitive authentication material. File output uses a private atomic JSON write and refuses links or non-file targets. A stopped profile is started headlessly and remains active until explicitly closed.
+Exports live session cookies directly from browser RAM, bypassing SQLite filesystem locks, or imports a saved cookie jar with `--load`. Cookie output is sensitive authentication material. File output uses a private atomic write (0600) and refuses links or non-file targets. A stopped profile is started headlessly and remains active until explicitly closed.
+
+Filters (export): `--url` forwards full URL filters (scheme required) to the browser; bare domains are rejected client-side — use `--domain` for domain-scoped filtering. `--domain` (repeatable) keeps cookies whose domain equals the filter or is a subdomain of it. `--session-only` drops persistent cookies (those with an expiry timestamp), keeping current-session credentials only. Filters compose. An explicit empty `--url` list exports nothing rather than everything. Human output includes a per-domain count summary.
+
+Formats (export): `--format json` (default) writes a Playwright-shaped JSON array; `--format netscape` writes a classic `cookies.txt` file compatible with curl, yt-dlp, and other ecosystem tools.
+
+Redaction (export): `--redact-values` replaces every cookie value with an empty string for a metadata-only preview. Redacted files retain valid cookie syntax but cannot restore the original credentials; importing them can replace existing values with empty strings.
+
+Import (`--load FILE`): accepts a JSON array produced by `--output` or a Netscape `cookies.txt` file (auto-detected). Netscape expiry `0` maps to a session cookie; host-only scope and the `#HttpOnly_` prefix are preserved. File parsing finishes before cookies are sent to the browser. Browser-side failures are reported, but import does not provide transactional rollback of the live cookie jar. Save an export before replacing important cookies. `--load` is mutually exclusive with `--output` and export filters.
 
 ## `top`
 

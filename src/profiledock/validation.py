@@ -35,6 +35,18 @@ def validate_url(url: str) -> None:
         raise ValidationError(f"invalid URL format: '{clean}'")
 
 
+def validate_cookie_url_filter(url: str) -> None:
+    """Validate a cookie --url filter.
+
+    Playwright's context.cookies(urls) passes filters to CDP, which requires
+    full URLs — a bare domain ('example.com') raises 'Invalid URL' there
+    (verified against a live Chromium). Keep validate_url's scheme requirement
+    so a bad filter fails with a clear message instead of a cryptic
+    controller error.
+    """
+    validate_url(url)
+
+
 def validate_proxy(proxy: str | None) -> None:
     """Validate a proxy URL: scheme://[user:pass@]host[:port].
 
@@ -57,8 +69,7 @@ def validate_proxy(proxy: str | None) -> None:
         raise ValidationError(f"proxy must include a scheme (http, https, or socks5): '{clean}'")
     if scheme not in _ALLOWED_PROXY_SCHEMES:
         raise ValidationError(f"unsupported proxy scheme '{scheme}' (allowed: http, https, socks5)")
-    # urlparse raises ValueError when .hostname/.port are accessed on a
-    # malformed netloc; normalize every failure into ValidationError.
+
     try:
         hostname = parsed.hostname
         port = parsed.port
@@ -103,7 +114,6 @@ def validate_time_zone(time_zone: str | None) -> None:
         raise ValidationError("timezone contains invalid characters or is too long")
     if clean.lower() == "host":
         raise ValidationError("timezone 'host' is not a valid IANA timezone")
-    # Accept any IANA-shaped value; deep validation happens in the browser.
 
 
 def validate_browser(browser: str, engine: str, require_executable: bool = False) -> None:

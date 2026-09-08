@@ -26,6 +26,7 @@ _IPC_COMMANDS = frozenset(
         "read_page",
         "eval",
         "cookies",
+        "set_cookies",
         "screenshot",
         "pdf",
     }
@@ -57,8 +58,7 @@ def send_controller_command(
     auto_start_headless: bool = True,
 ) -> dict[str, Any]:
     """Send a command to a Playwright controller, auto-starting headlessly if stopped."""
-    # Late-bound so patches of profiledock.process_manager._controller_available
-    # and ._MAX_RESPONSE_BYTES keep applying.
+
     from profiledock.process_manager import _MAX_RESPONSE_BYTES as _max_response_bytes
     from profiledock.process_manager import _controller_available as _controller_available_impl
 

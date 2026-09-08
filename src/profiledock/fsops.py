@@ -88,6 +88,8 @@ def write_private_json(path: Path, value: Any) -> None:
         os.close(fd)
         fd = None
         replace_with_retry(temporary, target)
+    except OSError as exc:
+        raise OSError(f"cannot write '{target}': {exc.strerror or exc}") from exc
     finally:
         if fd is not None:
             os.close(fd)

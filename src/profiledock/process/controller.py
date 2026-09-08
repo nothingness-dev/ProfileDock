@@ -194,12 +194,43 @@ def _execute_ipc_command(
             if urls is not None:
                 if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
                     return ({"status": "error", "message": "cookie URLs must be a list of strings"}, False)
-                from ..validation import validate_url
+                from ..validation import validate_cookie_url_filter
 
                 for url in urls:
-                    validate_url(url)
-            cookie_list = context.cookies(urls) if urls else context.cookies()
+                    validate_cookie_url_filter(url)
+
+            if urls is not None and not urls:
+                cookie_list: list[Any] = []
+            elif urls:
+                cookie_list = context.cookies(urls)
+            else:
+                cookie_list = context.cookies()
             return ({"status": "ok", "cookies": cookie_list}, False)
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd == "set_cookies":
+        set_cookies = args.get("set_cookies")
+        if not isinstance(set_cookies, list) or not all(isinstance(c, dict) for c in set_cookies):
+            return ({"status": "error", "message": "set_cookies must be a list of cookie objects"}, False)
+        for cookie in set_cookies:
+            if not str(cookie.get("name", "")).strip() or not isinstance(cookie.get("value"), str):
+                return (
+                    {"status": "error", "message": "each cookie needs a non-empty name and a string value"},
+                    False,
+                )
+            if not cookie.get("domain") and not cookie.get("url"):
+                return (
+                    {
+                        "status": "error",
+                        "message": f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'",
+                    },
+                    False,
+                )
+        try:
+            context.add_cookies(set_cookies)
+            total = len(context.cookies())
+            return ({"status": "ok", "added": len(set_cookies), "total_cookies": total}, False)
         except Exception as exc:
             return ({"status": "error", "message": str(exc)}, False)
 
@@ -299,7 +330,7 @@ def _execute_ipc_command(
 
 
 def _encode_ipc_response(response: dict[str, Any]) -> bytes:
-    # Late-bound so patches of profiledock.process_manager._MAX_RESPONSE_BYTES keep applying.
+
     from profiledock.process_manager import _MAX_RESPONSE_BYTES as _max_response_bytes
 
     encoded = (json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8")
@@ -458,8 +489,7 @@ def _controller(
     timezone: str | None = None,
     _install_signal_handlers: bool = True,
 ) -> int:
-    # Late-bound so patches of profiledock.process_manager._atomic_private_json
-    # and ._get_process_create_time keep applying.
+
     from profiledock.process_manager import (
         _atomic_private_json as _atomic_private_json_impl,
     )
@@ -469,12 +499,6 @@ def _controller(
 
     err = path.parent / "controller.error"
 
-    # A graceful termination signal must reach the context teardown below
-    # instead of killing the process with default disposition, which would
-    # orphan Chromium and leave running.json behind. Raising SystemExit from
-    # the handler unwinds through the try/finally blocks that close the
-    # context and unlink the state file. Armed before anything else so even
-    # early-exit paths (missing playwright) still die by teardown semantics.
     if _install_signal_handlers:
         import signal as signal_module
 

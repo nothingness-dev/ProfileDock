@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -138,6 +139,25 @@ def test_execute_ipc_command_eval_and_cookies():
     assert resp_cookies["cookies"][0]["name"] == "session"
 
 
+def test_execute_ipc_command_cookies_empty_url_list_exports_nothing():
+    """Regression: an explicit empty URL filter widened to 'export everything'.
+
+    urls=[] is falsy in Python, so `context.cookies(urls) if urls else
+    context.cookies()` silently returned the whole cookie jar for an explicit
+    empty filter — a credential-safety bug for scripted callers.
+    """
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+    mock_context.cookies.return_value = [{"name": "all", "value": "leak"}]
+
+    resp, _ = _execute_ipc_command(
+        {"cmd": "cookies", "token": "tok", "args": {"urls": []}}, mock_context, token="tok"
+    )
+    assert resp["status"] == "ok"
+    assert resp["cookies"] == [], "empty url filter must export nothing, not everything"
+    mock_context.cookies.assert_not_called()
+
+
 def test_execute_ipc_command_rejects_invalid_arguments_and_urls():
     context = MagicMock()
     context.pages = [MagicMock()]
@@ -189,6 +209,292 @@ def test_cookies_json_file_output_preserves_json_stdout(tmp_path: Path):
     assert '"command": "cookies"' in result.stdout
     assert '"count": 1' in result.stdout
     assert output.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_cookies_url_filter_rejects_bare_domain(tmp_path: Path):
+    """Cookie --url filters require full URLs, verified against live Chromium.
+
+    Playwright's context.cookies(urls) forwards filters to CDP, and CDP
+    rejects bare domains with 'Invalid URL' (confirmed on a real browser —
+    see the audit for this fix). Client-side validation must keep rejecting
+    them so the user gets a clear error instead of a cryptic controller
+    failure. Use --domain for domain-scoped filtering.
+    """
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.send_controller_command", return_value={"cookies": []}),
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--url", "example.com"])
+    assert result.exit_code == 1
+    assert "invalid URL scheme" in result.output
+
+    # Full URL passes and reaches the controller.
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch(
+            "profiledock.cli.send_controller_command",
+            return_value={"cookies": [{"name": "sid"}]},
+        ) as send_mock,
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--url", "https://example.com"])
+    assert result.exit_code == 0, result.output
+    sent_args = send_mock.call_args.kwargs.get("args") or send_mock.call_args[1].get("args")
+    assert sent_args == {"urls": ["https://example.com"]}
+
+
+def test_cookies_session_only_filter_excludes_persistent_cookies(tmp_path: Path):
+    """Session cookies (no expiry) can be excluded with --session-only.
+
+    Long-lived tracking cookies persist on disk; a user hardening an export
+    wants current-session credentials only. --session-only must drop every
+    cookie whose expires is -1 (Playwright's marker for session cookies).
+    """
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    cookies = [
+        {"name": "session", "value": "a", "expires": -1, "domain": "example.com"},
+        {"name": "persistent", "value": "b", "expires": 1893456000, "domain": "example.com"},
+    ]
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.send_controller_command", return_value={"cookies": cookies}),
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--session-only", "--json"])
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.stdout)
+    assert envelope["command"] == "cookies"
+    names = [c["name"] for c in envelope["data"]]
+    assert names == ["session"]
+
+
+def test_cookies_domain_filter_matches_suffix(tmp_path: Path):
+    """--domain filters by domain suffix, matching cookie-domain semantics.
+
+    A cookie set for '.example.com' must match --domain example.com, and
+    subdomains must match their parent: the filter mirrors how cookie domains
+    actually scope, not exact-string equality.
+    """
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    cookies = [
+        {"name": "a", "value": "1", "domain": ".example.com"},
+        {"name": "b", "value": "2", "domain": "sub.example.com"},
+        {"name": "c", "value": "3", "domain": "other.org"},
+    ]
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.send_controller_command", return_value={"cookies": cookies}),
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--domain", "example.com", "--json"])
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.stdout)
+    assert envelope["command"] == "cookies"
+    names = [c["name"] for c in envelope["data"]]
+    assert sorted(names) == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# cookies import (--load), Netscape format, and redaction
+# ---------------------------------------------------------------------------
+
+NETSCAPE_SAMPLE = (
+    "# Netscape HTTP Cookie File\n"
+    "# Generated by ProfileDock\n"
+    ".example.com\tTRUE\t/\tFALSE\t1893456000\tsess\tpersistent-value\n"
+    ".other.org\tTRUE\t/\tTRUE\t0\tsess2\tsession-value\n"
+)
+
+
+def test_netscape_preserves_cookie_scope_http_only_and_empty_values():
+    from profiledock.commands.automation import _cookies_to_netscape, _parse_cookie_file
+
+    cookies = [
+        {
+            "domain": "example.com",
+            "path": "/",
+            "secure": True,
+            "httpOnly": True,
+            "expires": -1,
+            "name": "sid",
+            "value": "",
+        },
+        {
+            "domain": ".example.com",
+            "path": "/",
+            "secure": False,
+            "httpOnly": False,
+            "expires": 1893456000,
+            "name": "pref",
+            "value": "value",
+        },
+    ]
+    raw = "\n".join(_cookies_to_netscape(cookies))
+    assert "#HttpOnly_example.com\tFALSE" in raw
+    assert _parse_cookie_file(raw, Path("cookies.txt")) == cookies
+
+
+def test_cookies_load_json_round_trip(tmp_path: Path):
+    """Importing a previously exported JSON file restores the cookie jar."""
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    jar = [{"name": "sid", "value": "v", "domain": "example.com", "path": "/", "expires": -1}]
+    load_file = tmp_path / "jar.json"
+    load_file.write_text(json.dumps(jar), encoding="utf-8")
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch(
+            "profiledock.cli.send_controller_command",
+            return_value={"added": 1, "total_cookies": 1},
+        ) as send_mock,
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--load", str(load_file), "--json"])
+    assert result.exit_code == 0, result.output
+    assert send_mock.call_args.kwargs.get("args") == {"set_cookies": jar}
+    envelope = json.loads(result.stdout)
+    assert envelope["data"]["count"] == 1
+    assert envelope["data"]["total_cookies"] == 1
+
+
+def test_cookies_load_netscape(tmp_path: Path):
+    """--load auto-detects Netscape cookies.txt and converts to Playwright shape.
+
+    Interop with the wider ecosystem (yt-dlp, curl, scripting) requires the
+    classic tab-separated format; expires 0 means a session cookie and must
+    map to expires -1.
+    """
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    load_file = tmp_path / "cookies.txt"
+    load_file.write_text(NETSCAPE_SAMPLE, encoding="utf-8")
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch(
+            "profiledock.cli.send_controller_command",
+            return_value={"added": 2, "total_cookies": 2},
+        ) as send_mock,
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--load", str(load_file), "--json"])
+    assert result.exit_code == 0, result.output
+    sent = send_mock.call_args.kwargs.get("args")["set_cookies"]
+    assert sent == [
+        {
+            "domain": ".example.com",
+            "path": "/",
+            "secure": False,
+            "httpOnly": False,
+            "expires": 1893456000,
+            "name": "sess",
+            "value": "persistent-value",
+        },
+        {
+            "domain": ".other.org",
+            "path": "/",
+            "secure": True,
+            "httpOnly": False,
+            "expires": -1,
+            "name": "sess2",
+            "value": "session-value",
+        },
+    ]
+
+
+def test_cookies_load_rejects_malformed_entries(tmp_path: Path):
+    """A malformed cookie entry fails the import with a clear message.
+
+    Half-imported authentication state is worse than none: one bad line in a
+    Netscape file (wrong column count) or a JSON entry missing name/value
+    must abort the whole import before anything reaches the browser.
+    """
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    bad = tmp_path / "bad.txt"
+    bad.write_text(
+        ".example.com\tTRUE\t/\tFALSE\t1893456000\tonly-five-columns\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.send_controller_command", return_value={"added": 0}),
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--load", str(bad)])
+    assert result.exit_code == 1
+    assert "malformed cookie entry" in result.output or "line 1" in result.output
+
+
+def test_cookies_load_missing_file_fails_cleanly(tmp_path: Path):
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.send_controller_command", return_value={"added": 0}),
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--load", str(tmp_path / "nope.json")])
+    assert result.exit_code == 1
+    assert "cannot read" in result.output or "not found" in result.output
+
+
+def test_cookies_load_invalid_utf8_fails_cleanly(tmp_path: Path):
+    bad = tmp_path / "bad.json"
+    bad.write_bytes(b"\xff\xfe\x00")
+    runner = CliRunner()
+    with patch("profiledock.cli.send_controller_command") as send_mock:
+        result = runner.invoke(app, ["cookies", "abc123", "--load", str(bad)])
+    assert result.exit_code == 1
+    assert "invalid cookie file" in result.output
+    send_mock.assert_not_called()
+
+
+def test_cookies_invalid_format_fails_before_browser_start():
+    runner = CliRunner()
+    with patch("profiledock.cli.send_controller_command") as send_mock:
+        result = runner.invoke(app, ["cookies", "abc123", "--format", "yaml"])
+    assert result.exit_code == 1
+    assert "unsupported format" in result.output
+    send_mock.assert_not_called()
+
+
+def test_cookies_redact_values_masks_secrets(tmp_path: Path):
+    """--redact-values exports metadata without the secret values.
+
+    Exporting to stdout dumps raw authentication material into scrollback;
+    a redacted preview lets users audit names/domains/expiry before deciding
+    to save the real values. Empty strings cannot restore the original secrets.
+    """
+    profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
+    cookies = [
+        {"name": "sid", "value": "super-secret", "domain": "example.com", "expires": -1},
+    ]
+    runner = CliRunner()
+    with (
+        patch("profiledock.cli.manager") as selected_manager,
+        patch("profiledock.cli.send_controller_command", return_value={"cookies": cookies}),
+    ):
+        selected_manager.return_value.resolve.return_value = profile
+        selected_manager.return_value.runtime_path.return_value = tmp_path / "runtime"
+        result = runner.invoke(app, ["cookies", "abc123", "--redact-values", "--json"])
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.stdout)
+    assert envelope["data"][0]["value"] != "super-secret"
+    assert envelope["data"][0]["value"] == ""
+    assert envelope["data"][0]["name"] == "sid"
 
 
 def test_execute_ipc_command_screenshot(tmp_path: Path):

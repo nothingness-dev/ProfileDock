@@ -50,3 +50,18 @@ def test_private_json_write_is_atomic_and_private(tmp_path):
 def test_private_json_write_rejects_directory_target(tmp_path):
     with pytest.raises(OSError, match="unsafe JSON output target"):
         write_private_json(tmp_path, {})
+
+
+def test_private_json_write_missing_parent_error_names_the_real_problem(tmp_path):
+    """Regression: a missing parent dir surfaced as raw ENOENT on a hidden temp file.
+
+    The OSError referenced the invisible .cookies.json.<hex>.tmp scratch path,
+    which tells the user nothing about what actually went wrong (no parent
+    directory). The error must name the intended output path, not the scratch.
+    """
+    target = tmp_path / "no-such-dir" / "cookies.json"
+    with pytest.raises(OSError) as exc_info:
+        write_private_json(target, [])
+    message = str(exc_info.value)
+    assert "cookies.json" in message
+    assert ".cookies.json." not in message, f"error leaks the hidden temp-file name: {message}"

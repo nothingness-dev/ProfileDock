@@ -65,9 +65,7 @@ class FieldSpec:
     hint: str = ""
     advanced: bool = False
     argv: str = "auto"
-    # Explicit CLI flag spelling when the field name does not match the
-    # contract (e.g. the launch form's comma-separated "urls" field maps to
-    # the repeatable --url option).
+
     flag_name: str = ""
 
 
@@ -109,11 +107,11 @@ GROUP_TITLES: dict[str, tuple[str, str, str]] = {
 }
 
 ENGINE_OPTIONS: tuple[str, ...] = ("direct", "playwright")
-# Sentinel for "no one-launch override": the stored preset/profile/env
-# precedence applies, exactly like omitting --engine on the CLI.
+
+
 ENGINE_INHERIT = "(inherit)"
-# Sentinel for "every profile" in PROFILE_OR_ALL pickers (backup target,
-# logs filter). Maps to the CLI's --all flag rather than a literal value.
+
+
 ALL_PROFILES = "__all__"
 
 CHROMIUM_FLAGS: tuple[str, ...] = (
@@ -405,7 +403,7 @@ ACTIONS: tuple[ActionSpec, ...] = (
     ActionSpec(
         id="cookies",
         label="cookies",
-        description="Export cookies from browser RAM",
+        description="Export cookies from browser RAM (or --load to import)",
         group=Group.DATA.value,
         glyph="󰆓",
         glyph_fallback="k",
@@ -418,6 +416,38 @@ ACTIONS: tuple[ActionSpec, ...] = (
                 FieldKind.PATH,
                 placeholder="cookies.json (stdout if empty)",
                 argv="flag",
+            ),
+            FieldSpec("domain", "Domain filter", FieldKind.TEXT, placeholder="example.com", argv="flag"),
+            FieldSpec(
+                "session_only",
+                "Session only",
+                FieldKind.TOGGLE,
+                hint="exclude persistent cookies",
+                argv="boolean",
+            ),
+            FieldSpec(
+                "load",
+                "Import file",
+                FieldKind.PATH,
+                placeholder="cookies.json or cookies.txt (import)",
+                argv="flag",
+                hint="import instead of exporting",
+            ),
+            FieldSpec(
+                "redact_values",
+                "Redact values",
+                FieldKind.TOGGLE,
+                hint="metadata-only preview",
+                argv="boolean",
+            ),
+            FieldSpec(
+                "format",
+                "Format",
+                FieldKind.TEXT,
+                placeholder="json",
+                default="json",
+                argv="flag",
+                hint="json or netscape",
             ),
         ),
     ),
@@ -561,8 +591,7 @@ def build_argv(action: ActionSpec, values: dict[str, object]) -> list[str]:
             continue
         if spec.kind in (FieldKind.PROFILE, FieldKind.PROFILE_OR_ALL) and text == ALL_PROFILES:
             text = ""
-        # "(inherit)" means "omit the override flag" — the CLI default
-        # precedence applies, exactly like leaving --engine off the command.
+
         if spec.kind is FieldKind.ENGINE and text == ENGINE_INHERIT:
             text = ""
         if not text:

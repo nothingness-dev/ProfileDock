@@ -31,7 +31,7 @@
     "shot": {"arguments": ["profile_id", "url"], "options": {"output": ["--output", "-o"], "tab": ["--tab", "-t"], "full_page": ["--full-page", "-f"], "json_output": ["--json"]}},
     "pdf": {"arguments": ["profile_id", "url"], "options": {"output": ["--output", "-o"], "tab": ["--tab", "-t"], "json_output": ["--json"]}},
     "eval": {"arguments": ["profile_id", "script"], "options": {"tab": ["--tab", "-t"], "json_output": ["--json"]}},
-    "cookies": {"arguments": ["profile_id"], "options": {"output_file": ["--output", "-o"], "url": ["--url", "-u"], "json_output": ["--json"]}},
+    "cookies": {"arguments": ["profile_id"], "options": {"output_file": ["--output", "-o"], "url": ["--url", "-u"], "domain": ["--domain", "-d"], "session_only": ["--session-only"], "load_file": ["--load", "-l"], "redact_values": ["--redact-values"], "format": ["--format", "-f"], "json_output": ["--json"]}},
     "top": {"arguments": ["profile_id"], "options": {"watch": ["--watch", "-w"], "interval": ["--interval", "-i"], "json_output": ["--json"]}},
     "config": {
       "arguments": [],

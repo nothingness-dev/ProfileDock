@@ -221,7 +221,7 @@ Optional values depend on the event. Known secrets are redacted before storage a
 
 `eval --json` returns an object containing the serialized `result` value.
 
-`cookies --json` returns an array of Playwright cookie objects when writing to stdout. With `--output`, data contains the absolute `output_file` and exported cookie `count`; the sensitive cookies are written only to that private JSON file.
+`cookies --json` returns an array of Playwright cookie objects when writing to stdout. With `--output`, data contains the absolute `output_file`, exported cookie `count`, and `format` (`json` or `netscape`); the sensitive cookies are written only to that private file. The array reflects the applied filters: `--url` filters inside the browser, while `--domain` and `--session-only` filter the exported set. With `--redact-values`, every cookie `value` is an empty string. With `--load`, data contains `count` (cookies imported), `loaded`, and `total_cookies` (jar size after the import).
 
 ## Errors and forward compatibility
 
