@@ -55,9 +55,9 @@ The unit suite (`-m "not browser"`) targets sub-second isolation: every unit tes
 python -m pytest -q -m "not browser" --durations=25
 ```
 
-Reference numbers (Windows 11, Python 3.12): unit suite ≈14–15 s for 305 tests; median unit test <0.05 s. The only unit tests approaching the 0.5 s line are the startup-timeout process test (~0.6 s, dominated by a deliberate 0.2 s timeout plus process teardown) and a CLI round-trip test that performs 10 sequential invocations (~0.6 s total). Browser-marked tests are exempt from the budget; they launch real processes and take up to ~11 s each.
+Reference numbers (Windows 11, Python 3.13): full suite ≈2 minutes for 550+ tests including browser-marked integration tests; median unit test <0.05 s. The unit suite alone (`-m "not browser"`) runs in about a minute on this hardware, dominated by the failed-startup rollback lifecycle test (~30 s, a real process-timeout scenario). Browser-marked tests are exempt from the sub-second budget; they launch real processes and take up to ~11 s each.
 
-If a new unit test appears above the 1 s mark in `--durations`, look for accidental sleeps, redundant metadata migrations per assertion, or filesystem work outside `tmp_path` before accepting the cost.
+If a new unit test appears above the 1 s mark in `--durations` without exercising a real process or timeout path, look for accidental sleeps, redundant metadata migrations per assertion, or filesystem work outside `tmp_path` before accepting the cost.
 
 ## Important coverage
 

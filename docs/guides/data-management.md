@@ -147,4 +147,4 @@ profiledock doctor
 profiledock doctor --repair
 ```
 
-Doctor can recover a valid metadata backup, migrate legacy metadata, remove verifiably stale runtime state, and clean known incomplete temporary operations. If primary and backup metadata are both corrupted, or runtime state is ambiguous, ProfileDock preserves evidence and requires manual review.
+Doctor can recover a valid metadata backup, migrate legacy metadata, remove verifiably stale runtime state, and clean known incomplete temporary operations. When recovery rewrites a corrupt `profiles.json` from its backup, the unreadable primary is first preserved beside it under a diagnostic name (`.profiles.json.corrupt-<hex>`) so nothing recoverable or diagnostic is lost. If primary and backup metadata are both corrupted, or runtime state is ambiguous, ProfileDock preserves evidence and requires manual review.
