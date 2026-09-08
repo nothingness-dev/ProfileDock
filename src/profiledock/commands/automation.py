@@ -12,6 +12,7 @@ import typer
 from ..cli_support import emit_json, fail, fail_exception, selected_paths
 from ..data_root import _is_link
 from ..fsops import replace_with_retry, write_all, write_private_json
+from ..models import Profile
 from ..process_manager import (
     BrowserLaunchError,
     ProfileRunningError,
@@ -25,6 +26,28 @@ def _get_manager() -> ProfileManager:
     from ..cli import manager
 
     return manager()
+
+
+def _identity_preset_kwargs(profile: Profile) -> dict[str, Any]:
+    """Profile identity presets for controller auto-start.
+
+    An automation command that auto-starts a stopped profile must launch it
+    with the same proxy/user-agent/locale/timezone a manual launch would
+    use; otherwise automation traffic silently bypasses the configured
+    egress (real-IP leak).
+    """
+    cfg = getattr(profile, "launch_config", None)
+    kwargs: dict[str, Any] = {}
+    if cfg is not None:
+        if cfg.proxy:
+            kwargs["proxy"] = cfg.proxy
+        if cfg.user_agent:
+            kwargs["user_agent"] = cfg.user_agent
+        if cfg.locale:
+            kwargs["locale"] = cfg.locale
+        if cfg.timezone:
+            kwargs["timezone"] = cfg.timezone
+    return kwargs
 
 
 def _apply_cookie_filters(
@@ -228,6 +251,7 @@ def open_tab_command(
             args={"url": url},
             runtime_dir=runtime_path(profile),
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
         )
     except (
         ProfileNotFoundError,
@@ -311,6 +335,7 @@ def read_page_command(
             args={"url": url, "tab": tab},
             runtime_dir=runtime_path(profile),
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
             timeout=40.0,
         )
     except (
@@ -389,6 +414,7 @@ def _send_capture_command(
         args={"url": url, "tab": tab, "output": str(output.resolve()), **extra_args},
         runtime_dir=runtime_path(profile),
         auto_start_headless=True,
+        **_identity_preset_kwargs(profile),
         timeout=60.0,
     )
 
@@ -572,6 +598,7 @@ def eval_script_command(
             args={"script": script, "tab": tab},
             runtime_dir=runtime_path(profile),
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
         )
     except (
         ProfileNotFoundError,
@@ -661,6 +688,7 @@ def export_cookies_command(
             args={"urls": url} if url else {},
             runtime_dir=runtime_path(profile),
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
         )
     except (
         ProfileNotFoundError,
@@ -738,6 +766,7 @@ def _import_cookies(profile_id: str, load_file: Path, *, json_output: bool) -> N
             args={"set_cookies": set_cookies},
             runtime_dir=runtime_path(profile),
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
         )
     except (
         ProfileNotFoundError,

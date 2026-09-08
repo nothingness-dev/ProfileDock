@@ -8,6 +8,7 @@ process trees; this module is the single source of that behavior.
 import os
 from pathlib import Path
 
+from ..validation import validate_url
 from .errors import BrowserLaunchError
 from .state import _unlink_quietly, error_path, state_path
 
@@ -37,9 +38,16 @@ def validate_launch_request(
         raise ValueError("window width and height must be at least 100")
     if len(list(start_urls or [])) > tabs:
         raise ValueError("number of start URLs cannot exceed the requested tab count")
+    for url in start_urls or []:
+        validate_url(url)
     if not Path(data_dir).is_dir():
         raise BrowserLaunchError(
             "profile data directory is missing or invalid",
+            "invalid_data_directory",
+        )
+    if not Path(data_dir).parent.name:
+        raise BrowserLaunchError(
+            "profile data directory must not sit directly under a filesystem root",
             "invalid_data_directory",
         )
 

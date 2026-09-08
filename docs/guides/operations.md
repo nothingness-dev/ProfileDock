@@ -87,6 +87,8 @@ The network or package mirror may block Playwright downloads. Use Direct mode wi
 
 ### Profile is already running
 
+If a controller exits while its recorded browser remains alive, cleanup verifies the browser's process identity before attempting termination. If termination cannot be confirmed, the runtime record is retained and status reports an error. Close the remaining browser before retrying; do not delete its state file while it is active.
+
 ```bash
 profiledock status Work
 profiledock close Work

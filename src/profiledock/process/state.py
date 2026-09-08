@@ -5,6 +5,7 @@ the current user (mode 0600 files, atomic replace-on-write).
 """
 
 import json
+import math
 import os
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ _PLAYWRIGHT_STATE_FIELDS = frozenset(
         "controller_pid",
         "controller_started_at",
         "launcher_pid",
+        "launcher_create_time",
         "port",
         "token",
         "tabs",
@@ -145,6 +147,16 @@ def _valid_state(value: StateDict, profile_id: str | None = None) -> bool:
     if value.get("status") not in {"starting", "running", "closing"}:
         return False
     if "launcher_pid" in value and (type(value["launcher_pid"]) is not int or value["launcher_pid"] < 0):
+        return False
+    if (
+        "launcher_create_time" in value
+        and value["launcher_create_time"] is not None
+        and (
+            type(value["launcher_create_time"]) not in (int, float)
+            or not math.isfinite(value["launcher_create_time"])
+            or value["launcher_create_time"] <= 0
+        )
+    ):
         return False
     if "closing" in value and type(value["closing"]) is not bool:
         return False

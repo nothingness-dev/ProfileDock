@@ -93,6 +93,8 @@ Protections:
 
 - The Playwright controller listens only on loopback and accepts a bounded command vocabulary for lifecycle, tab inspection, navigation, page reading, JavaScript evaluation, and cookie export.
 - Each controller uses a random per-launch token stored in private runtime state.
+- Controller startup passes tokens and identity presets through its environment instead of process arguments. This reduces command-line exposure but does not hide credentials from processes allowed to inspect that environment.
+- JSON and legacy probe/close requests require authentication. Windows controllers reserve their loopback port with exclusive binding.
 - Commands have size limits and socket timeouts, and tokens are compared in constant time.
 - Commands and arguments are schema-checked, URLs are restricted to supported schemes, and request and response sizes are bounded.
 - `eval` intentionally executes the exact JavaScript expression supplied by the local CLI user inside the selected page. It never executes that expression as a shell command or Python expression.

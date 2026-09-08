@@ -26,6 +26,7 @@ from ..backup import create_backup_archive
 from ..browser_detection import browser_rows
 from ..cli_contract import EXIT_SUCCESS, EXIT_USER_ERROR, error_category
 from ..cli_support import format_cpu_percent, redact_proxy
+from ..commands.automation import _identity_preset_kwargs
 from ..data_root import DataPaths
 from ..doctor import STATUS_FAILED, STATUS_OK, STATUS_WARNING, DiagnosticCheck, run_diagnostics
 from ..fsops import write_private_json
@@ -598,6 +599,7 @@ def _open_tab(paths: DataPaths, manager: ProfileManager, values: dict[str, objec
             args={"url": url},
             runtime_dir=paths.runtime_dir / profile.id,
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
         )
     except Exception as exc:
         category = getattr(exc, "category", None) or error_category(str(exc))
@@ -626,6 +628,7 @@ def _read_page(paths: DataPaths, manager: ProfileManager, values: dict[str, obje
             args={"url": url, "tab": 0},
             runtime_dir=paths.runtime_dir / profile.id,
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
             timeout=40.0,
         )
     except Exception as exc:
@@ -672,6 +675,7 @@ def _screenshot(paths: DataPaths, manager: ProfileManager, values: dict[str, obj
             args={"url": url, "tab": 0, "output": str(out_path.resolve()), "full_page": full_page},
             runtime_dir=paths.runtime_dir / profile.id,
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
             timeout=60.0,
         )
     except Exception as exc:
@@ -728,6 +732,7 @@ def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object
                 args={"set_cookies": set_cookies},
                 runtime_dir=paths.runtime_dir / profile.id,
                 auto_start_headless=True,
+                **_identity_preset_kwargs(profile),
             )
         except Exception as exc:
             category = getattr(exc, "category", None) or error_category(str(exc))
@@ -747,6 +752,7 @@ def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object
             args={},
             runtime_dir=paths.runtime_dir / profile.id,
             auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
         )
     except Exception as exc:
         category = getattr(exc, "category", None) or error_category(str(exc))

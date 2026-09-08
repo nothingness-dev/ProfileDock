@@ -56,8 +56,18 @@ def send_controller_command(
     runtime_dir: Path | None = None,
     timeout: float = 30.0,
     auto_start_headless: bool = True,
+    proxy: str | None = None,
+    user_agent: str | None = None,
+    locale: str | None = None,
+    timezone: str | None = None,
 ) -> dict[str, Any]:
-    """Send a command to a Playwright controller, auto-starting headlessly if stopped."""
+    """Send a command to a Playwright controller, auto-starting headlessly if stopped.
+
+    Identity presets (proxy/user_agent/locale/timezone) apply to the
+    auto-started session exactly as a manual launch would; a profile
+    configured with a proxy must never egress via the real IP because an
+    automation command happened to arrive while it was stopped.
+    """
 
     from profiledock.process_manager import _MAX_RESPONSE_BYTES as _max_response_bytes
     from profiledock.process_manager import _controller_available as _controller_available_impl
@@ -81,7 +91,16 @@ def send_controller_command(
     ):
         if not auto_start_headless:
             raise ProfileRunningError(f"profile '{profile_id}' is not running with Playwright controller")
-        state = start_controller(data_dir, tabs=1, headless=True, runtime_dir=runtime_dir)
+        state = start_controller(
+            data_dir,
+            tabs=1,
+            headless=True,
+            runtime_dir=runtime_dir,
+            proxy=proxy,
+            user_agent=user_agent,
+            locale=locale,
+            timezone=timezone,
+        )
 
     port = int(state.get("port", 0))
     token = str(state.get("token", ""))

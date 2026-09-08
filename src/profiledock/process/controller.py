@@ -10,12 +10,15 @@ import argparse
 import hmac
 import json
 import os
+import queue
 import socket
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .identity import _find_browser_pid
-from .ipc import _IPC_COMMANDS, _MAX_COMMAND_BYTES
+from .ipc import _IPC_COMMANDS
 from .state import (
     RUNNING_STATE_PROTOCOL_VERSION,
     _read_state,
@@ -339,69 +342,183 @@ def _encode_ipc_response(response: dict[str, Any]) -> bytes:
     return b'{"status":"error","message":"controller response exceeds the maximum size"}\n'
 
 
-def _wait_for_close(server: socket.socket, context: "BrowserContext", token: str) -> None:
-    while _context_alive(context):
+def _wait_for_close(
+    server: socket.socket,
+    context: "BrowserContext",
+    token: str,
+    startup: Callable[[], None] | None = None,
+) -> None:
+    """Serve the IPC protocol until a close command or browser death.
+
+    A listener thread accepts connections immediately and answers probe and
+    close lines without touching the browser, so local liveness checks never
+    starve behind a long command or the startup navigation. JSON commands
+    that need the browser context are handed to the main thread (the sync
+    Playwright API is single-threaded) through a queue.
+    """
+    from profiledock.process_manager import _MAX_COMMAND_BYTES as max_command_bytes
+
+    command_queue: queue.Queue[tuple[socket.socket, str] | None] = queue.Queue()
+    shutdown = threading.Event()
+    workers: list[threading.Thread] = []
+
+    def serve(connection: socket.socket) -> None:
         try:
-            connection, _ = server.accept()
+            connection.settimeout(30.0)
+            command_raw = b""
+            while True:
+                chunk = connection.recv(max_command_bytes)
+                if not chunk:
+                    break
+                command_raw += chunk
+                if b"\n" in chunk:
+                    break
+                if len(command_raw) > max_command_bytes:
+                    break
         except (TimeoutError, OSError):
-            continue
-        with connection:
+            _close_quietly(connection)
+            return
+        if len(command_raw) > max_command_bytes or not command_raw:
+            _send_line(connection, b"error\n")
+            return
+        supplied = command_raw.decode("utf-8", errors="replace").strip()
+
+        if supplied.startswith("{") and supplied.endswith("}"):
             try:
-                connection.settimeout(30.0)
-                command_raw = b""
-                while True:
-                    chunk = connection.recv(_MAX_COMMAND_BYTES)
-                    if not chunk:
-                        break
-                    command_raw += chunk
-                    if b"\n" in chunk:
-                        break
-                    if len(command_raw) > _MAX_COMMAND_BYTES:
-                        break
-            except (TimeoutError, OSError):
-                continue
-            if len(command_raw) > _MAX_COMMAND_BYTES or not command_raw:
-                try:
-                    connection.sendall(b"error\n")
-                except OSError:
-                    pass
-                continue
-            supplied = command_raw.decode("utf-8", errors="replace").strip()
-
-            if supplied.startswith("{") and supplied.endswith("}"):
-                try:
-                    cmd_obj = json.loads(supplied)
-                    resp, should_exit = _execute_ipc_command(cmd_obj, context, token)
-                    connection.sendall(_encode_ipc_response(resp))
-                    if should_exit:
-                        return
-                    continue
-                except Exception as exc:
-                    try:
-                        err_resp = {"status": "error", "message": str(exc)}
-                        connection.sendall(_encode_ipc_response(err_resp))
-                    except OSError:
-                        pass
-                    continue
-
-            close_command = "close:" + token
-            probe_command = "probe:" + token
-            if hmac.compare_digest(supplied, probe_command):
-                try:
-                    connection.sendall(b"ok\n")
-                except OSError:
-                    pass
-                continue
-            if hmac.compare_digest(supplied, close_command):
-                try:
-                    connection.sendall(b"ok\n")
-                except OSError:
-                    pass
+                cmd_obj = json.loads(supplied)
+            except json.JSONDecodeError as exc:
+                _send_line(
+                    connection,
+                    _encode_ipc_response({"status": "error", "message": str(exc)}),
+                )
                 return
+            cmd = cmd_obj.get("cmd")
+            req_token = cmd_obj.get("token")
+            if not isinstance(req_token, str) or not hmac.compare_digest(
+                req_token.encode("utf-8"), token.encode("utf-8")
+            ):
+                _send_line(connection, b'{"status":"error","message":"unauthorized command token"}\n')
+                return
+            if cmd == "probe":
+                _send_line(connection, b'{"status":"ok"}\n')
+                return
+            if cmd == "close":
+                _send_line(connection, b'{"status":"ok"}\n')
+                shutdown.set()
+                command_queue.put(None)
+                return
+
+            command_queue.put((connection, supplied))
+            return
+
+        matched = None
+        for candidate in ("probe:" + token, "close:" + token):
             try:
-                connection.sendall(b"error\n")
+                if hmac.compare_digest(supplied, candidate):
+                    matched = candidate
+                    break
+            except TypeError:
+                continue
+        if matched is None:
+            _send_line(connection, b"error\n")
+        elif matched.startswith("probe:"):
+            _send_line(connection, b"ok\n")
+        else:
+            _send_line(connection, b"ok\n")
+            shutdown.set()
+            command_queue.put(None)
+
+    def listener() -> None:
+        while not shutdown.is_set():
+            try:
+                connection, _ = server.accept()
+            except TimeoutError:
+                continue
             except OSError:
-                pass
+                shutdown.set()
+                command_queue.put(None)
+                return
+            workers[:] = [worker for worker in workers if worker.is_alive()]
+            if len(workers) >= 32 or command_queue.qsize() >= 32:
+                _close_quietly(connection)
+                continue
+            worker = threading.Thread(target=serve, args=(connection,), daemon=True)
+            workers.append(worker)
+            worker.start()
+
+    def listener_guarded() -> None:
+        try:
+            listener()
+        except BaseException:
+            if not shutdown.is_set():
+                shutdown.set()
+                command_queue.put(None)
+
+    listener_thread = threading.Thread(target=listener_guarded, daemon=True)
+    listener_thread.start()
+    try:
+        if startup is not None:
+            startup()
+        while not shutdown.is_set() and _context_alive(context):
+            try:
+                item = command_queue.get(timeout=0.5)
+            except queue.Empty:
+                pages = context.pages
+                if not pages:
+                    return
+                page = pages[0]
+                pump = getattr(page, "wait_for_timeout", None)
+                if pump is not None:
+                    try:
+                        pump(50)
+                    except Exception:
+                        pass
+                continue
+            if item is None:
+                return
+            connection, supplied = item
+            try:
+                cmd_obj = json.loads(supplied)
+                resp, should_exit = _execute_ipc_command(cmd_obj, context, token)
+                _send_line(connection, _encode_ipc_response(resp))
+                if should_exit:
+                    return
+            except Exception as exc:
+                _send_line(
+                    connection,
+                    _encode_ipc_response({"status": "error", "message": str(exc)}),
+                )
+    finally:
+        shutdown.set()
+        try:
+            server.close()
+        except (OSError, AttributeError):
+            pass
+        listener_thread.join(timeout=0.6)
+        for worker in workers:
+            worker.join(timeout=0.05)
+        while True:
+            try:
+                pending = command_queue.get_nowait()
+            except queue.Empty:
+                break
+            if pending is not None:
+                _close_quietly(pending[0])
+
+
+def _close_quietly(connection: socket.socket) -> None:
+    try:
+        connection.close()
+    except (OSError, AttributeError):
+        pass
+
+
+def _send_line(connection: socket.socket, payload: bytes) -> None:
+    try:
+        connection.sendall(payload)
+    except OSError:
+        pass
+    _close_quietly(connection)
 
 
 def _playwright_proxy_options(proxy_url: str | None) -> dict[str, Any]:
@@ -530,11 +647,12 @@ def _controller(
         return 2
 
     context = None
-    channel = browser_channel or "chromium,chrome"
+    channel = browser_channel or "chromium"
     server = None
     try:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if os.name == "nt":
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         server.bind(("127.0.0.1", 0))
         server.listen(128)
         server.settimeout(0.5)
@@ -561,13 +679,6 @@ def _controller(
                 while len(context.pages) > target_pages:
                     context.pages[-1].close()
 
-                for idx, url in enumerate(urls):
-                    if idx < len(context.pages):
-                        try:
-                            context.pages[idx].goto(url)
-                        except Exception:
-                            pass
-
                 browser_pid = _find_browser_pid(os.getpid())
                 _atomic_private_json_impl(
                     path,
@@ -591,7 +702,17 @@ def _controller(
                         "headless": bool(headless),
                     },
                 )
-                _wait_for_close(server, context, token)
+
+                def _navigate_start_urls() -> None:
+
+                    for idx, url in enumerate(urls):
+                        if idx < len(context.pages):
+                            try:
+                                context.pages[idx].goto(url, wait_until="domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+
+                _wait_for_close(server, context, token, startup=_navigate_start_urls)
             finally:
                 try:
                     context.close()
@@ -628,39 +749,35 @@ def main() -> None:
     parser.add_argument("--controller", type=Path, required=True)
     parser.add_argument("data_dir")
     parser.add_argument("tabs", type=int)
-    parser.add_argument("token")
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--browser-channel", type=str, default=None)
-    parser.add_argument("--window-size", type=str, default=None)
-    parser.add_argument("--url", action="append", default=[])
     parser.add_argument("--proxy", type=str, default=None)
     parser.add_argument("--user-agent", type=str, default=None)
     parser.add_argument("--locale", type=str, default=None)
     parser.add_argument("--timezone", type=str, default=None)
     args = parser.parse_args()
 
-    width = None
-    height = None
-    if args.window_size:
-        parts = args.window_size.split(",")
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            width = int(parts[0])
-            height = int(parts[1])
+    token = os.environ.get("PROFILEDOCK_CONTROLLER_TOKEN", "")
+    if not token:
+        parser.error("PROFILEDOCK_CONTROLLER_TOKEN environment variable is required")
+    proxy = os.environ.get("PROFILEDOCK_CONTROLLER_PROXY") or args.proxy
+    user_agent = os.environ.get("PROFILEDOCK_CONTROLLER_USER_AGENT") or args.user_agent
+    locale = os.environ.get("PROFILEDOCK_CONTROLLER_LOCALE") or args.locale
+    timezone = os.environ.get("PROFILEDOCK_CONTROLLER_TIMEZONE") or args.timezone
 
     raise SystemExit(
         _controller(
             args.controller,
             args.data_dir,
             args.tabs,
-            args.token,
+            token,
             args.headless,
-            browser_channel=args.browser_channel,
-            window_width=width,
-            window_height=height,
-            start_urls=args.url or None,
-            proxy=args.proxy,
-            user_agent=args.user_agent,
-            locale=args.locale,
-            timezone=args.timezone,
+            browser_channel=None,
+            window_width=None,
+            window_height=None,
+            start_urls=None,
+            proxy=proxy,
+            user_agent=user_agent,
+            locale=locale,
+            timezone=timezone,
         )
     )

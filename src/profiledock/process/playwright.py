@@ -10,13 +10,14 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from .errors import BrowserLaunchError, ProfileRunningError
-from .identity import _close_stderr, _stderr_message, _terminate_matching_process
+from .identity import _terminate_matching_process
 from .launch import prepare_runtime_dir, validate_launch_request
 from .state import (
     RUNNING_STATE_PROTOCOL_VERSION,
@@ -31,6 +32,52 @@ from .state import (
     state_file_is_unreadable,
     state_path,
 )
+
+
+class _StderrCapture:
+    """Drain a child's stderr pipe on a thread, keeping a bounded tail.
+
+    Keeps the pipe from filling (which would stall a chatty Playwright
+    driver and fake a startup timeout) while preserving the last bytes for
+    exit diagnostics instead of dropping them to devnull.
+    """
+
+    def __init__(self, process: subprocess.Popen[bytes]) -> None:
+        self._process = process
+        self._buffer = b""
+        self._buffer_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        stream = self._process.stderr
+        if stream is None:
+            return
+
+        def read_loop() -> None:
+            try:
+                while True:
+                    chunk = stream.read(4096)
+                    if not chunk:
+                        break
+                    with self._buffer_lock:
+                        self._buffer = (self._buffer + chunk)[-_MAX_STDERR_TAIL:]
+            except (OSError, ValueError):
+                pass
+
+        self._thread = threading.Thread(target=read_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+
+        if self._process.poll() is not None and self._thread is not None:
+            self._thread.join(timeout=1)
+
+    def tail(self) -> bytes:
+        with self._buffer_lock:
+            return self._buffer
+
+
+_MAX_STDERR_TAIL = 16 * 1024
 
 
 def start_controller(
@@ -50,6 +97,9 @@ def start_controller(
 ) -> StateDict:
 
     from profiledock.process_manager import _controller_available as _controller_available_impl
+    from profiledock.process_manager import (
+        _get_process_create_time as _get_process_create_time_impl,
+    )
     from profiledock.process_manager import _stop_process as _stop_process_impl
     from profiledock.process_manager import is_running as _is_running_impl
 
@@ -66,13 +116,15 @@ def start_controller(
     if _is_running_impl(data_dir, runtime_dir):
         raise ProfileRunningError("profile is already running")
     token = uuid4().hex
+    launcher_pid = os.getpid()
     initial = {
         "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
         "engine": "playwright",
         "profile_id": Path(data_dir).parent.name,
         "controller_pid": 0,
         "controller_started_at": _utc_now(),
-        "launcher_pid": os.getpid(),
+        "launcher_pid": launcher_pid,
+        "launcher_create_time": _get_process_create_time_impl(launcher_pid),
         "port": 0,
         "token": token,
         "tabs": tabs,
@@ -100,23 +152,28 @@ def start_controller(
         str(path),
         data_dir,
         str(tabs),
-        token,
     ]
+
+    env = dict(os.environ)
+    for key in ("TOKEN", "PROXY", "USER_AGENT", "LOCALE", "TIMEZONE"):
+        env.pop("PROFILEDOCK_CONTROLLER_" + key, None)
+    env["PROFILEDOCK_CONTROLLER_TOKEN"] = token
     if headless:
         command.append("--headless")
     if proxy:
-        command.extend(["--proxy", proxy])
+        env["PROFILEDOCK_CONTROLLER_PROXY"] = proxy
     if user_agent:
-        command.extend(["--user-agent", user_agent])
+        env["PROFILEDOCK_CONTROLLER_USER_AGENT"] = user_agent
     if locale:
-        command.extend(["--locale", locale])
+        env["PROFILEDOCK_CONTROLLER_LOCALE"] = locale
     if timezone:
-        command.extend(["--timezone", timezone])
+        env["PROFILEDOCK_CONTROLLER_TIMEZONE"] = timezone
     try:
         popen_kwargs: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.PIPE,
+            "env": env,
         }
         if sys.platform == "win32":
             popen_kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
@@ -127,6 +184,9 @@ def start_controller(
         process = subprocess.Popen(command, **popen_kwargs)
         deadline = time.monotonic() + startup_timeout
         poll_interval = 0.02
+
+        stderr_capture = _StderrCapture(process)
+        stderr_capture.start()
         try:
             while time.monotonic() < deadline:
                 state = _read_state(path)
@@ -138,7 +198,7 @@ def start_controller(
                     and _controller_available_impl(state)
                 ):
                     _unlink_quietly(err)
-                    _close_stderr(process)
+                    stderr_capture.stop()
                     return state
                 if process.poll() is not None:
                     break
@@ -155,19 +215,21 @@ def start_controller(
     _unlink_quietly(path)
     error_info = _read_error(err)
     if error_info:
-        _close_stderr(process)
+        _stop_process_impl(process)
+        stderr_capture.stop()
         _unlink_quietly(path)
         raise BrowserLaunchError(
             error_info["message"],
             str(error_info["error_type"]),
         )
     if process.poll() is not None:
-        stderr = _stderr_message(process, token)
+        stderr_capture.stop()
+        stderr = stderr_capture.tail().decode("utf-8", errors="replace").replace(token, "[redacted]").strip()
         message = f"Controller process exited unexpectedly (code {process.returncode})"
         if stderr:
             message = f"{message}: {stderr}"
         _write_error(err, "controller_exited", message, redactions=(token,))
-        _close_stderr(process)
+        stderr_capture.stop()
         _unlink_quietly(path)
         raise BrowserLaunchError(
             message,
@@ -177,7 +239,7 @@ def start_controller(
     _unlink_quietly(path)
     message = f"Controller startup timed out after {startup_timeout:g} seconds"
     _write_error(err, "controller_timeout", message, redactions=(token,))
-    _close_stderr(process)
+    stderr_capture.stop()
     raise BrowserLaunchError(
         message,
         "controller_timeout",

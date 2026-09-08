@@ -172,6 +172,8 @@ Proxy strings with embedded credentials are accepted by the Playwright engine an
 
 Playwright launches open a visible Chromium window by default; pass `--headless` for a background Playwright launch. The Direct engine does not accept `--headless`. The command returns only after the controller and browser are fully ready, and a failed startup rolls back all runtime artifacts. When no tab count or preset exists, interactive mode prompts. Non-interactive mode requires `--tabs`. Start URLs cannot outnumber tabs. Duplicate launch is refused while the profile is starting or already running. Launch writes runtime state outside `browser-data` and records the launch timestamp after success.
 
+Readiness means the browser and authenticated controller are available; start URLs may still be loading. Slow start URLs do not delay readiness probes. Automation commands that start a stopped profile reuse its saved proxy, user-agent, locale, and timezone in both the CLI and interactive interface.
+
 ## `close`
 
 ```text

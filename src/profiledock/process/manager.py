@@ -12,6 +12,7 @@ from .identity import _terminate_matching_process
 from .playwright import _close_playwright
 from .state import (
     RUNNING_STATE_PROTOCOL_VERSION,
+    StateDict,
     _read_error,
     _read_state,
     _unlink_quietly,
@@ -21,6 +22,48 @@ from .state import (
     error_path,
     state_path,
 )
+
+
+def _reap_recorded_browser(state: StateDict, timeout: float) -> bool:
+    """Terminate a recorded live browser before destroying its state record.
+
+    Unlinking running.json without this leaks the Chromium tree: it keeps the
+    Windows profile lock and no later path can find or signal it.
+    """
+    raw_browser_pid = state.get("browser_pid")
+    if type(raw_browser_pid) is not int or raw_browser_pid <= 0:
+        return True
+    return _terminate_matching_process(
+        raw_browser_pid,
+        state.get("browser_create_time"),
+        min(max(timeout, 0.1), 5),
+    )
+
+
+def _launcher_starting(state: StateDict) -> bool:
+    """True when the state's launcher process is verifiably still alive.
+
+    A bare PID-liveness check keeps a dead launch looking 'starting' forever
+    once the OS reuses the launcher PID; when the state records the
+    launcher's create-time it must match too.
+    """
+    from profiledock.process_manager import _alive as alive_impl
+    from profiledock.process_manager import (
+        _get_process_create_time as create_time_impl,
+    )
+
+    launcher_pid = int(state.get("launcher_pid", -1))
+    if launcher_pid <= 0:
+        return False
+    if not alive_impl(launcher_pid):
+        return False
+    recorded = state.get("launcher_create_time")
+    if recorded is None:
+        return True
+    actual = create_time_impl(launcher_pid)
+    if actual is None:
+        return True
+    return abs(actual - float(recorded)) < 2.0
 
 
 def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None = None) -> str:
@@ -49,7 +92,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None
                     return "closing"
                 return "running"
             launcher_pid = state["launcher_pid"]
-            if pid == 0 and launcher_pid > 0 and _alive_impl(launcher_pid):
+            if pid == 0 and launcher_pid > 0 and _launcher_starting(state):
                 return "starting"
             if state.get("closing"):
                 if clean_stale:
@@ -72,8 +115,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None
             return "stale"
         pid = int(state.get("controller_pid", -1))
         if pid <= 0:
-            launcher_pid = int(state.get("launcher_pid", -1))
-            if launcher_pid > 0 and _alive_impl(launcher_pid):
+            if _launcher_starting(state):
                 return "starting"
             if clean_stale:
                 _unlink_quietly(path)
@@ -82,10 +124,14 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None
         if not _alive_impl(pid):
             if state.get("closing"):
                 if clean_stale:
+                    if not _reap_recorded_browser(state, timeout=1.0):
+                        return "error"
                     _unlink_quietly(path)
                     return "stopped"
                 return "stale"
             if clean_stale:
+                if not _reap_recorded_browser(state, timeout=1.0):
+                    return "error"
                 _unlink_quietly(path)
                 return "crashed"
             return "stale"
@@ -156,10 +202,13 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Path | None = None) -> bo
         and not _matching_impl(browser_pid, upgraded.get("browser_create_time"))
     ):
         return False
+
+    if browser_pid > 0 and _matching_impl(browser_pid, upgraded.get("browser_create_time")):
+        return True
     return (
         _alive_impl(controller_pid)
         or _controller_available_impl(upgraded)
-        or (controller_pid <= 0 and _alive_impl(launcher_pid))
+        or (controller_pid <= 0 and _launcher_starting(upgraded))
     )
 
 

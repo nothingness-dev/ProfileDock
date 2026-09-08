@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -138,6 +139,54 @@ def test_controller_applies_launch_preset_options(controller_env):
     )
     owned_pids.add(state["pid"])
     assert state["page_count"] == 2
+    _close(data_dir, owned_pids, state["pid"])
+
+
+def test_ready_state_publishes_before_slow_start_urls(controller_env):
+    """Regression: ready state was published only after navigating every
+    start URL with Playwright's 30s default goto timeout. One slow URL made
+    the launcher time out and force-kill a healthy browser. The ready state
+    must publish before navigation so the launcher returns promptly even
+    when a start URL stalls.
+    """
+    import threading
+
+    manager, profile, data_dir, owned_pids = controller_env
+
+    stall = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    stall.bind(("127.0.0.1", 0))
+    stall.listen(4)
+    stall_port = stall.getsockname()[1]
+    stop_accepting = threading.Event()
+
+    def accept_forever():
+        while not stop_accepting.is_set():
+            try:
+                connection, _ = stall.accept()
+
+            except OSError:
+                return
+
+    acceptor = threading.Thread(target=accept_forever, daemon=True)
+    acceptor.start()
+
+    try:
+        started = time.monotonic()
+        state = start_controller(
+            str(data_dir),
+            1,
+            headless=True,
+            start_urls=[f"http://127.0.0.1:{stall_port}/"],
+            startup_timeout=8,
+        )
+        elapsed = time.monotonic() - started
+        owned_pids.add(state["pid"])
+
+        assert state["port"] > 0
+        assert elapsed < 8
+    finally:
+        stop_accepting.set()
+        stall.close()
     _close(data_dir, owned_pids, state["pid"])
 
 
@@ -292,8 +341,7 @@ def test_controller_installs_graceful_termination_handlers(tmp_path, monkeypatch
         "signal",
         lambda num, handler: armed.append(num) or signal_module.SIG_DFL,
     )
-    # Block the playwright import so the real _controller exits early via the
-    # playwright_unavailable path — signal arming happens before that exit.
+
     real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
     def blocked_import(name, *args, **kwargs):
@@ -307,7 +355,6 @@ def test_controller_installs_graceful_termination_handlers(tmp_path, monkeypatch
         controller = tmp_path / "running.json"
         data_dir = str(tmp_path / "browser-data")
         tabs = 1
-        token = "x" * 32
         headless = True
         browser_channel = None
         window_size = None
@@ -318,6 +365,8 @@ def test_controller_installs_graceful_termination_handlers(tmp_path, monkeypatch
         timezone = None
 
     monkeypatch.setattr(argparse.ArgumentParser, "parse_args", lambda self, *a, **k: FakeArgs())
+
+    monkeypatch.setenv("PROFILEDOCK_CONTROLLER_TOKEN", "x" * 32)
 
     with pytest.raises(SystemExit):
         controller_module.main()
