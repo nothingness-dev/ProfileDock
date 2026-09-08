@@ -245,9 +245,7 @@ def _directory_manifest(root: Path) -> tuple[set[str], dict[str, tuple[int, str]
             if _is_link(file_path) or not file_path.is_file():
                 raise MigrationError(f"source profile contains unsafe file: {file_path}")
             relative_file = file_path.relative_to(root).as_posix()
-            # Runtime leftovers (running.json, controller.error, *.tmp) are
-            # transient state, matching backup's exclusion set; migrating them
-            # could make the destination profile appear falsely active.
+
             if _is_runtime_or_log_file(relative_file):
                 continue
             files[relative_file] = (file_path.stat().st_size, sha256_file(file_path))

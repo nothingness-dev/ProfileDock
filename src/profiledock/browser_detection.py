@@ -22,7 +22,6 @@ _PREFERRED_GROUP = {
 }
 
 _BROWSER_ROWS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # (display name, candidate executable paths across platforms)
     (
         "Google Chrome",
         (

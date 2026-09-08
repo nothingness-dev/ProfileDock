@@ -35,8 +35,6 @@ MAX_ARCHIVE_MEMBERS = 100000
 
 
 class RestoreError(Exception):
-    # Defaults keep keyword-classified messages working; subclasses override
-    # with stable contract-v1 categories so rewording never reclassifies them.
     category = "storage_error"
 
 

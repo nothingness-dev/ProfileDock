@@ -77,12 +77,7 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
         category = "profile_active"
     elif isinstance(error, BrowserLaunchError):
         category = "browser_launch_failed"
-    elif isinstance(error, DataRootError):
-        # DataRootError covers both mundane environment failures (missing
-        # LOCALAPPDATA, invalid root) and genuine path-safety refusals; let the
-        # message keywords classify it instead of blanket security_violation.
-        category = error_category(str(error))
-    elif isinstance(error, ValidationError):
+    elif isinstance(error, (DataRootError, ValidationError)):
         category = error_category(str(error))
     elif isinstance(error, (StorageError, OSError)):
         category = "storage_error"
@@ -93,10 +88,7 @@ def fail_exception(error: Exception, code: int = EXIT_USER_ERROR) -> None:
             category = "security_violation"
         else:
             category = error_category(str(error))
-    # Structural fallback: domain exceptions may carry their own category
-    # (BackupError, RestoreError, MigrationError families). When the keyword
-    # classifier produced the generic invalid_input but the exception knows
-    # better, prefer the exception's attribute.
+
     error_category_attr = getattr(error, "category", None)
     if category == "invalid_input" and isinstance(error_category_attr, str) and error_category_attr:
         category = error_category_attr
@@ -123,7 +115,7 @@ def resolve_engine_strict(cli_engine: str | None, profile: Profile) -> str:
         if clean not in ("direct", "playwright"):
             raise ValueError("engine must be 'direct' or 'playwright'")
         return clean
-    # getattr keeps duck-typed profile stand-ins (tests) working without the attribute.
+
     launch_config = getattr(profile, "launch_config", None)
     if launch_config and launch_config.engine:
         return str(launch_config.engine)

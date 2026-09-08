@@ -243,8 +243,6 @@ def status_command(
                 try:
                     _render_once()
                 except StorageError as exc:
-                    # A transient lock or I/O blip should not kill a monitor;
-                    # report it and keep polling.
                     typer.echo(f"status refresh skipped: {exc}", err=True)
                 time.sleep(interval)
     except KeyboardInterrupt:
@@ -515,7 +513,6 @@ def close_command(
     corr_id = generate_correlation_id()
     paths = selected_paths()
     if profile_id is None:
-        # Guarded by fail() above when neither a profile nor --all was given.
         fail("must specify a profile identifier or use --all to close all profiles")
     try:
         profile = _get_manager().resolve(profile_id)

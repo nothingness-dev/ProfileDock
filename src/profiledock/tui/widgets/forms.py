@@ -305,9 +305,7 @@ class ProfilePicker(Vertical):
         self._repaint()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        # Clicking (or Enter on) a profile in the list commits it — without
-        # this the picker highlights but the value stays on the previous
-        # selection, so forms like close/delete act on the wrong profile.
+
         event.stop()
         value = str(event.option.id or "")
         if value:
@@ -318,9 +316,7 @@ class ProfilePicker(Vertical):
             self.post_message(self.Changed(self, value))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Enter in the picker's search box commits the best visible match
-        # instead of being swallowed — otherwise single-pick forms (delete,
-        # show, launch) feel dead on pure keyboard.
+
         event.stop()
         rows = self._visible_rows()
         if rows:
@@ -763,9 +759,7 @@ class FormPanel(VerticalScroll):
             return self._simple_row(spec, control)
         if spec.kind is FieldKind.ENGINE:
             entries = [(option, option) for option in (spec.options or ("direct", "playwright"))]
-            # Prefer the spec's explicit default, then the first option —
-            # which for the launch override is "(inherit)" so the stored
-            # preset/profile/environment precedence stays untouched.
+
             control = ChoiceList(entries, selected=spec.default or entries[0][0], id=f"choice-{spec.name}")
             return self._simple_row(spec, control)
         if spec.kind is FieldKind.BROWSER:
@@ -863,8 +857,7 @@ class FormPanel(VerticalScroll):
                     return
             except NoMatches:
                 pass
-        # Updating a choice only refreshes the preview — advancing (or worse,
-        # submitting) on select made single-option forms fire accidentally.
+
         self._refresh_preview()
 
     def on_profile_picker_changed(self, event: ProfilePicker.Changed) -> None:

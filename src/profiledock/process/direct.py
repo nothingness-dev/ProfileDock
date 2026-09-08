@@ -47,9 +47,7 @@ def start_direct_chrome(
     extra_args: list[str] | None = None,
     proxy_server: str | None = None,
 ) -> StateDict:
-    # Late-bound so patches of profiledock.process_manager._system_browser_executable,
-    # .is_running, ._get_process_create_time, ._stop_process and
-    # ._atomic_private_json keep applying.
+
     from profiledock.process_manager import (
         _atomic_private_json as _atomic_private_json_impl,
     )
@@ -144,9 +142,6 @@ def start_direct_chrome(
         _write_error(err, "browser_launch_failed", str(exc))
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
 
-    # Platforms that cannot read process create times record None; identity
-    # checks then degrade to PID liveness instead of failing every launch and
-    # close.
     proc_create_time = _get_process_create_time_impl(process.pid)
     state = {
         "protocol_version": RUNNING_STATE_PROTOCOL_VERSION,
@@ -174,8 +169,7 @@ def start_direct_chrome(
 
 
 def _close_direct(path: Path, state: StateDict, timeout: float) -> None:
-    # Late-bound so patches of profiledock.process_manager._atomic_private_json,
-    # ._alive and ._is_matching_process keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import (
         _atomic_private_json as _atomic_private_json_impl,

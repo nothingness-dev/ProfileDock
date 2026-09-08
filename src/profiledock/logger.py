@@ -27,7 +27,7 @@ def sanitize_url(url: str) -> str:
         parsed = urlparse(clean)
         if not parsed.scheme or not parsed.netloc:
             return clean.split("?")[0].split("#")[0]
-        # Use hostname only; netloc would retain embedded credentials (user:pass@host).
+
         host = parsed.hostname
         if not host:
             return "[url]"
@@ -54,17 +54,13 @@ def redact_sensitive_data(message: str, secrets: list[str] | None = None) -> str
             if secret and len(secret) > 4:
                 redacted = redacted.replace(secret, _REDACTED)
 
-    # (?<![A-Za-z]) avoids mangling words like "monkey=", while still matching
-    # snake_case secret names such as "api_key=" or "auth_token=".
     redacted = re.sub(
         r"(?<![A-Za-z])(token|secret|password|auth|cookie|key)=([^&\s]+)",
         r"\1=[redacted]",
         redacted,
         flags=re.IGNORECASE,
     )
-    # Proxy URLs with embedded credentials: scheme://user:pass@host -> user:***@host.
-    # The password part may itself contain '@' (the split is at the LAST one),
-    # so only '/' and whitespace terminate it.
+
     redacted = re.sub(
         r"((?:https?|socks5)://)([^@/\s:]+):([^/\s]+)@",
         r"\1\2:***@",
@@ -164,8 +160,6 @@ def write_log_entry(
                     cleaned_details[k] = v
             entry["details"] = cleaned_details
 
-        # default=str keeps the entry (including ERROR events) alive when a
-        # details value is not JSON-serializable, instead of dropping it silently.
         payload = json.dumps(entry, default=str) + "\n"
 
         target_files = [log_dir / "profiledock.log"]

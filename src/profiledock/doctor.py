@@ -370,11 +370,7 @@ def check_playwright_chromium() -> DiagnosticCheck:
 
         with sync_playwright() as p:
             exec_path = p.chromium.executable_path
-            # executable_path is computed locally, so the driver's init task
-            # never completes; exiting then leaves a pending asyncio task that
-            # dumps "Task was destroyed but it is pending" noise at exit. One
-            # cheap round-trip (a failing connect is enough) pumps the loop
-            # and lets the session shut down cleanly.
+
             try:
                 p.chromium.connect_over_cdp("http://127.0.0.1:1", timeout=200)
             except Exception:
@@ -538,8 +534,6 @@ def check_stale_running_state(root: Path) -> tuple[DiagnosticCheck, list[Path]]:
     for running_json in runtime_dir.glob("*/running.json"):
         data_dir = paths.profiles_dir / running_json.parent.name / "browser-data"
         if state_file_is_unreadable(running_json):
-            # An unparseable state file cannot verify or protect a live process,
-            # so it is safe to clean rather than treat as ambiguous.
             stale_files.append(running_json)
             continue
         status = get_status(str(data_dir), clean_stale=False, runtime_dir=running_json.parent)
@@ -610,9 +604,6 @@ def check_orphan_directories(root: Path) -> DiagnosticCheck:
 
     orphans: list[str] = []
     for item in profiles_dir.iterdir():
-        # Dot-prefixed directories are transient operation state
-        # (.deleting-*, .quarantine_*, .temp_restore_*, .m-*), not orphaned
-        # profiles; --reattach-orphans skips them too.
         if item.is_dir() and not item.name.startswith(".") and item.name not in known_ids:
             orphans.append(item.name)
 
@@ -661,7 +652,6 @@ def check_disk_space(root: Path) -> DiagnosticCheck:
     try:
         usage = shutil.disk_usage(root)
     except OSError:
-        # Absence of information is not a failure; report probe status.
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
@@ -735,7 +725,6 @@ def check_proxy_timezone_consistency(root: Path) -> DiagnosticCheck:
     try:
         doc = load_metadata(profiles_file)
     except Exception:
-        # Metadata validity is reported by metadata_schema; nothing to check.
         return DiagnosticCheck(
             id=check_id,
             status=STATUS_OK,
@@ -925,9 +914,6 @@ def repair_environment(
                 if not profiles_are_stopped(doc.profiles):
                     raise StorageError("cannot repair metadata while a profile is active")
                 with metadata_lock(profiles_file):
-                    # Preserve the corrupt primary before it is overwritten:
-                    # the backup may be stale, and the unreadable file is the
-                    # only evidence for diagnosing the corruption.
                     corrupt_primary = profiles_file.with_name(f".{profiles_file.name}.corrupt-{uuid4().hex}")
                     try:
                         _atomic_write(corrupt_primary, profiles_file.read_text(encoding="utf-8"), paths.root)
@@ -978,9 +964,6 @@ def repair_environment(
             validated_doc = load_metadata(profiles_file)
             validate_metadata_document(validated_doc.profiles, profiles_dir)
         except Exception:
-            # Plain metadata validation failure is reported by the
-            # metadata_schema check; only destructive repair work below
-            # surfaces its own failures.
             validated_doc = None
         if validated_doc is not None and (recreate_missing_directories or reattach_orphans):
             try:
@@ -994,9 +977,6 @@ def repair_environment(
                     repairs=repairs,
                 )
             except Exception as exc:
-                # A requested repair that could not run must be visible, not
-                # silent: the user asked doctor to fix things, so a swallowed
-                # failure looks like success.
                 repairs.append(
                     DiagnosticCheck(
                         id="repair_recreate_or_reattach_failed",

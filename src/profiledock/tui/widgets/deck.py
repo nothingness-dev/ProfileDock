@@ -33,10 +33,7 @@ class VimOptionList(OptionList):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        # Chain count of the click currently being dispatched. Textual runs
-        # every _on_click in the MRO, so the stock OptionList handler fires
-        # alongside ours and unconditionally calls action_select(); the gate
-        # below lets a single click highlight-only in double-click mode.
+
         self._click_chain = 0
 
     def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
@@ -119,7 +116,6 @@ def _filtered(actions: list[ActionSpec], query: str) -> list[ActionSpec]:
     for action in actions:
         label_score = fuzzy_score(query, action.label)
         if label_score is not None:
-            # Label matches rank above all others; higher fuzzy score wins.
             key = (0, -(100000 + label_score), action.label)
         else:
             haystack = f"{action.label} {action.description} {action.id} {action.hotkey}"

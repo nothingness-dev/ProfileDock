@@ -86,7 +86,7 @@ def backup_command(
             if not profiles:
                 fail("no profiles found to backup")
         else:
-            assert profile_id is not None  # guarded above; narrows Optional for resolve()
+            assert profile_id is not None
             profile = profile_manager.resolve(profile_id)
             profiles = [profile]
 

@@ -24,8 +24,7 @@ from .state import (
 
 
 def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None = None) -> str:
-    # Late-bound so patches of profiledock.process_manager._alive and
-    # ._is_matching_process keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import (
         _is_matching_process as _is_matching_process_impl,
@@ -93,10 +92,7 @@ def get_status(data_dir: str, clean_stale: bool = True, runtime_dir: Path | None
         port = int(state.get("port", 0))
         if not port:
             return "starting"
-        # A hand-closed browser window (clicking the X) leaves the controller
-        # process alive; "running" therefore requires the recorded browser
-        # process too. When browser_pid is missing/unreadable the controller
-        # alone decides, preserving compatibility with older state files.
+
         browser_pid = int(state.get("browser_pid", 0) or 0)
         if browser_pid > 0 and not _is_matching_process_impl(browser_pid, state.get("browser_create_time")):
             if clean_stale:
@@ -121,8 +117,7 @@ def is_running(data_dir: str, runtime_dir: Path | None = None) -> bool:
 
 
 def is_active_for_mutation(data_dir: str, runtime_dir: Path | None = None) -> bool:
-    # Late-bound so patches of profiledock.process_manager._alive,
-    # ._is_matching_process and ._controller_available keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import (
         _controller_available as _controller_available_impl,
@@ -150,8 +145,7 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Path | None = None) -> bo
         return True
     controller_pid = int(upgraded.get("controller_pid", -1))
     launcher_pid = int(upgraded.get("launcher_pid", -1))
-    # Mirror get_status: a hand-closed browser leaves the controller alive but
-    # the profile is not truly active; IPC attach below cleans such states up.
+
     from profiledock.process_manager import _is_matching_process as _matching_impl
 
     browser_pid = int(upgraded.get("browser_pid", 0) or 0)
@@ -170,8 +164,7 @@ def is_active_for_mutation(data_dir: str, runtime_dir: Path | None = None) -> bo
 
 
 def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Path | None = None) -> None:
-    # Late-bound so patches of profiledock.process_manager.is_running, ._alive
-    # and ._get_process_create_time keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import (
         _get_process_create_time as _get_process_create_time_impl,
@@ -196,9 +189,7 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Path | Non
         expected_create_time = initial_state.get("process_create_time")
         if initial_pid > 0 and _alive_impl(initial_pid):
             actual_create_time = _get_process_create_time_impl(initial_pid)
-            # Enforce identity only when both timestamps are available; on
-            # platforms that cannot read create times, PID liveness is the
-            # strongest available check.
+
             if (
                 expected_create_time is not None
                 and actual_create_time is not None
@@ -213,9 +204,6 @@ def close_controller(data_dir: str, timeout: float = 15, runtime_dir: Path | Non
         raw_browser_pid = initial_state.get("browser_pid")
         controller_pid = raw_controller_pid if type(raw_controller_pid) is int else 0
         if controller_pid > 0 and not _alive_impl(controller_pid) and not initial_state.get("closing"):
-            # The controller crashed without a close request. Recover by
-            # terminating the recorded browser (only when its process identity
-            # matches) and cleaning all runtime state.
             if type(raw_browser_pid) is int and raw_browser_pid > 0:
                 _terminate_matching_process(
                     raw_browser_pid,

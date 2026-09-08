@@ -21,7 +21,6 @@ BACKUP_ARCHIVE_SCHEMA_VERSION = 1
 
 
 class BackupError(Exception):
-    # Structural category so fail_exception survives message rewording.
     category = "storage_error"
 
 
@@ -271,10 +270,7 @@ def _archive_profile(
 
 
 def _verify_archive_structure(archive: Path) -> None:
-    # Structural verification only: member uniqueness, manifest presence and
-    # format, and per-file sizes. Content checksums were computed from the
-    # exact bytes streamed into the archive and are re-verified against the
-    # manifest at restore time.
+
     with tarfile.open(archive, "r:gz") as verify_tar:
         names = verify_tar.getnames()
         if len(names) != len(set(names)):

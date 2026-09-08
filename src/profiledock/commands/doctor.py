@@ -125,9 +125,7 @@ def doctor_command(
         },
     )
     has_warning = any(c.status == STATUS_WARNING for c in checks)
-    # --strict treats warnings as unhealthy for the exit code; the JSON
-    # "healthy" field keeps its failure-only meaning, strictness travels in
-    # "strict_healthy" so existing consumers stay compatible.
+
     strict_failed = has_failed or (strict and has_warning)
     if json_output:
         payload = {

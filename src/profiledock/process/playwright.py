@@ -48,8 +48,7 @@ def start_controller(
     locale: str | None = None,
     timezone: str | None = None,
 ) -> StateDict:
-    # Late-bound so patches of profiledock.process_manager.is_running,
-    # ._controller_available and ._stop_process keep applying.
+
     from profiledock.process_manager import _controller_available as _controller_available_impl
     from profiledock.process_manager import _stop_process as _stop_process_impl
     from profiledock.process_manager import is_running as _is_running_impl
@@ -120,17 +119,10 @@ def start_controller(
             "stderr": subprocess.PIPE,
         }
         if sys.platform == "win32":
-            # Detach the controller from the launcher's console and give it
-            # its own process group: terminal death (CTRL_CLOSE_EVENT) then
-            # cannot kill it mid-teardown, and group-scoped termination
-            # reaches the node driver + Chromium children.
             popen_kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
                 subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
             )
         else:
-            # Fresh session on POSIX: the controller becomes a process-group
-            # leader, so terminal SIGHUP does not propagate and
-            # _signal_posix_process_group kills the whole tree.
             popen_kwargs["start_new_session"] = True
         process = subprocess.Popen(command, **popen_kwargs)
         deadline = time.monotonic() + startup_timeout
@@ -153,8 +145,6 @@ def start_controller(
                 time.sleep(poll_interval)
                 poll_interval = min(poll_interval * 1.5, 0.1)
         except BaseException:
-            # An interrupt during startup must not orphan the freshly spawned
-            # controller subprocess or its starting-state file.
             _stop_process_impl(process)
             _unlink_quietly(path)
             raise
@@ -195,8 +185,7 @@ def start_controller(
 
 
 def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
-    # Late-bound so patches of profiledock.process_manager._atomic_private_json,
-    # ._alive and ._is_matching_process keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import (
         _atomic_private_json as _atomic_private_json_impl,
@@ -248,8 +237,6 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
     if path.exists():
         browser_pid = int(state.get("browser_pid", 0) or 0)
         if browser_pid > 0:
-            # Last-resort cleanup after a stuck close; the browser process is
-            # only signalled when its identity matches the recorded one.
             _terminate_matching_process(
                 browser_pid, state.get("browser_create_time"), min(max(timeout, 0.1), 5)
             )
@@ -264,10 +251,6 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
     if not close_sent:
         raise ProfileRunningError("profile is not running", stopped=True)
 
-    # The controller removes running.json only after context.close() has
-    # flushed persistent profile data. Wait for the controller (and browser)
-    # processes to fully exit so a follow-up launch never races a dying
-    # browser and no Chromium or controller processes survive the command.
     if controller_pid > 0:
         while _alive_impl(controller_pid) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -276,6 +259,5 @@ def _close_playwright(path: Path, state: StateDict, timeout: float) -> None:
         if not _is_matching_process_impl(
             browser_pid, state.get("browser_create_time"), require_verification=True
         ):
-            # The recorded PID now belongs to an unrelated process; never signal it.
             return
         _terminate_matching_process(browser_pid, state.get("browser_create_time"), min(max(timeout, 0.1), 5))

@@ -288,8 +288,7 @@ _DOCTOR_EXPORTS = frozenset(
 
 
 def __getattr__(name: str) -> Any:
-    # Deferred doctor import keeps `list`/`show`/`status` startups light while
-    # preserving `patch("profiledock.cli.run_diagnostics")`-style monkeypatching.
+
     if name in _DOCTOR_EXPORTS:
         from . import doctor
 

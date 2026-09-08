@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _CREATE_TIME_TOLERANCE_SECONDS = 2.0
-_WINDOWS_FILETIME_EPOCH_DELTA = 116_444_736_000_000_000  # 100ns ticks between 1601 and 1970
+_WINDOWS_FILETIME_EPOCH_DELTA = 116_444_736_000_000_000
 _WINDOWS_FILETIME_TICKS_PER_SECOND = 10_000_000
 _PS_EXECUTABLE = "/bin/ps"
 
@@ -50,7 +50,7 @@ class ProcessSample:
     """Full resource sample for one process."""
 
     identity: ProcessIdentity
-    cpu_time: float = 0.0  # cumulative user+system seconds
+    cpu_time: float = 0.0
     rss_bytes: int = 0
     vms_bytes: int = 0
     create_time: float | None = None
@@ -90,10 +90,6 @@ def make_sample(
     )
 
 
-# ---------------------------------------------------------------------------
-# Platform samplers
-
-
 class PlatformSampler:
     """Two-phase sampling interface: cheap enumeration, then batched details."""
 
@@ -108,7 +104,7 @@ class PsutilSampler(PlatformSampler):
     """Sampler backed by the optional ``psutil`` package (any platform)."""
 
     def __init__(self) -> None:
-        import psutil  # optional dependency; imported lazily
+        import psutil
 
         self._psutil = psutil
 
@@ -531,7 +527,6 @@ def sample_process_tree(
         and create_time is not None
         and abs(create_time - expected_create_time) > _CREATE_TIME_TOLERANCE_SECONDS
     ):
-        # PID recycled by an unrelated process: refuse to report telemetry.
         return []
 
     children: dict[int, list[int]] = {}

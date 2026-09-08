@@ -166,9 +166,6 @@ def direct_launch_options(plan: LaunchPlan, extra_args: list[str] | None = None)
         options["window_width"] = plan.window_width
         options["window_height"] = plan.window_height
     if plan.proxy is not None:
-        # Chromium flags cannot express proxy credentials; the direct engine
-        # only supports credentialess proxies. Playwright is the supported
-        # path when authentication is required.
         if "@" in plan.proxy:
             raise LaunchPlanError(
                 "direct engine does not support proxy credentials; use the playwright engine"

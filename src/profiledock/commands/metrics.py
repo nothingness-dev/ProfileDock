@@ -104,7 +104,7 @@ def _render_rows_table(rows: list[_MetricsRow]) -> str:
                 format_size_bytes(row.disk_bytes),
             ]
         )
-    from ..cli import _render_table  # late-bound: tests patch profiledock.cli._render_table
+    from ..cli import _render_table
 
     return _render_table(table)
 
@@ -183,7 +183,6 @@ def top_command(
             try:
                 rows = _snapshot()
             except StorageError as exc:
-                # A transient lock or I/O blip should not kill the monitor.
                 typer.echo(f"top refresh skipped: {exc}", err=True)
                 time.sleep(interval)
                 continue

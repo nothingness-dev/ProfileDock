@@ -73,8 +73,6 @@ def ensure_within_root(
         target_absolute = root_absolute / target_absolute
     target_absolute = target_absolute.absolute()
 
-    # The root resolves identically on every call with the same root; caching avoids
-    # repeated GetLongPathName/realpath syscalls in hot metadata paths.
     root_key = str(root_absolute)
     cached = _resolved_root_cache.get(root_key)
     if cached is None:

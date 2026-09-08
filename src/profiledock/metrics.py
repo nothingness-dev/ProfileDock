@@ -31,14 +31,11 @@ from .process.metrics import (
 )
 from .process.state import _read_state, state_path
 
-# ---------------------------------------------------------------------------
-# Typed metric models
-
 
 @dataclass
 class ProcessResourceUsage:
     pid: int
-    name: str  # "browser", "renderer", "gpu", "utility", "controller"
+    name: str
     cpu_percent: float
     memory_rss_bytes: int
     memory_vms_bytes: int
@@ -55,7 +52,7 @@ class ProcessResourceUsage:
 
 @dataclass
 class LiveResourceUsage:
-    status: str  # "running", "stopped", "degraded"
+    status: str
     total_cpu_percent: float
     total_memory_rss_bytes: float
     process_count: int
@@ -110,9 +107,6 @@ class ProfileMetrics:
             "storage": self.storage.to_dict(),
         }
 
-
-# ---------------------------------------------------------------------------
-# Static disk metrics
 
 _LOG_FILE_NAMES = frozenset({"debug.log", "chrome_debug.log"})
 _LOG_DIR_NAMES = frozenset({"crashpad"})
@@ -201,10 +195,6 @@ def _zero_storage_usage() -> StorageResourceUsage:
     )
 
 
-# ---------------------------------------------------------------------------
-# Live process metrics
-
-
 def measure_live_usage(
     root_pid: int,
     expected_create_time: float | None = None,
@@ -236,7 +226,6 @@ def measure_live_usage(
         return _degraded_usage()
     wall_seconds = max(clock() - wall_start, 1e-6)
     if not second:
-        # Every process in the tree exited during the sampling window.
         return _stopped_usage()
     previous = {sample.pid: sample for sample in first}
     total_cpu = round(cpu_percent_between(previous, second, wall_seconds), 2)

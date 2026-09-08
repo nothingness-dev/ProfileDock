@@ -190,8 +190,7 @@ def _valid_direct_state(value: StateDict, profile_id: str) -> bool:
         return False
     pid = value["pid"]
     process_create_time = value.get("process_create_time")
-    # None is legal on platforms that cannot read process create times;
-    # identity checks degrade to PID liveness for such states.
+
     if pid > 0 and process_create_time is not None and not isinstance(process_create_time, (int, float)):
         return False
     if not isinstance(value.get("started_at"), str):
@@ -246,7 +245,7 @@ def _upgrade_legacy_state(path: Path, value: StateDict, profile_id: str) -> Stat
     try:
         if not backup_path.exists():
             _atomic_private_bytes(backup_path, json.dumps(value).encode("utf-8"))
-        # Late-bound so patches of profiledock.process_manager._atomic_private_json keep applying.
+
         from profiledock.process_manager import _atomic_private_json as _atomic_private_json_impl
 
         _atomic_private_json_impl(path, upgraded)

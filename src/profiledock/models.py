@@ -5,8 +5,8 @@ from typing import Any
 METADATA_SCHEMA_VERSION = 1
 _SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1})
 LAUNCH_CONFIG_SCHEMA_VERSION = 2
-# v1 configs (five core fields, no identity options) remain readable forever:
-# migrate_launch_config fills the new fields with defaults and re-stamps v2.
+
+
 _LAUNCH_CONFIG_FIELDS = frozenset(
     {
         "schema_version",
@@ -33,8 +33,6 @@ def migrate_launch_config(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("launch config must be a JSON object")
     migrated = dict(value)
     if "schema_version" not in migrated:
-        # v1 bare-shape config: re-stamp as the current version with defaults
-        # for fields introduced after v1.
         migrated = {
             "schema_version": LAUNCH_CONFIG_SCHEMA_VERSION,
             "default_tabs": migrated.get("default_tabs"),
@@ -52,7 +50,6 @@ def migrate_launch_config(value: dict[str, Any]) -> dict[str, Any]:
     if type(version) is not int or version < 1 or version > LAUNCH_CONFIG_SCHEMA_VERSION:
         raise ValueError(f"unsupported launch config schema version: {version}")
     if version < LAUNCH_CONFIG_SCHEMA_VERSION:
-        # v1 versioned config: add the identity fields at their defaults.
         for field_name in ("proxy", "user_agent", "locale", "timezone"):
             migrated.setdefault(field_name, None)
         migrated["schema_version"] = LAUNCH_CONFIG_SCHEMA_VERSION
@@ -153,8 +150,7 @@ class LaunchConfig:
         window_height = value.get("window_height")
         if window_height is not None and (type(window_height) is not int or window_height < 100):
             raise ValueError("window_height must be an integer >= 100 or null")
-        # Identity fields (schema v2). Validation lives in validation.py so the
-        # same rules apply to per-launch CLI flags; here they run for presets.
+
         from .validation import validate_locale, validate_proxy, validate_time_zone, validate_user_agent
 
         proxy = value.get("proxy")

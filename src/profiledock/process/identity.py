@@ -150,8 +150,7 @@ def _is_matching_process(
     expected_start_time: float | None,
     require_verification: bool = False,
 ) -> bool:
-    # Late-bound so patches of profiledock.process_manager._alive and
-    # ._get_process_create_time keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import _get_process_create_time as _get_process_create_time_impl
 
@@ -308,7 +307,7 @@ def _find_browser_pid(controller_pid: int) -> int:
     """
     if controller_pid < 1:
         return 0
-    # Late-bound so patches of profiledock.process_manager._list_processes keep applying.
+
     from profiledock.process_manager import _list_processes as _list_processes_impl
 
     try:
@@ -348,8 +347,7 @@ def _terminate_matching_process(pid: int, expected_create_time: float | None, ti
     Returns True when the process is gone (or was already absent). A PID whose
     create time does not match the recorded value is never signalled.
     """
-    # Late-bound so patches of profiledock.process_manager._alive and
-    # ._is_matching_process keep applying.
+
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import _is_matching_process as _is_matching_process_impl
 
@@ -419,8 +417,7 @@ def _stop_process(process: Popen[bytes], timeout: float = 5) -> None:
         )
     else:
         _signal_posix_process_group(process.pid, signal.SIGTERM)
-    # Drain stderr while waiting so a child filling the pipe cannot deadlock
-    # the wait; communicate() also closes the pipe deterministically.
+
     try:
         process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

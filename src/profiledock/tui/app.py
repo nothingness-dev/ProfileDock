@@ -152,13 +152,9 @@ class ProfileDockApp(App[None]):
         self._selected_profile_id: str | None = None
         self._pending: tuple[ActionSpec, dict[str, object]] | None = None
         self._last_spec: ActionSpec | None = None
-        # Monotonic token per refresh request; a worker holding an older
-        # token is stale and its rows are discarded on arrival.
+
         self._profiles_generation = 0
         self._cards_generation = 0
-
-    # ------------------------------------------------------------------
-    # layout
 
     def compose(self) -> ComposeResult:
         yield HeaderBar(id="app-header")
@@ -190,12 +186,7 @@ class ProfileDockApp(App[None]):
         self._check_size()
         self.refresh_profiles(with_sizes=True)
         self._prefetch_browsers()
-        # Adaptive polling: statuses flip in near-realtime while any profile
-        # is running (a hand-closed window should register within a second),
-        # and the cadence backs off when everything is stopped. The timer
-        # must stay running — _periodic_refresh swaps its interval only when
-        # it observes a running/idle transition, which a paused timer never
-        # gets the chance to do.
+
         self._fast_poll = False
         self._poll_handle = self.set_interval(5.0, self._periodic_refresh)
 
@@ -213,9 +204,6 @@ class ProfileDockApp(App[None]):
             return resolve_data_root(prepare=True)
         except Exception:
             return None
-
-    # ------------------------------------------------------------------
-    # background workers
 
     def _launch_worker(
         self,
@@ -278,8 +266,7 @@ class ProfileDockApp(App[None]):
         self._rows = rows
         rail = self.query_one("#rail", ProfileRail)
         rail.set_rows(rows, keep_id=keep or self._selected_profile_id)
-        # The kept id may have vanished (deleted elsewhere / stale): resync the
-        # selection to whatever the rail actually highlights now.
+
         current = rail.current_row
         if current is not None and current.profile_id != self._selected_profile_id:
             self._selected_profile_id = current.profile_id
@@ -334,9 +321,6 @@ class ProfileDockApp(App[None]):
             group="cards",
         )
 
-    # ------------------------------------------------------------------
-    # mode handling
-
     def _set_mode(self, mode: str) -> None:
         self._mode = mode
         inspect_pane = self.query_one("#inspect-pane", Vertical)
@@ -388,9 +372,6 @@ class ProfileDockApp(App[None]):
         crumbs, chips = self._footer_args()
         self.query_one("#app-footer", FooterBar).set_context(crumbs, chips)
 
-    # ------------------------------------------------------------------
-    # action flow
-
     async def begin_action(self, spec: ActionSpec, preselect: str | None = None) -> None:
         if self._busy:
             return
@@ -438,9 +419,6 @@ class ProfileDockApp(App[None]):
         self._pending = None
         self.query_one("#form-pane", FormPanel).clear()
         self._set_mode(Mode.BROWSE)
-
-    # ------------------------------------------------------------------
-    # event handlers
 
     def on_command_deck_highlighted(self, event: CommandDeck.Highlighted) -> None:
         try:
@@ -513,9 +491,6 @@ class ProfileDockApp(App[None]):
             if spec is not None:
                 await self.begin_action(spec)
 
-    # ------------------------------------------------------------------
-    # bindings
-
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("exec", "filter"):
             return self._mode == Mode.BROWSE and not self._busy
@@ -525,9 +500,6 @@ class ProfileDockApp(App[None]):
             form = self.query_one("#form-pane", FormPanel)
             return self._mode == Mode.FORM and form.has_advanced
         if action == "quit_app":
-            # Plain q must never fire while a form field, validation, or a
-            # confirmation modal is in play — a stray press would discard
-            # the whole session. Escape/ctrl+c handle those states.
             return not isinstance(self.screen, ConfirmModal) and self._mode in (
                 Mode.BROWSE,
                 Mode.OUTPUT,
@@ -592,9 +564,6 @@ class ProfileDockApp(App[None]):
             self._cancel_form()
         elif self._mode == Mode.OUTPUT:
             self._set_mode(Mode.BROWSE)
-
-    # ------------------------------------------------------------------
-    # responsive shell
 
     def on_resize(self) -> None:
         self._check_size()
