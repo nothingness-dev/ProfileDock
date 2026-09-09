@@ -252,12 +252,11 @@ class TestInteractiveApp:
             rail = app_instance.query_one("#rail")
             hl_before = deck.highlighted
 
-            await pilot.press("o")  # open launch form
+            await pilot.press("o")
             await pilot.pause()
             assert deck.disabled
             assert rail.disabled
 
-            # clicks on gated panes must not move their selection mid-form
             await pilot.click("#deck", offset=(6, 2))
             await self._settle(pilot, app_instance)
             assert app_instance.query_one("#form-pane", FormPanel).styles.display == "block"
@@ -307,10 +306,12 @@ class TestInteractiveApp:
             ]
             for widget in targets:
                 before = widget.region
+                pane_before = form.region
                 widget.focus()
                 await pilot.pause()
                 after = widget.region
-                assert after == before, f"{widget.id} shifted on focus: {before} -> {after}"
+                assert (after.x, after.width, after.height) == (before.x, before.width, before.height)
+                assert form.region == pane_before
 
     @pytest.mark.asyncio
     async def test_form_has_no_badge_blocks(self):
@@ -338,20 +339,18 @@ class TestInteractiveApp:
             await pilot.pause()
             filt = app_instance.query_one("#deck-filter")
             assert filt.styles.display == "block"
-            # Label matches rank first: "engine" should surface set-engine
-            # (label) ahead of descriptions that merely mention the word.
+
             filt.value = "engine"
             await pilot.pause()
             deck = app_instance.query_one("#deck")
             assert deck.match_count >= 2
-            # Label matches rank first: set-engine (label) outranks
-            # descriptions that merely contain the letters.
-            first = str(deck.get_option_at_index(1).id)  # index 0 is the group header
+
+            first = str(deck.get_option_at_index(1).id)
             assert first == "set-engine"
             await pilot.press("escape")
             await pilot.pause()
             assert filt.styles.display == "none"
-            # Closing the filter restores the full deck (18 commands).
+
             assert deck.match_count == 18
 
     @pytest.mark.asyncio
@@ -430,7 +429,7 @@ class TestInteractiveLifecycle:
         app_instance = ProfileDockApp()
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance)
-            await pilot.press("r")  # rename form
+            await pilot.press("r")
             await pilot.pause()
             await pilot.press("q")
             await pilot.pause()
@@ -452,7 +451,7 @@ class TestInteractiveLifecycle:
         app_instance = ProfileDockApp()
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance)
-            await pilot.press("x")  # delete
+            await pilot.press("x")
             await pilot.pause()
             app_instance.query_one("#form-pane", FormPanel).submit()
             await pilot.pause()
@@ -476,7 +475,7 @@ class TestInteractiveLifecycle:
 
         def fake_run_action(paths, action_id, values):
             captured["argv_seen"] = None
-            # emulate run_action argv assembly through build_argv
+
             from profiledock.tui.actions import ACTIONS_BY_ID, build_argv
             from profiledock.tui.backend import EXIT_SUCCESS
 
@@ -488,7 +487,7 @@ class TestInteractiveLifecycle:
         app_instance = ProfileDockApp()
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance)
-            await pilot.press("b")  # backup form
+            await pilot.press("b")
             await pilot.pause()
             from profiledock.tui.widgets.forms import FormPanel
 
@@ -526,20 +525,18 @@ class TestInteractiveLifecycle:
         app_instance = ProfileDockApp()
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance)
-            await pilot.press("o")  # launch form
+            await pilot.press("o")
             await pilot.pause()
             from unittest.mock import patch as _patch
 
             import profiledock.tui.backend as backend_mod
 
             form = app_instance.query_one("#form-pane", FormPanel)
-            # engine defaults to (inherit); submit directly
+
             with _patch.object(backend_mod, "start_controller", fake_start_controller):
                 form.submit()
                 await self._settle(pilot, app_instance, rounds=3)
         assert launched, "controller launch was not invoked"
-        # If engine had been overridden to direct, start_direct_chrome would
-        # have been called instead and the dict stayed empty.
 
 
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
@@ -597,13 +594,13 @@ class TestDoubleClickUX:
         async with app_instance.run_test() as pilot:
             for _ in range(3):
                 await pilot.pause()
-            await pilot.press("c")  # create form
+            await pilot.press("c")
             await pilot.pause()
             form = app_instance.query_one("#form-pane", FormPanel)
             choice = form.query_one("#choice-engine")
             choice.set_value("playwright")
             await pilot.pause()
-            # Form stays open; only preview updated.
+
             assert app_instance._mode == "form"
             assert form.spec is not None and form.spec.id == "create"
 
@@ -636,9 +633,7 @@ class TestSelectionAndRealtimeRegressions:
 
         paths = resolve_data_root(self._data_root, prepare=True)
         manager = ProfileManager(paths)
-        # Names use letters outside hex (t, z): a search query for one name
-        # can never fuzzy-match another profile's random hex id, keeping the
-        # best-match deterministic across runs.
+
         names = ("TargetZ", "OtherA", "OtherB")
         for index in range(count):
             manager.create(names[index])
@@ -666,13 +661,12 @@ class TestSelectionAndRealtimeRegressions:
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance, rounds=3)
             assert len(app_instance._rows) == 3
-            await pilot.press("w")  # close form opens with picker focused
+            await pilot.press("w")
             await pilot.pause()
             form = app_instance.query_one("#form-pane", FormPanel)
             picker = form.query_one("#picker-profile", ProfilePicker)
             initial = picker.value
-            # Commit a different profile through the same OptionSelected
-            # handler a click takes, pinned to the actual row ids.
+
             listing = picker.query_one("ProfilePicker VimOptionList")
             other = next(row.profile_id for row in app_instance._rows if row.profile_id != initial)
             from textual.widgets import OptionList
@@ -684,7 +678,7 @@ class TestSelectionAndRealtimeRegressions:
             )
             await pilot.pause()
             assert picker.value == other, "picker selection did not commit"
-            # search + enter still commits the best match
+
             inp = picker.query_one("ProfilePicker Input", Input)
             inp.focus()
             await pilot.press(*"TargetZ")
@@ -702,7 +696,7 @@ class TestSelectionAndRealtimeRegressions:
         async with app_instance.run_test() as pilot:
             await self._settle(pilot, app_instance)
             assert app_instance._fast_poll is False
-            # Simulate a running profile appearing in rows.
+
             from profiledock.tui.backend import ProfileRow
 
             app_instance._rows = [ProfileRow(app_instance._rows[0].profile, status="running")]
@@ -716,3 +710,178 @@ class TestSelectionAndRealtimeRegressions:
             await pilot.pause()
             assert app_instance._fast_poll is False
             assert app_instance._poll_handle._interval == 5.0
+
+    @pytest.mark.asyncio
+    async def test_rail_double_click_opens_launch_form_exactly_once(self):
+        """Regression: stock OptionList._on_click double-fired on double click.
+
+        Textual dispatches every _on_click in the MRO. The VimOptionList
+        override did not stop the event, so on a chain-2 click the stock
+        handler ran action_select() a second time and begin_action was
+        re-entered after the busy flag cleared — the launch form (and the
+        delete confirmation) was effectively triggered twice per double click.
+        """
+        self._make_profiles(1)
+        from profiledock.interactive import ProfileDockApp
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            rail = app_instance.query_one("#rail")
+            begin_calls: list[str] = []
+
+            original = app_instance.begin_action
+
+            async def counting_begin(spec, preselect=None):
+                begin_calls.append(spec.id)
+                await original(spec, preselect)
+
+            app_instance.begin_action = counting_begin  # type: ignore[method-assign]
+
+            await pilot.double_click(rail, offset=(3, 0))
+            await self._settle(pilot, app_instance)
+            assert begin_calls == ["launch"], (
+                f"double click dispatched launch {len(begin_calls)} times: {begin_calls}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_enter_after_single_click_selects_immediately(self):
+        self._make_profiles(1)
+        from profiledock.interactive import ProfileDockApp
+
+        app = ProfileDockApp()
+        async with app.run_test() as pilot:
+            await self._settle(pilot, app)
+            rail = app.query_one("#rail")
+            await pilot.click(rail, offset=(3, 0))
+            await pilot.press("enter")
+            await self._settle(pilot, app)
+            assert app._mode == "form"
+
+    @pytest.mark.asyncio
+    async def test_deck_single_click_only_previews_not_runs(self):
+        """Regression: chain-1 click ran the command in single-click mode.
+
+        VimOptionList._on_click (double_click_selects=False) highlights and
+        selects; the stock handler then selected again. For instant commands
+        (list/status) a stray click would RUN the command; this test asserts
+        a single click on the deck never executes, only previews.
+        """
+        self._make_profiles(1)
+        from profiledock.interactive import ProfileDockApp
+
+        app_instance = ProfileDockApp()
+        async with app_instance.run_test() as pilot:
+            await self._settle(pilot, app_instance)
+            deck = app_instance.query_one("#deck")
+            executed: list[str] = []
+            original_execute = app_instance._execute
+
+            def counting_execute(spec, values):
+                executed.append(spec.id)
+                return original_execute(spec, values)
+
+            app_instance._execute = counting_execute  # type: ignore[method-assign]
+            await pilot.click(deck)
+            await self._settle(pilot, app_instance)
+            assert executed == [], f"a single deck click ran commands: {executed}"
+
+            assert deck.current_spec is not None
+
+    @pytest.mark.asyncio
+    async def test_profile_picker_click_selects_once(self):
+        """Regression: picker/radio lists posted Changed twice per click.
+
+        The picker's inner OptionList (double_click_selects=False) let the
+        stock _on_click run action_select() a second time after the Vim
+        handler, so on_option_list_option_selected fired twice and the picker
+        posted Changed twice — previews re-rendered and submit raced.
+        Uses the real app so the theme CSS and full compose tree are live.
+        """
+        from unittest.mock import patch
+
+        self._make_profiles(1)
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.widgets.forms import ProfilePicker
+
+        app = ProfileDockApp()
+        posted: list[str] = []
+        original_post = ProfilePicker.post_message
+
+        def capturing_post(self, message):
+            if isinstance(message, ProfilePicker.Changed):
+                posted.append(message.value)
+            return original_post(self, message)
+
+        with patch.object(ProfilePicker, "post_message", capturing_post):
+            async with app.run_test() as pilot:
+                await self._settle(pilot, app)
+                await app.begin_action(next(a for a in ACTIONS if a.id == "delete"))
+                await pilot.pause()
+                await pilot.pause()
+                listing = app.query_one("ProfilePicker OptionList")
+                posted.clear()
+
+                await pilot.click(listing, offset=(3, 0))
+                await pilot.pause()
+                await pilot.pause()
+                values = [v for v in posted if v]
+                assert len(values) == 1, f"expected one selection event per click: {posted}"
+
+    @pytest.mark.asyncio
+    async def test_form_buttons_reachable_by_mouse_on_tall_form(self):
+        """Regression: submit/cancel rendered below the pane fold, unclickable.
+
+        FormPanel stubbed out every scroll method, so Textual's
+        scroll-into-view never ran; on tall forms (delete/launch with a
+        picker) the buttons row sat under the pane's clipped bottom and
+        clicks landed on the footer docked over it.
+        """
+        self._make_profiles(1)
+        from textual.widgets import Button
+
+        from profiledock.interactive import ProfileDockApp
+
+        app = ProfileDockApp()
+        async with app.run_test() as pilot:
+            await self._settle(pilot, app)
+            await app.begin_action(next(a for a in ACTIONS if a.id == "delete"))
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.click(app.query_one("ProfilePicker OptionList"), offset=(3, 0))
+            await pilot.pause()
+            await pilot.pause()
+            pane = app.query_one("#form-pane")
+            submit = app.query_one("#form-submit", expect_type=Button)
+            await pilot.click(submit)
+            await pilot.pause()
+            await pilot.pause()
+            from profiledock.tui.widgets.overlays import ConfirmModal
+
+            assert any(isinstance(s, ConfirmModal) for s in app.screen_stack), (
+                f"submit button click never reached the form; button region "
+                f"{submit.region}, pane region {pane.region}, scroll {pane.scroll_offset}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_cancel_button_click_closes_form(self):
+        """Regression: the cancel button had the same below-fold defect."""
+        self._make_profiles(1)
+        from textual.widgets import Button
+
+        from profiledock.interactive import ProfileDockApp
+        from profiledock.tui.actions import ACTIONS as ALL_ACTIONS
+
+        app = ProfileDockApp()
+        async with app.run_test() as pilot:
+            await self._settle(pilot, app)
+            await app.begin_action(next(a for a in ALL_ACTIONS if a.id == "delete"))
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.click(app.query_one("ProfilePicker OptionList"), offset=(3, 0))
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.click(app.query_one("#form-cancel", expect_type=Button))
+            await pilot.pause()
+            await pilot.pause()
+            assert app._mode != "form", "cancel click did not close the form"

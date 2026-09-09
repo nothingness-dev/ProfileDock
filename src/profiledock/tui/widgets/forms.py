@@ -16,7 +16,6 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.geometry import Offset
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, Input, Label, OptionList, Static
@@ -363,19 +362,7 @@ class FieldRow(Horizontal):
 
 
 class FormPanel(VerticalScroll):
-    """Mode B inspector: interactive parameter entry for one action."""
-
-    def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
-        return
-
-    def scroll_to_widget(self, *args: Any, **kwargs: Any) -> bool:
-        return False
-
-    def scroll_to_center(self, *args: Any, **kwargs: Any) -> None:
-        return
-
-    def scroll_to_region(self, *args: Any, **kwargs: Any) -> Offset:
-        return Offset(0, 0)
+    """Scrollable action fields with submit and cancel buttons docked below."""
 
     DEFAULT_CSS = """
     FormPanel {
@@ -436,6 +423,8 @@ class FormPanel(VerticalScroll):
         text-overflow: clip;
     }
     FormPanel .form-buttons {
+        dock: bottom;
+        background: $surface;
         height: auto;
         margin-top: 1;
     }

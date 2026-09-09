@@ -31,11 +31,6 @@ class VimOptionList(OptionList):
 
     double_click_selects = False
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-
-        self._click_chain = 0
-
     def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
         return
 
@@ -44,31 +39,22 @@ class VimOptionList(OptionList):
         return
 
     async def _on_click(self, event: events.Click) -> None:
-        """Single-click highlights; selecting happens here, gated by mode.
-
-        This overrides the stock OptionList handler (Textual dispatches every
-        _on_click in the MRO, and the stock one would select unconditionally),
-        so the select call lives here: immediate for single-click lists, and
-        for double-click lists only when the click chain reaches 2.
-        """
+        """Handle selection once, suppressing the inherited click handler."""
         clicked_option: int | None = event.style.meta.get("option")
-        if clicked_option is None or self._options[clicked_option].disabled:
+        event.stop()
+        event.prevent_default()
+        if (
+            clicked_option is None
+            or not 0 <= clicked_option < len(self._options)
+            or self._options[clicked_option].disabled
+        ):
             return
-        self._click_chain = event.chain
         if self.double_click_selects and event.chain < 2:
             if self.highlighted != clicked_option:
                 self.highlighted = clicked_option
             return
         self.highlighted = clicked_option
         self.action_select()
-
-    def action_select(self) -> None:
-        """Select, but in double-click mode swallow chain-1 clicks."""
-        if self.double_click_selects and self._click_chain == 1:
-            self._click_chain = 0
-            return
-        self._click_chain = 0
-        super().action_select()
 
     def _highlighted_option_id(self) -> str | None:
         index = self.highlighted
