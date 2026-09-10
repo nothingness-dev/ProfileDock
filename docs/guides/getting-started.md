@@ -1,5 +1,7 @@
 # Getting started
 
+Install ProfileDock first if you have not: see [Installation](installation.md). The commands below assume the project virtual environment is active (`.venv\Scripts\Activate.ps1` on Windows, `source .venv/bin/activate` on macOS and Linux).
+
 ## Create two isolated profiles
 
 ```bash
@@ -77,6 +79,38 @@ profiledock config show Work
 ```
 
 Explicit launch options override stored presets for one launch. See [Configuration and engines](configuration.md) for precedence and validation.
+
+## Automate through a profile's session
+
+With the Playwright extra installed, a profile's persistent authenticated session doubles as an automation surface. `read` prints a page as Markdown, `shot` captures a PNG, `pdf` exports a PDF, `eval` runs JavaScript, and `cookies` exports or imports cookie jars:
+
+```bash
+profiledock read Work https://example.com
+profiledock shot Work --full-page
+profiledock pdf Work
+profiledock eval Work "document.title"
+profiledock cookies Work --output work-cookies.json
+```
+
+A stopped profile is auto-started headlessly with its saved identity presets and stays active until explicitly closed. Identity presets — proxy, user agent, locale, timezone — are stored per profile:
+
+```bash
+profiledock config set Work proxy socks5://127.0.0.1:9050
+profiledock config set Work user-agent "Mozilla/5.0 (Custom)"
+profiledock config set Work locale en-GB
+profiledock config set Work timezone Europe/Berlin
+```
+
+Credential-bearing proxies are always redacted in output and logs; see the [command reference](../reference/commands.md) for every automation option, filter, and format.
+
+## Monitor resource usage
+
+```bash
+profiledock top
+profiledock top Work --watch
+```
+
+`top` reports each profile's process-tree CPU, memory (RSS), process count, open tabs, and disk footprint, like `docker stats`. Install the optional `metrics` extra (`psutil`) for accelerated sampling; sampling falls back to platform-native queries without it.
 
 ## Back up before important changes
 

@@ -14,7 +14,7 @@ pip install -e ".[playwright]"
 playwright install chromium
 ```
 
-`requirements.txt` contains runtime requirements. `requirements-dev.lock` contains reproducible development and test requirements. `pyproject.toml` remains the package metadata and optional-extra source.
+`requirements.txt` contains runtime requirements. `requirements-dev.lock` contains reproducible development and test requirements: exact pins so any fresh clone produces the same library versions. `pyproject.toml` remains the package metadata and optional-extra source.
 
 Regenerate the lockfile only after intentional dependency changes:
 

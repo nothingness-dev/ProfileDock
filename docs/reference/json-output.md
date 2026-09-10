@@ -219,7 +219,7 @@ Optional values depend on the event. Known secrets are redacted before storage a
 
 `pdf --json` returns `output` (absolute PDF path), `url`, `title`, and `bytes` (file size).
 
-`eval --json` returns an object containing the serialized `result` value.
+`eval --json` returns an object containing the serialized `result` value. JavaScript values that JSON cannot represent directly, such as `NaN` and `Infinity`, are represented as `{"value": "...", "unserializable": true}`.
 
 `cookies --json` returns an array of Playwright cookie objects when writing to stdout. With `--output`, data contains the absolute `output_file`, exported cookie `count`, and `format` (`json` or `netscape`); the sensitive cookies are written only to that private file. The array reflects the applied filters: `--url` filters inside the browser, while `--domain` and `--session-only` filter the exported set. With `--redact-values`, every cookie `value` is an empty string. With `--load`, data contains `count` (cookies imported), `loaded`, and `total_cookies` (jar size after the import).
 

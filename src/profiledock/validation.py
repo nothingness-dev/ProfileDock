@@ -53,8 +53,12 @@ def validate_proxy(proxy: str | None) -> None:
     Deliberately strict: a bare ``host:port`` (no scheme) is rejected because
     the engines disagree on how to interpret it, and ``socks4`` is rejected
     because neither Playwright nor Chromium flags document reliable support.
-    Credentials are allowed in the stored value but must be redacted before
-    display (see cli_support.redact_proxy).
+    Credentials in http/https URLs are allowed in the stored value but must be
+    redacted before display (see cli_support.redact_proxy). Credentials in
+    socks5:// URLs are rejected: Chromium's --proxy-server flag cannot
+    authenticate SOCKS5 (RFC 1929), so they are silently dropped and the
+    session egresses unauthenticated — failing validation beats an identity
+    preset that leaks.
     """
     if proxy is None:
         return
@@ -69,6 +73,11 @@ def validate_proxy(proxy: str | None) -> None:
         raise ValidationError(f"proxy must include a scheme (http, https, or socks5): '{clean}'")
     if scheme not in _ALLOWED_PROXY_SCHEMES:
         raise ValidationError(f"unsupported proxy scheme '{scheme}' (allowed: http, https, socks5)")
+    if scheme == "socks5" and (parsed.username or parsed.password):
+        raise ValidationError(
+            f"socks5 proxy credentials are not supported by Chromium; "
+            f"use a credentialess socks5 URL or an http/https proxy: '{clean}'"
+        )
 
     try:
         hostname = parsed.hostname

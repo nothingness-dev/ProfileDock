@@ -370,11 +370,6 @@ def check_playwright_chromium() -> DiagnosticCheck:
 
         with sync_playwright() as p:
             exec_path = p.chromium.executable_path
-
-            try:
-                p.chromium.connect_over_cdp("http://127.0.0.1:1", timeout=200)
-            except Exception:
-                pass
             if exec_path and Path(exec_path).exists():
                 return DiagnosticCheck(
                     id=check_id,

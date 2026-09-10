@@ -28,7 +28,31 @@ from .state import (
 )
 
 if TYPE_CHECKING:
-    from playwright.sync_api import BrowserContext, Playwright
+    from playwright.sync_api import BrowserContext, Page, Playwright
+
+_tabs_generation = 0
+
+_NO_OPEN_TABS_MESSAGE = "profile has no open tabs; open one with 'profiledock open-tab'"
+
+
+def _bump_tabs_generation() -> int:
+    global _tabs_generation
+    _tabs_generation += 1
+    return _tabs_generation
+
+
+def _generation_stale(args: dict[str, Any]) -> str | None:
+    generation = args.get("generation")
+    if generation is None:
+        return None
+    if type(generation) is not int:
+        return "generation must be an integer"
+    if generation != _tabs_generation:
+        return (
+            f"stale tab list (command generation {generation}, "
+            f"current {_tabs_generation}); re-run the tabs command"
+        )
+    return None
 
 
 def _context_alive(context: "BrowserContext") -> bool:
@@ -38,8 +62,67 @@ def _context_alive(context: "BrowserContext") -> bool:
         return False
 
 
+def _page_title(context: "BrowserContext", page: "Page") -> str:
+    try:
+        browser = context.browser
+        if browser is not None:
+            session = browser.new_browser_cdp_session()
+            try:
+                infos = session.send("Target.getTargets")
+                targets = infos.get("targetInfos")
+                if isinstance(targets, list) and targets:
+                    pages = []
+                    for target in targets:
+                        if not isinstance(target, dict):
+                            continue
+                        info = target.get("targetInfo", target)
+                        if isinstance(info, dict) and info.get("type", "page") == "page":
+                            pages.append(info)
+                    idx = list(context.pages).index(page)
+                    if 0 <= idx < len(pages):
+                        return str(pages[idx].get("title", "") or "")
+            finally:
+                try:
+                    session.detach()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        return page.title()
+    except Exception:
+        return ""
+
+
+def _tabs_snapshot(context: "BrowserContext") -> list[dict[str, Any]]:
+    pages_info: list[dict[str, Any]] = []
+    for idx, page in enumerate(context.pages):
+        pages_info.append(
+            {
+                "index": idx,
+                "url": page.url,
+                "title": _page_title(context, page),
+            }
+        )
+    return pages_info
+
+
+def _capture_output_guard(output_path: str, data_dir: str | None) -> str | None:
+    if not data_dir:
+        return None
+    try:
+        resolved = Path(output_path).resolve()
+        resolved.relative_to(Path(data_dir).resolve())
+    except (OSError, ValueError):
+        return None
+    return f"output path is inside the profile data directory: {output_path}"
+
+
 def _execute_ipc_command(
-    cmd_obj: dict[str, Any], context: "BrowserContext", token: str
+    cmd_obj: dict[str, Any],
+    context: "BrowserContext",
+    token: str,
+    data_dir: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Execute a parsed JSON-RPC command against active browser context.
 
@@ -63,19 +146,16 @@ def _execute_ipc_command(
         return ({"status": "ok"}, True)
 
     if cmd == "tabs":
-        pages_info = []
-        for idx, page in enumerate(context.pages):
-            try:
-                title = page.title()
-            except Exception:
-                title = ""
-            pages_info.append({"index": idx, "url": page.url, "title": title})
-        return ({"status": "ok", "tabs": pages_info}, False)
+        return (
+            {"status": "ok", "tabs": _tabs_snapshot(context), "tabs_generation": _tabs_generation},
+            False,
+        )
 
     if cmd == "open_tab":
         url = args.get("url", "about:blank")
         if not isinstance(url, str):
             return ({"status": "error", "message": "URL must be a string"}, False)
+        page = None
         try:
             from ..validation import validate_url
 
@@ -83,31 +163,48 @@ def _execute_ipc_command(
             page = context.new_page()
             if url and url != "about:blank":
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            try:
+                title = _page_title(context, page)
+            except Exception:
+                title = ""
+            _bump_tabs_generation()
             return (
                 {
                     "status": "ok",
                     "tab": {
                         "index": len(context.pages) - 1,
                         "url": page.url,
-                        "title": page.title(),
+                        "title": title,
                     },
                 },
                 False,
             )
         except Exception as exc:
+            if page is not None:
+                try:
+                    page.close()
+                except Exception:
+                    pass
             return ({"status": "error", "message": str(exc)}, False)
 
     if cmd == "close_tab":
+        stale = _generation_stale(args)
+        if stale:
+            return ({"status": "error", "message": stale}, False)
         index = args.get("index")
         if type(index) is not int or not (0 <= index < len(context.pages)):
             return ({"status": "error", "message": f"tab index out of range: {index}"}, False)
         try:
             context.pages[index].close()
+            _bump_tabs_generation()
             return ({"status": "ok", "remaining_tabs": len(context.pages)}, False)
         except Exception as exc:
             return ({"status": "error", "message": str(exc)}, False)
 
     if cmd == "read_page":
+        stale = _generation_stale(args)
+        if stale:
+            return ({"status": "error", "message": stale}, False)
         tab_index = args.get("tab", 0)
         url = args.get("url")
         if url is not None and not isinstance(url, str):
@@ -120,7 +217,10 @@ def _execute_ipc_command(
             except Exception as exc:
                 return ({"status": "error", "message": str(exc)}, False)
         if not context.pages:
-            context.new_page()
+            return (
+                {"status": "error", "message": _NO_OPEN_TABS_MESSAGE},
+                False,
+            )
         if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
             return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
         page = context.pages[tab_index]
@@ -135,7 +235,7 @@ def _execute_ipc_command(
                 {
                     "status": "ok",
                     "url": page.url,
-                    "title": extracted["title"] or page.title(),
+                    "title": extracted["title"] or _page_title(context, page),
                     "content": extracted["content"],
                     "links": extracted["links"],
                 },
@@ -145,22 +245,38 @@ def _execute_ipc_command(
             return ({"status": "error", "message": str(exc)}, False)
 
     if cmd == "eval":
+        stale = _generation_stale(args)
+        if stale:
+            return ({"status": "error", "message": stale}, False)
         script = args.get("script", "")
         tab_index = args.get("tab", 0)
         if not isinstance(script, str) or not script:
             return ({"status": "error", "message": "script expression must not be empty"}, False)
         if not context.pages:
-            context.new_page()
+            return (
+                {"status": "error", "message": _NO_OPEN_TABS_MESSAGE},
+                False,
+            )
         if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
             return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
         page = context.pages[tab_index]
         session = None
         try:
             session = context.new_cdp_session(page)
+            deadline = (
+                "(async () => {"
+                "const timer = new Promise((_, reject) => {"
+                "setTimeout(() => reject(new Error('JavaScript evaluation timed out')), 10000);"
+                "});"
+                "return await Promise.race([Promise.resolve((0, eval)("
+                + json.dumps(script)
+                + ")), timer]);"
+                "})()"
+            )
             evaluation = session.send(
                 "Runtime.evaluate",
                 {
-                    "expression": script,
+                    "expression": deadline,
                     "awaitPromise": True,
                     "returnByValue": True,
                     "timeout": 10000,
@@ -180,7 +296,7 @@ def _execute_ipc_command(
                 return ({"status": "error", "message": "invalid JavaScript result"}, False)
             result = remote.get("value")
             if "unserializableValue" in remote:
-                result = remote["unserializableValue"]
+                result = {"value": remote["unserializableValue"], "unserializable": True}
             return ({"status": "ok", "result": result}, False)
         except Exception as exc:
             return ({"status": "error", "message": str(exc)}, False)
@@ -238,12 +354,18 @@ def _execute_ipc_command(
             return ({"status": "error", "message": str(exc)}, False)
 
     if cmd == "screenshot":
+        stale = _generation_stale(args)
+        if stale:
+            return ({"status": "error", "message": stale}, False)
         tab_index = args.get("tab", 0)
         url = args.get("url")
         output_path = args.get("output", "")
         full_page = bool(args.get("full_page", False))
         if not isinstance(output_path, str) or not output_path.strip():
             return ({"status": "error", "message": "output path must be a non-empty string"}, False)
+        guard_error = _capture_output_guard(output_path.strip(), data_dir)
+        if guard_error:
+            return ({"status": "error", "message": guard_error}, False)
         if url is not None and not isinstance(url, str):
             return ({"status": "error", "message": "URL must be a string or null"}, False)
         if url:
@@ -254,7 +376,10 @@ def _execute_ipc_command(
             except Exception as exc:
                 return ({"status": "error", "message": str(exc)}, False)
         if not context.pages:
-            context.new_page()
+            return (
+                {"status": "error", "message": _NO_OPEN_TABS_MESSAGE},
+                False,
+            )
         if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
             return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
         page = context.pages[tab_index]
@@ -275,7 +400,7 @@ def _execute_ipc_command(
                     "status": "ok",
                     "output": path,
                     "url": page.url,
-                    "title": page.title(),
+                    "title": _page_title(context, page),
                     "bytes": size,
                 },
                 False,
@@ -284,11 +409,17 @@ def _execute_ipc_command(
             return ({"status": "error", "message": str(exc)}, False)
 
     if cmd == "pdf":
+        stale = _generation_stale(args)
+        if stale:
+            return ({"status": "error", "message": stale}, False)
         tab_index = args.get("tab", 0)
         url = args.get("url")
         output_path = args.get("output", "")
         if not isinstance(output_path, str) or not output_path.strip():
             return ({"status": "error", "message": "output path must be a non-empty string"}, False)
+        guard_error = _capture_output_guard(output_path.strip(), data_dir)
+        if guard_error:
+            return ({"status": "error", "message": guard_error}, False)
         if url is not None and not isinstance(url, str):
             return ({"status": "error", "message": "URL must be a string or null"}, False)
         if url:
@@ -299,7 +430,10 @@ def _execute_ipc_command(
             except Exception as exc:
                 return ({"status": "error", "message": str(exc)}, False)
         if not context.pages:
-            context.new_page()
+            return (
+                {"status": "error", "message": _NO_OPEN_TABS_MESSAGE},
+                False,
+            )
         if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
             return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
         page = context.pages[tab_index]
@@ -318,7 +452,7 @@ def _execute_ipc_command(
                     "status": "ok",
                     "output": path,
                     "url": page.url,
-                    "title": page.title(),
+                    "title": _page_title(context, page),
                     "bytes": size,
                 },
                 False,
@@ -347,6 +481,7 @@ def _wait_for_close(
     context: "BrowserContext",
     token: str,
     startup: Callable[[], None] | None = None,
+    data_dir: str | None = None,
 ) -> None:
     """Serve the IPC protocol until a close command or browser death.
 
@@ -479,7 +614,7 @@ def _wait_for_close(
             connection, supplied = item
             try:
                 cmd_obj = json.loads(supplied)
-                resp, should_exit = _execute_ipc_command(cmd_obj, context, token)
+                resp, should_exit = _execute_ipc_command(cmd_obj, context, token, data_dir=data_dir)
                 _send_line(connection, _encode_ipc_response(resp))
                 if should_exit:
                     return
@@ -712,7 +847,7 @@ def _controller(
                             except Exception:
                                 pass
 
-                _wait_for_close(server, context, token, startup=_navigate_start_urls)
+                _wait_for_close(server, context, token, startup=_navigate_start_urls, data_dir=data_dir)
             finally:
                 try:
                     context.close()

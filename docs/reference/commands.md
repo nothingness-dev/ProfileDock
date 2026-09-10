@@ -88,7 +88,7 @@ Supported settings:
 | `engine` | `direct` or `playwright`. |
 | `browser` | Supported browser name or executable path. |
 | `window-size` | `WIDTHxHEIGHT`, each at least 100. |
-| `proxy` | `http://`, `https://`, or `socks5://` URL, optionally `user:pass@host:port`; `none` clears it. |
+| `proxy` | `http://`, `https://`, or `socks5://` URL; `user:pass@host:port` credentials are supported for http/https only (`none` clears it). |
 | `user-agent` | Non-empty user-agent string (max 512 characters). |
 | `locale` | Locale tag such as `en` or `en-GB`. |
 | `timezone` | IANA timezone name such as `Europe/Berlin`. |
@@ -288,7 +288,7 @@ Opens a new tab dynamically in a Playwright browser session without restarting i
 profiledock close-tab PROFILE INDEX [--json]
 ```
 
-Closes a specific tab index in an active Playwright browser session.
+Closes a specific tab index in an active Playwright browser session. Closing the final tab ends the headless controller; use `open-tab` to create a replacement session.
 
 ## `read`
 
@@ -304,7 +304,7 @@ Reads page content as formatted Markdown in the terminal using the profile's per
 profiledock shot PROFILE [URL] [--output FILE] [--tab N] [--full-page] [--json]
 ```
 
-Captures a PNG screenshot of a page through the profile's persistent browser session. A stopped profile is started headlessly and remains active. `--output` chooses the destination file (default `./<profile>-<timestamp>.png`); `--full-page` captures the entire scrollable page instead of the current viewport. The output path must be a `.png` file in an existing directory; nothing is captured until navigation succeeds, so a failed navigation writes no file.
+Captures a PNG screenshot of a page through the profile's persistent browser session. A stopped profile is started headlessly and remains active. `--output` chooses the destination file (default `./<profile>-<timestamp>.png`); `--full-page` captures the entire scrollable page instead of the current viewport. The output path must be a `.png` file in an existing directory and cannot be inside `browser-data`; nothing is captured until navigation succeeds, so a failed navigation writes no file.
 
 ## `pdf`
 
@@ -312,7 +312,7 @@ Captures a PNG screenshot of a page through the profile's persistent browser ses
 profiledock pdf PROFILE [URL] [--output FILE] [--tab N] [--json]
 ```
 
-Exports the page as a PDF through the profile's persistent browser session. A stopped profile is started headlessly and remains active. PDF rendering requires a headless Chromium session: if the profile is running headed, the command fails with a clear message advising a close-and-retry. `--output` chooses the destination file (default `./<profile>-<timestamp>.pdf`).
+Exports the page as a PDF through the profile's persistent browser session. A stopped profile is started headlessly and remains active. PDF rendering requires a headless Chromium session: if the profile is running headed, the command fails with a clear message advising a close-and-retry. `--output` chooses the destination file (default `./<profile>-<timestamp>.pdf`) and cannot be inside `browser-data`.
 
 ## `eval`
 

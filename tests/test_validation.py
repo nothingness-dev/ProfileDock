@@ -87,7 +87,6 @@ def test_validate_proxy_accepts_valid_forms():
     validate_proxy("http://127.0.0.1:8080")
     validate_proxy("https://proxy.example.com")
     validate_proxy("socks5://127.0.0.1:9050")
-    validate_proxy("socks5://user:pass@127.0.0.1:1080")
     validate_proxy("http://user@10.0.0.1:3128")
 
 
@@ -143,3 +142,18 @@ def test_validate_identity_fields():
         validate_time_zone("")
     with pytest.raises(ValidationError):
         validate_time_zone("host")
+
+
+def test_validate_proxy_rejects_socks5_credentials():
+    """Chromium's --proxy-server flag cannot authenticate SOCKS5; credentials
+    embedded in a socks5:// URL are silently dropped and the session egresses
+    unauthenticated. Fail at validation instead of at the exit node."""
+    from profiledock.validation import ValidationError, validate_proxy
+
+    with pytest.raises(ValidationError, match="socks5"):
+        validate_proxy("socks5://user:pass@127.0.0.1:1080")
+    with pytest.raises(ValidationError, match="socks5"):
+        validate_proxy("socks5://user@127.0.0.1:1080")
+    validate_proxy("socks5://127.0.0.1:1080")
+    validate_proxy("http://user:pass@10.0.0.1:3128")
+    validate_proxy("https://user@10.0.0.1:3128")

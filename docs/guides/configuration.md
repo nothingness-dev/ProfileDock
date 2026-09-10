@@ -73,13 +73,13 @@ profiledock config set Work default-tabs 4
 profiledock config set Work engine playwright
 profiledock config set Work browser chromium
 profiledock config set Work window-size 1440x900
-profiledock config set Work proxy socks5://user:pass@127.0.0.1:1080
+profiledock config set Work proxy http://user:pass@proxy.example.com:8080
 profiledock config set Work user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 profiledock config set Work locale en-GB
 profiledock config set Work timezone Europe/Berlin
 ```
 
-`default-tabs` must be at least 1. `window-size` must contain width and height of at least 100. `browser` may be a supported browser name or an executable path accepted by the selected engine. `proxy` accepts `http://`, `https://`, or `socks5://` URLs with optional `user:pass@host:port` credentials (`none` clears it). `user-agent` is a non-empty string up to 512 characters. `locale` is a tag such as `en` or `en-GB`. `timezone` is an IANA name such as `Europe/Berlin`.
+`default-tabs` must be at least 1. `window-size` must contain width and height of at least 100. `browser` may be a supported browser name or an executable path accepted by the selected engine. `proxy` accepts `http://`, `https://`, or `socks5://` URLs; `user:pass@host:port` credentials are supported for http/https proxies only — Chromium cannot authenticate SOCKS5, so credentialed socks5 URLs are rejected at validation (`none` clears it). `user-agent` is a non-empty string up to 512 characters. `locale` is a tag such as `en` or `en-GB`. `timezone` is an IANA name such as `Europe/Berlin`.
 
 Proxy credentials are redacted to `user:***@host` in every display surface. When a profile sets a proxy, keep its `timezone` coherent with the proxy's exit location — `profiledock doctor` warns about proxied profiles with a missing or invalid timezone, the most common geo-mismatch leak.
 

@@ -17,6 +17,19 @@ From the repository root, run:
 python scripts/setup_project.py
 ```
 
+### What the virtual environment is and why it matters
+
+The setup script creates a virtual environment in `.venv`: a self-contained folder with its own Python interpreter link, its own pip, and its own `site-packages` directory. Every package ProfileDock needs is installed inside `.venv/Lib/site-packages` (or `.venv/lib` on macOS and Linux) and nowhere else.
+
+This gives you two guarantees:
+
+- **No conflicts with your computer.** Your system Python's packages are never read or modified. Other projects and their virtual environments are untouched, and installing ProfileDock cannot break anything else on the machine.
+- **No conflicts inside the project.** Package versions are resolved together at install time. With `--dev`, every dependency is pinned to the exact tested version from `requirements-dev.lock`, so a fresh clone always produces the same working set of versions — no resolution surprises, no drift over time.
+
+The only thing a virtual environment shares with your system is the Python interpreter itself: the environment is created from whatever Python version you ran the setup script with, and it uses that interpreter's standard library. If you later uninstall or upgrade that Python installation, recreate the environment by deleting `.venv` and running the setup script again.
+
+### Setup options
+
 The setup script creates `.venv`, upgrades pip, and installs the minimal editable runtime from `requirements.txt`. It does not download a browser or run tests unless requested.
 
 Useful setup options:
@@ -28,7 +41,7 @@ python scripts/setup_project.py --dev --with-playwright
 python scripts/setup_project.py --dev --with-playwright --test
 ```
 
-`--dev` installs `requirements-dev.lock`. `--with-playwright` installs the Playwright extra and Chromium. `--test` installs the test extra when necessary and runs pytest after setup. The options are non-interactive and may be combined.
+`--dev` installs `requirements-dev.lock`, a lockfile that pins every development and test dependency to the exact tested version. It is the recommended choice for anyone working on ProfileDock or running its tests, because it guarantees a reproducible environment: the same clone on any machine gets the same library versions. `--with-playwright` installs the Playwright extra and Chromium. `--test` installs the test extra when necessary and runs pytest after setup. The options are non-interactive and may be combined.
 
 ## Manual setup on Windows PowerShell
 

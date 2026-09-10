@@ -1192,7 +1192,7 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
             "set",
             "SecProf",
             "proxy",
-            "socks5://user:hunter2@127.0.0.1:1080",
+            "http://user:hunter2@127.0.0.1:8080",
         ],
     )
     assert res.exit_code == EXIT_SUCCESS, res.output
@@ -1201,7 +1201,7 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
     shown = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "SecProf", "--json"])
     assert shown.exit_code == EXIT_SUCCESS
     payload = json.loads(shown.output)
-    assert payload["data"]["proxy"] == "socks5://user:***@127.0.0.1:1080"
+    assert payload["data"]["proxy"] == "http://user:***@127.0.0.1:8080"
     assert "hunter2" not in shown.output
 
     # And the on-disk value keeps credentials for actual use.
@@ -1210,7 +1210,7 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
 
     paths = resolve_data_root(Path(tmp_path), prepare=True)
     profile = ProfileManager(paths).resolve("SecProf")
-    assert profile.launch_config.proxy == "socks5://user:hunter2@127.0.0.1:1080"
+    assert profile.launch_config.proxy == "http://user:hunter2@127.0.0.1:8080"
 
 
 def test_config_set_identity_settings(tmp_path):

@@ -82,7 +82,7 @@ def test_launch_config_v2_round_trip_and_v1_migration():
 
     cfg = LaunchConfig(
         default_tabs=2,
-        proxy="socks5://user:secret@127.0.0.1:1080",
+        proxy="http://user:secret@127.0.0.1:8080",
         user_agent="Custom UA",
         locale="en-GB",
         timezone="Europe/Berlin",
@@ -90,7 +90,7 @@ def test_launch_config_v2_round_trip_and_v1_migration():
     data = cfg.to_dict()
     assert data["schema_version"] == LAUNCH_CONFIG_SCHEMA_VERSION == 2
     restored = LaunchConfig.from_dict(data)
-    assert restored.proxy == "socks5://user:secret@127.0.0.1:1080"
+    assert restored.proxy == "http://user:secret@127.0.0.1:8080"
     assert restored.user_agent == "Custom UA"
     assert restored.locale == "en-GB"
     assert restored.timezone == "Europe/Berlin"

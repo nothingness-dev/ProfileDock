@@ -18,7 +18,7 @@ dependencies = [
 version = {attr = "profiledock.version.__version__"}
 
 [project.optional-dependencies]
-playwright = ["playwright>=1.40"]
+playwright = ["playwright>=1.49"]
 interactive = ["textual>=1.0"]
 # Optional acceleration for resource metrics: the samplers fall back to
 # platform-native /proc, tool-help, and ps queries when psutil is absent.
@@ -27,7 +27,7 @@ test = [
     "pytest>=8.4",
     "pytest-asyncio>=1.0",
     "pytest-timeout>=2.3",
-    "playwright>=1.40",
+    "playwright>=1.49",
     "textual>=1.0",
 ]
 dev = [
@@ -35,7 +35,7 @@ dev = [
     "pytest-asyncio>=1.0",
     "pytest-timeout>=2.3",
     "pytest-xdist>=3.5",
-    "playwright>=1.40",
+    "playwright>=1.49",
     "textual>=1.0",
     "ruff>=0.16",
     "mypy>=1.19",

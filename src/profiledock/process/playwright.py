@@ -68,7 +68,6 @@ class _StderrCapture:
         self._thread.start()
 
     def stop(self) -> None:
-
         if self._process.poll() is not None and self._thread is not None:
             self._thread.join(timeout=1)
 

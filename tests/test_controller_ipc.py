@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from profiledock.cli import app
 from profiledock.models import Profile
 from profiledock.page_reader import extract_page_markdown
+from profiledock.process import controller as controller_module
 from profiledock.process_manager import (
     _encode_ipc_response,
     _execute_ipc_command,
@@ -96,7 +97,7 @@ def test_execute_ipc_command_open_and_close_tab():
     mock_new_page.title.return_value = "Hacker News"
 
     mock_context = MagicMock()
-    mock_context.pages = [mock_new_page]
+    mock_context.pages = [MagicMock(), mock_new_page]
     mock_context.new_page.return_value = mock_new_page
 
     cmd_open = {"cmd": "open_tab", "token": "tok", "args": {"url": "https://news.ycombinator.com"}}
@@ -104,7 +105,7 @@ def test_execute_ipc_command_open_and_close_tab():
     assert resp_open["status"] == "ok"
     assert resp_open["tab"]["url"] == "https://news.ycombinator.com"
 
-    cmd_close_tab = {"cmd": "close_tab", "token": "tok", "args": {"index": 0}}
+    cmd_close_tab = {"cmd": "close_tab", "token": "tok", "args": {"index": 1}}
     resp_close, _ = _execute_ipc_command(cmd_close_tab, mock_context, token="tok")
     assert resp_close["status"] == "ok"
     mock_new_page.close.assert_called_once()
@@ -121,15 +122,14 @@ def test_execute_ipc_command_eval_and_cookies():
     resp_eval, _ = _execute_ipc_command(cmd_eval, mock_context, token="tok")
     assert resp_eval["status"] == "ok"
     assert resp_eval["result"] == "evaluated_title"
-    mock_context.new_cdp_session.return_value.send.assert_called_once_with(
-        "Runtime.evaluate",
-        {
-            "expression": "document.title",
-            "awaitPromise": True,
-            "returnByValue": True,
-            "timeout": 10000,
-        },
-    )
+    call = mock_context.new_cdp_session.return_value.send.call_args
+    assert call[0][0] == "Runtime.evaluate"
+    params = call[0][1]
+    assert params["awaitPromise"] is True
+    assert params["returnByValue"] is True
+    assert params["timeout"] == 10000
+    assert "Promise.race" in params["expression"]
+    assert "document.title" in params["expression"]
     mock_context.new_cdp_session.return_value.detach.assert_called_once()
 
     cmd_cookies = {"cmd": "cookies", "token": "tok", "args": {}}
@@ -528,6 +528,26 @@ def test_execute_ipc_command_screenshot(tmp_path: Path):
     assert out_file.read_bytes() == b"\x89PNG fake bytes"
 
 
+def test_execute_ipc_command_screenshot_survives_title_failure(tmp_path: Path):
+    mock_page = MagicMock()
+    mock_page.url = "https://example.com"
+    mock_page.title.side_effect = Exception("Execution context was destroyed")
+
+    def fake_screenshot(path, full_page=False):
+        Path(path).write_bytes(b"\x89PNG ok")
+
+    mock_page.screenshot.side_effect = fake_screenshot
+
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    out_file = tmp_path / "capture.png"
+    cmd = {"cmd": "screenshot", "token": "tok", "args": {"output": str(out_file)}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok", resp
+    assert resp["bytes"] == len(b"\x89PNG ok")
+
+
 def test_execute_ipc_command_screenshot_requires_output_path():
     mock_context = MagicMock()
     mock_context.pages = [MagicMock()]
@@ -588,6 +608,20 @@ def test_execute_ipc_command_pdf_requires_output_path():
     assert resp["status"] == "error"
 
 
+def test_execute_ipc_command_pdf_refuses_output_inside_profile_data_dir(tmp_path: Path):
+    data_dir = tmp_path / "abc123" / "browser-data"
+    data_dir.mkdir(parents=True)
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock()]
+
+    inside = data_dir / "page.pdf"
+    cmd = {"cmd": "pdf", "token": "tok", "args": {"output": str(inside)}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok", data_dir=str(data_dir))
+    assert resp["status"] == "error"
+    assert "profile data directory" in resp["message"]
+    assert not inside.exists()
+
+
 def test_execute_ipc_command_pdf_rejects_bad_url():
     mock_context = MagicMock()
     mock_context.pages = [MagicMock()]
@@ -605,3 +639,156 @@ def test_execute_ipc_command_pdf_maps_headed_error():
     resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
     assert resp["status"] == "error"
     assert "headless Chromium session" in resp["message"]
+
+
+def test_execute_ipc_command_eval_wraps_script_with_deadline():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+    mock_context.new_cdp_session.return_value.send.return_value = {
+        "result": {"type": "string", "value": "ok"}
+    }
+
+    cmd = {"cmd": "eval", "token": "tok", "args": {"script": "document.title"}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    sent = mock_context.new_cdp_session.return_value.send.call_args
+    expression = sent[0][1]["expression"]
+    assert "Promise.race" in expression, "script must run under a deadline wrapper"
+    assert "document.title" in expression, "original expression must be preserved"
+    assert sent[0][1]["awaitPromise"] is True
+
+
+def test_execute_ipc_command_eval_marks_unserializable_result():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+    mock_context.new_cdp_session.return_value.send.return_value = {
+        "result": {"type": "number", "unserializableValue": "NaN"}
+    }
+
+    cmd = {"cmd": "eval", "token": "tok", "args": {"script": "NaN"}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    assert resp["result"] == {"value": "NaN", "unserializable": True}
+
+
+def test_execute_ipc_command_eval_reports_deadline_expiry():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+    mock_context.new_cdp_session.return_value.send.return_value = {
+        "exceptionDetails": {
+            "text": "Uncaught (in promise)",
+            "exception": {"description": "Error: the page evaluation timed out after 10s"},
+        }
+    }
+
+    cmd = {"cmd": "eval", "token": "tok", "args": {"script": "new Promise(() => {})"}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "timed out" in resp["message"]
+
+
+def test_execute_ipc_command_tabs_uses_browser_level_target_info():
+    mock_page1 = MagicMock()
+    mock_page1.url = "https://busy.example.com"
+    mock_page2 = MagicMock()
+    mock_page2.url = "https://example.com"
+
+    target_infos = [
+        {"title": "Busy Page", "url": "https://busy.example.com", "type": "page"},
+        {"title": "", "url": "https://example.com", "type": "page"},
+    ]
+
+    mock_session = MagicMock()
+    mock_session.send.return_value = {"targetInfos": target_infos}
+
+    mock_browser = MagicMock()
+    mock_browser.new_browser_cdp_session.return_value = mock_session
+
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page1, mock_page2]
+    mock_context.browser = mock_browser
+
+    cmd = {"cmd": "tabs", "token": "tok"}
+    resp, should_exit = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    assert not should_exit
+    titles = [t["title"] for t in resp["tabs"]]
+    assert titles == ["Busy Page", ""]
+    for page in mock_context.pages:
+        page.title.assert_not_called(), "page.title() must never be called from tabs"
+
+
+def test_execute_ipc_command_open_tab_closes_orphan_page_on_goto_failure():
+    mock_new_page = MagicMock()
+    mock_new_page.url = "https://down.example.invalid"
+    mock_new_page.title.return_value = ""
+    mock_new_page.goto.side_effect = Exception("net::ERR_CONNECTION_REFUSED")
+
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock(), mock_new_page]
+    mock_context.new_page.return_value = mock_new_page
+
+    cmd = {"cmd": "open_tab", "token": "tok", "args": {"url": "https://down.example.invalid"}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "CONNECTION_REFUSED" in resp["message"]
+    mock_new_page.close.assert_called_once()
+
+
+def test_execute_ipc_command_close_tab_closes_last_page():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    cmd = {"cmd": "close_tab", "token": "tok", "args": {"index": 0}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    mock_page.close.assert_called_once()
+
+
+def test_execute_ipc_command_stale_generation_rejected():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [mock_page]
+
+    cmd = {"cmd": "close_tab", "token": "tok", "args": {"index": 0, "generation": 1}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "stale" in resp["message"]
+    mock_page.close.assert_not_called()
+
+
+def test_execute_ipc_command_current_generation_accepted():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock(), mock_page]
+
+    cmd = {"cmd": "close_tab", "token": "tok", "args": {"index": 1, "generation": controller_module._tabs_generation}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    mock_page.close.assert_called_once()
+
+
+def test_execute_ipc_command_omitted_generation_accepted():
+    mock_page = MagicMock()
+    mock_context = MagicMock()
+    mock_context.pages = [MagicMock(), mock_page]
+
+    cmd = {"cmd": "close_tab", "token": "tok", "args": {"index": 1}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "ok"
+    mock_page.close.assert_called_once()
+
+
+def test_execute_ipc_command_read_page_no_pages_reports_error():
+    mock_context = MagicMock()
+    mock_context.pages = []
+
+    cmd = {"cmd": "read_page", "token": "tok", "args": {}}
+    resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
+    assert resp["status"] == "error"
+    assert "no open tabs" in resp["message"]
+    mock_context.new_page.assert_not_called()
