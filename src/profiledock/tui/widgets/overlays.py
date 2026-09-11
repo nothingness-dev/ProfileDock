@@ -6,9 +6,9 @@ from typing import Any, ClassVar
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, Static
+from textual.widgets import Button, Input, Label, Static
 
 from ..actions import ActionSpec
 
@@ -62,6 +62,15 @@ class ConfirmModal(ModalScreen[bool]):
         color: $accent;
         text-style: bold;
     }
+    #confirm-buttons {
+        height: auto;
+        margin-top: 1;
+        align-horizontal: center;
+    }
+    #confirm-buttons Button {
+        margin: 0 1;
+        min-width: 12;
+    }
     """
 
     BINDINGS: ClassVar[list[Any]] = [
@@ -102,6 +111,9 @@ class ConfirmModal(ModalScreen[bool]):
             else:
                 yield Label("", id="confirm-countdown")
                 yield Label("[Y] confirm  ·  [N/Esc] cancel", id="confirm-hint")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Cancel", variant="default", id="confirm-cancel")
+                yield Button("Confirm", variant="error", id="confirm-ok")
 
     def on_mount(self) -> None:
         if self._typed:
@@ -137,6 +149,13 @@ class ConfirmModal(ModalScreen[bool]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
         self.action_confirm()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "confirm-ok":
+            self.action_confirm()
+        elif event.button.id == "confirm-cancel":
+            self.action_cancel()
 
     @property
     def target(self) -> str:

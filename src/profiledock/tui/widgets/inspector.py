@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from rich.table import Table
@@ -228,6 +229,9 @@ class OutputPane(VerticalScroll):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._body = Static("", id="output-body", markup=False)
+        self._busy_started: float | None = None
+        self._busy_timer: Any | None = None
+        self._busy_message = ""
 
     def compose(self) -> ComposeResult:
         yield self._body
@@ -240,6 +244,10 @@ class OutputPane(VerticalScroll):
         category: str = "",
         hint: str = "",
     ) -> None:
+        if self._busy_timer is not None:
+            self._busy_timer.stop()
+            self._busy_timer = None
+        self._busy_started = None
         title = Text()
         if exit_code == 0:
             title.append(" OK ", style="bold black on green")
@@ -259,4 +267,15 @@ class OutputPane(VerticalScroll):
         self.scroll_home(animate=False)
 
     def set_busy(self, message: str) -> None:
-        self._body.update(Text(f"… {message}", style="italic yellow"))
+        if self._busy_timer is not None:
+            self._busy_timer.stop()
+        self._busy_started = time.monotonic()
+        self._busy_message = message
+        self._update_busy_line()
+        self._busy_timer = self.set_interval(1.0, self._update_busy_line)
+
+    def _update_busy_line(self) -> None:
+        elapsed = 0
+        if self._busy_started is not None:
+            elapsed = int(time.monotonic() - self._busy_started)
+        self._body.update(Text(f"… {self._busy_message} (elapsed {elapsed}s)", style="italic yellow"))

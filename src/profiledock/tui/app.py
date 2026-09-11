@@ -465,10 +465,12 @@ class ProfileDockApp(App[None]):
         self._execute(spec, event.values)
 
     def _on_confirmed(self, confirmed: bool | None) -> None:
-        if not confirmed or self._pending is None:
+        if self._pending is None:
             return
         spec, values = self._pending
         self._pending = None
+        if not confirmed:
+            return
         self._execute(spec, values)
 
     def on_form_panel_cancelled(self, event: FormPanel.Cancelled) -> None:
