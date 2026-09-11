@@ -454,3 +454,69 @@ def test_restore_quarantine_failure_rolls_back_existing_profiles(tmp_path):
     loaded = load_metadata(dst_paths.profiles_file)
     assert [p.name for p in loaded.profiles] == ["ExistingP1", "ExistingP2"]
     assert all(p.engine == "playwright" for p in loaded.profiles)
+
+
+def test_restore_skipped_after_cache_regeneration(tmp_path):
+    src_paths = make_paths(tmp_path / "src")
+    data = src_paths.profiles_dir / "p1" / "browser-data"
+    data.mkdir(parents=True)
+    (data / "cookies.sqlite").write_text("data", encoding="utf-8")
+    cache_dir = data / "Default" / "Cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "data_0").write_text("cache_blob", encoding="utf-8")
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data))
+    archive_file = tmp_path / "cache.tar.gz"
+    create_backup_archive([profile], src_paths, archive_file, exclude_cache=True)
+
+    destination = make_paths(tmp_path / "destination")
+    restore_backup_archive(archive_file, destination)
+    regenerated = destination.profiles_dir / "p1" / "browser-data" / "Default" / "Cache"
+    regenerated.mkdir(parents=True)
+    (regenerated / "data_0").write_text("recreated", encoding="utf-8")
+
+    repeated = restore_backup_archive(archive_file, destination)
+    assert repeated.total_restored == 0
+    assert [s.status for s in repeated.skipped] == ["skipped"]
+
+
+def test_restore_corrupted_archive_raises_invalid_archive(tmp_path):
+    src_paths = make_paths(tmp_path / "src")
+    data = src_paths.profiles_dir / "p1" / "browser-data"
+    data.mkdir(parents=True)
+    (data / "f.txt").write_text("content", encoding="utf-8")
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(data))
+    archive = tmp_path / "b.tar.gz"
+    create_backup_archive([profile], src_paths, archive)
+    truncated = tmp_path / "trunc.tar.gz"
+    raw = archive.read_bytes()
+    truncated.write_bytes(raw[: len(raw) // 2])
+
+    with pytest.raises(InvalidArchiveError, match="corrupted"):
+        restore_backup_archive(truncated, make_paths(tmp_path / "dst"))
+
+
+def test_restore_rejects_windows_reserved_device_names(tmp_path):
+    dst_paths = make_paths(tmp_path / "dst")
+    archive_file = tmp_path / "reserved.tar.gz"
+    manifest = {
+        "format_version": 1,
+        "profiles": [
+            {
+                "id": "p1",
+                "name": "Reserved",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "files": {"con .txt": {"size": 1, "sha256": "0" * 64}},
+            }
+        ],
+    }
+    with tarfile.open(archive_file, "w:gz") as tar:
+        manifest_bytes = json.dumps(complete_manifest(manifest)).encode("utf-8")
+        member = tarfile.TarInfo("backup_manifest.json")
+        member.size = len(manifest_bytes)
+        tar.addfile(member, io.BytesIO(manifest_bytes))
+        data_info = tarfile.TarInfo("profiles/p1/browser-data/con .txt")
+        data_info.size = 1
+        tar.addfile(data_info, io.BytesIO(b"x"))
+
+    with pytest.raises(DecompressionSecurityError, match="reserved"):
+        restore_backup_archive(archive_file, dst_paths)

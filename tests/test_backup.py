@@ -1,3 +1,4 @@
+import io
 import json
 import tarfile
 from pathlib import Path
@@ -422,3 +423,51 @@ def test_cli_verify_missing_archive_fails(tmp_path):
     result = runner.invoke(app, ["--data-root", str(tmp_path), "verify", str(tmp_path / "no.tar.gz")])
     assert result.exit_code == EXIT_USER_ERROR
     assert "Error [not_found]" in result.output
+
+
+def test_verify_rejects_inconsistent_manifest_totals(tmp_path):
+    from profiledock.backup import verify_backup_archive
+
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "f.txt").write_text("content", encoding="utf-8")
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(p_data))
+    archive = tmp_path / "good.tar.gz"
+    create_backup_archive([profile], paths, archive)
+
+    with tarfile.open(archive, "r:gz") as t:
+        manifest = json.loads(t.extractfile("backup_manifest.json").read().decode("utf-8"))
+        members = [(m, t.extractfile(m).read()) for m in t.getmembers() if m.name != "backup_manifest.json"]
+
+    for field, delta in (("total_bytes", 5), ("total_files", 1), ("total_profiles", 2)):
+        bad = dict(manifest)
+        bad[field] = manifest[field] + delta
+        bad_archive = tmp_path / f"bad_{field}.tar.gz"
+        with tarfile.open(bad_archive, "w:gz") as dst:
+            mb = json.dumps(bad).encode("utf-8")
+            mi = tarfile.TarInfo("backup_manifest.json")
+            mi.size = len(mb)
+            dst.addfile(mi, io.BytesIO(mb))
+            for m, data in members:
+                dst.addfile(m, io.BytesIO(data))
+        with pytest.raises(BackupError, match="total"):
+            verify_backup_archive(bad_archive)
+
+
+def test_verify_corrupted_archive_raises_backup_error(tmp_path):
+    from profiledock.backup import verify_backup_archive
+
+    paths = make_paths(tmp_path)
+    p_data = paths.profiles_dir / "p1" / "browser-data"
+    p_data.mkdir(parents=True)
+    (p_data / "f.txt").write_text("content", encoding="utf-8")
+    profile = Profile("p1", "Work", "2026-01-01T00:00:00+00:00", str(p_data))
+    archive = tmp_path / "b.tar.gz"
+    create_backup_archive([profile], paths, archive)
+    truncated = tmp_path / "trunc.tar.gz"
+    raw = archive.read_bytes()
+    truncated.write_bytes(raw[: len(raw) // 2])
+
+    with pytest.raises(BackupError, match="corrupted"):
+        verify_backup_archive(truncated)

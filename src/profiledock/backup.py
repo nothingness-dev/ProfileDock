@@ -1,3 +1,4 @@
+import gzip
 import io
 import json
 import os
@@ -339,6 +340,8 @@ def verify_backup_archive(archive_path: Path) -> VerifyReport:
 
     try:
         tar = tarfile.open(archive, "r:gz")  # noqa: SIM115 - closed by the `with tar` below
+    except (tarfile.TarError, EOFError, OSError) as exc:
+        raise BackupError(f"corrupted backup archive: {exc}") from exc
     except Exception as exc:
         raise BackupError(f"could not open backup archive: {exc}") from exc
 
@@ -372,6 +375,14 @@ def verify_backup_archive(archive_path: Path) -> VerifyReport:
                 profiles_data = [_validated_archive_profile(p) for p in profiles_data]
             except Exception as exc:
                 raise BackupError(f"backup archive verification failed: {exc}") from exc
+
+            for field, actual in (
+                ("total_profiles", len(profiles_data)),
+                ("total_files", sum(p["file_count"] for p in profiles_data)),
+                ("total_bytes", sum(p["total_bytes"] for p in profiles_data)),
+            ):
+                if manifest.get(field) != actual:
+                    raise BackupError(f"manifest {field} does not match profile entries")
 
             members = tar.getmembers()
             if len(members) > 100000:
@@ -414,8 +425,12 @@ def verify_backup_archive(archive_path: Path) -> VerifyReport:
                             hasher.update(chunk)
                     if hasher.hexdigest() != metadata["sha256"]:
                         checksum_failures.append(member_name)
+    except gzip.BadGzipFile as exc:
+        raise BackupError(f"corrupted backup archive: {exc}") from exc
     except (BackupError, OSError):
         raise
+    except (tarfile.TarError, EOFError) as exc:
+        raise BackupError(f"corrupted backup archive: {exc}") from exc
 
     return VerifyReport(
         archive_path=str(archive),

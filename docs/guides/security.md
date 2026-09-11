@@ -24,7 +24,7 @@ These mechanisms do not defend against a malicious process running as the same l
 
 ## Archive and metadata safety
 
-Restore treats archives as untrusted. It rejects path traversal, absolute paths, link members, special file types, duplicate names, excessive counts and sizes, malformed versioned manifests, unsafe IDs, inconsistent totals, and checksum mismatches.
+Restore treats archives as untrusted. It rejects path traversal, absolute paths, Windows reserved device names, link members, special file types, duplicate names, excessive counts and sizes, malformed versioned manifests, unsafe IDs, inconsistent totals, and checksum mismatches.
 
 Metadata and runtime formats reject unknown future versions. Persistent migrations are sequential, idempotent, backed up first, and atomically replaced. Interrupted operations preserve the authoritative original or roll back staged destination changes.
 

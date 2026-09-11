@@ -88,7 +88,7 @@ profiledock restore work-profile.tar.gz
 profiledock restore work-profile.tar.gz --json
 ```
 
-Restore validates the complete archive before committing. It rejects absolute paths, `..` traversal, backslashes used for cross-platform escape, links, unsafe types, duplicate members, oversized archives, bad manifests, unknown future versions, unsafe profile IDs, inconsistent totals, and checksum mismatches.
+Restore validates the complete archive before committing. It rejects absolute paths, `..` traversal, backslashes used for cross-platform escape, Windows reserved device names, links, unsafe types, duplicate members, oversized archives, bad manifests, unknown future versions, unsafe profile IDs, inconsistent totals, and checksum mismatches.
 
 Conflicting IDs and names are refused. `--force` permits supported replacement but never permits active-profile overwrite or filesystem-boundary escape. Temporary extraction and quarantined replacement make restore rollback-safe.
 
