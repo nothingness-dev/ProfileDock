@@ -154,6 +154,7 @@ def build_launch_plan(
 def direct_launch_options(plan: LaunchPlan, extra_args: list[str] | None = None) -> dict[str, Any]:
     """Assemble keyword options for :func:`start_direct_chrome` from a plan."""
     options: dict[str, Any] = {}
+    identity_args: list[str] = []
     if plan.browser is not None:
         browser_path = Path(plan.browser).expanduser()
         if browser_path.is_file():
@@ -171,7 +172,15 @@ def direct_launch_options(plan: LaunchPlan, extra_args: list[str] | None = None)
                 "direct engine does not support proxy credentials; use the playwright engine"
             )
         options["proxy_server"] = plan.proxy
-    if extra_args:
+        identity_args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+    if plan.user_agent is not None:
+        identity_args.append(f"--user-agent={plan.user_agent}")
+    if plan.locale is not None:
+        identity_args.append(f"--lang={plan.locale}")
+        identity_args.append(f"--accept-lang={plan.locale}")
+    if identity_args:
+        options["extra_args"] = identity_args + list(extra_args or [])
+    elif extra_args:
         options["extra_args"] = list(extra_args)
     return options
 

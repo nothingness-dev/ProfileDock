@@ -81,7 +81,7 @@ profiledock config set Work timezone Europe/Berlin
 
 `default-tabs` must be at least 1. `window-size` must contain width and height of at least 100. `browser` may be a supported browser name or an executable path accepted by the selected engine. `proxy` accepts `http://`, `https://`, or `socks5://` URLs; `user:pass@host:port` credentials are supported for http/https proxies only — Chromium cannot authenticate SOCKS5, so credentialed socks5 URLs are rejected at validation (`none` clears it). `user-agent` is a non-empty string up to 512 characters. `locale` is a tag such as `en` or `en-GB`. `timezone` is an IANA name such as `Europe/Berlin`.
 
-Proxy credentials are redacted to `user:***@host` in every display surface. When a profile sets a proxy, keep its `timezone` coherent with the proxy's exit location — `profiledock doctor` warns about proxied profiles with a missing or invalid timezone, the most common geo-mismatch leak.
+Proxy credentials are redacted to `user:***@host` in every display surface. When a profile sets a proxy, both engines block non-proxied WebRTC UDP paths. Keep its `timezone` coherent with the proxy's exit location — `profiledock doctor` warns about proxied profiles with a missing or invalid timezone, the most common geo-mismatch leak.
 
 Manage start URLs:
 

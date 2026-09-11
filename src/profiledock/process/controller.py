@@ -693,9 +693,14 @@ def _launch_context(
     from playwright.sync_api import Error as PlaywrightError
 
     kwargs: dict[str, Any] = {"headless": headless}
+    launch_args: list[str] = ["--disable-blink-features=AutomationControlled"]
     if window_width is not None and window_height is not None:
         kwargs["viewport"] = {"width": window_width, "height": window_height}
-        kwargs["args"] = [f"--window-size={window_width},{window_height}"]
+        launch_args.append(f"--window-size={window_width},{window_height}")
+    if proxy:
+        launch_args.append("--force-webrtc-ip-handling-policy=disable_non_proxied_udp")
+    kwargs["args"] = launch_args
+    kwargs["ignore_default_args"] = ["--enable-automation"]
     proxy_options = _playwright_proxy_options(proxy)
     if proxy_options:
         kwargs["proxy"] = proxy_options
