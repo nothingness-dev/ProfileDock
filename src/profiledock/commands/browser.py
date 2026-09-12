@@ -117,6 +117,78 @@ def set_engine_command(
         typer.echo(f"  {old_engine or '(unset)'} -> {clean_engine}")
 
 
+def proxy_test_command(
+    profile_id: str | None = typer.Argument(
+        None, help="Profile ID, prefix, or name to read the stored proxy from."
+    ),
+    proxy: str | None = typer.Option(
+        None, "--proxy", help="Proxy URL to test (overrides the stored preset)."
+    ),
+    timeout: float = typer.Option(15.0, "--timeout", help="Seconds to wait for the geo response."),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Apply the suggested timezone (and locale when known) to the profile preset.",
+    ),
+) -> None:
+    """Test HTTP(S) proxy egress and optionally save its timezone preset."""
+    from ..proxy_test import ProxyTestError, proxy_test
+
+    manager = _get_manager()
+    effective_proxy = proxy
+    profile = None
+    if profile_id is not None:
+        try:
+            profile = manager.resolve(profile_id)
+            if effective_proxy is None:
+                effective_proxy = manager.get_launch_config(profile.id).proxy
+        except (
+            ProfileNotFoundError,
+            AmbiguousProfileError,
+            StorageError,
+            ValidationError,
+            ValueError,
+        ) as exc:
+            fail_exception(exc)
+
+    if effective_proxy is None:
+        fail("proxy URL is required; pass --proxy or configure a profile preset")
+    if write and profile is None:
+        fail("--write requires a profile")
+        return
+    try:
+        result = proxy_test(effective_proxy, timeout=timeout)
+    except (ProxyTestError, ValidationError, ValueError) as exc:
+        fail_exception(exc)
+    if not result["ok"]:
+        fail(result["error"] or "proxy test failed")
+    typer.echo(f"proxy: {redact_proxy(effective_proxy)}")
+    typer.echo(f"exit IP: {result['exit_ip']}")
+    typer.echo(f"latency: {result['latency_ms']} ms")
+    suggested = result["timezone"]
+    typer.echo(f"egress timezone: {suggested or '(unknown)'}")
+    if result.get("locale"):
+        typer.echo(f"egress locale: {result['locale']}")
+    if write:
+        profile_to_write = profile
+        if profile_to_write is None:
+            fail("--write requires a profile")
+            return
+        updates: dict[str, Any] = {}
+        if suggested:
+            updates["timezone"] = suggested
+        if result.get("locale"):
+            updates["locale"] = result["locale"]
+        if not updates:
+            fail("no timezone/locale suggestion available to write")
+        try:
+            manager.update_launch_config(profile_to_write.id, **updates)
+        except (StorageError, ValidationError, ValueError) as exc:
+            fail_exception(exc)
+        written = ", ".join(f"{k}={v}" for k, v in updates.items())
+        typer.echo(f"updated preset for '{profile_to_write.name}': {written}")
+
+
 def status_command(
     profile_id: str | None = typer.Argument(None, help="Profile ID, prefix, or name."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Continuously poll and display live status."),
