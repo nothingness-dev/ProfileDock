@@ -35,6 +35,23 @@ def _system_browser_executable(preferred: str | None = None) -> Path | None:
     return _system_browser_impl(preferred)
 
 
+_CDP_PORT_WAIT_SECONDS = 2.0
+
+
+def _cdp_port_from_active_port_file(data_dir: str | Path) -> int | None:
+    candidate = Path(data_dir) / "DevToolsActivePort"
+    try:
+        first_line = candidate.read_text(encoding="utf-8").split("\n", 1)[0].strip()
+    except OSError:
+        return None
+    if not first_line.isdigit():
+        return None
+    port = int(first_line)
+    if not 1 <= port <= 65535:
+        return None
+    return port
+
+
 def start_direct_chrome(
     data_dir: str,
     tabs: int,
@@ -115,6 +132,8 @@ def start_direct_chrome(
         "--no-default-browser-check",
         "--disable-background-mode",
         "--new-window",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=0",
     ]
     if window_width is not None and window_height is not None:
         args.append(f"--window-size={window_width},{window_height}")
@@ -136,11 +155,31 @@ def start_direct_chrome(
         popen_kwargs["start_new_session"] = True
 
     try:
+        (Path(data_dir) / "DevToolsActivePort").unlink(missing_ok=True)
+    except OSError as exc:
+        _unlink_quietly(path)
+        _write_error(err, "browser_launch_failed", str(exc))
+        raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
+
+    try:
         process = subprocess.Popen(args, **popen_kwargs)
     except OSError as exc:
         _unlink_quietly(path)
         _write_error(err, "browser_launch_failed", str(exc))
         raise BrowserLaunchError(str(exc), "browser_launch_failed") from exc
+
+    cdp_port: int | None = None
+    cdp_deadline = time.monotonic() + _CDP_PORT_WAIT_SECONDS
+    cdp_poll = 0.05
+    process_poll = getattr(process, "poll", None)
+    while time.monotonic() < cdp_deadline:
+        if callable(process_poll) and process_poll() is not None:
+            break
+        cdp_port = _cdp_port_from_active_port_file(data_dir)
+        if cdp_port is not None:
+            break
+        time.sleep(cdp_poll)
+        cdp_poll = min(cdp_poll * 1.5, 0.2)
 
     proc_create_time = _get_process_create_time_impl(process.pid)
     state = {
@@ -154,6 +193,7 @@ def start_direct_chrome(
         "channel": initial["channel"],
         "started_at": started_at,
         "status": "running",
+        "cdp_port": cdp_port,
     }
 
     try:

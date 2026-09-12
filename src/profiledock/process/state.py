@@ -31,6 +31,7 @@ _DIRECT_STATE_FIELDS = frozenset(
         "started_at",
         "status",
         "closing",
+        "cdp_port",
     }
 )
 _PLAYWRIGHT_STATE_FIELDS = frozenset(
@@ -200,6 +201,10 @@ def _valid_direct_state(value: StateDict, profile_id: str) -> bool:
         return False
     if "closing" in value and type(value["closing"]) is not bool:
         return False
+    if "cdp_port" in value:
+        cdp_port = value["cdp_port"]
+        if cdp_port is not None and (type(cdp_port) is not int or not 1 <= cdp_port <= 65535):
+            return False
     pid = value["pid"]
     process_create_time = value.get("process_create_time")
 

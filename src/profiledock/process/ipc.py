@@ -12,7 +12,14 @@ from typing import Any
 
 from .errors import BrowserLaunchError, ProfileRunningError
 from .playwright import start_controller
-from .state import StateDict, _read_state, _upgrade_legacy_state, _valid_state, state_path
+from .state import (
+    StateDict,
+    _read_state,
+    _upgrade_legacy_state,
+    _valid_direct_state,
+    _valid_state,
+    state_path,
+)
 
 _MAX_COMMAND_BYTES = 65536
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
@@ -71,6 +78,7 @@ def send_controller_command(
 
     from profiledock.process_manager import _MAX_RESPONSE_BYTES as _max_response_bytes
     from profiledock.process_manager import _controller_available as _controller_available_impl
+    from profiledock.process_manager import _is_matching_process as _is_matching_process_impl
 
     if cmd not in _IPC_COMMANDS:
         raise ValueError(f"unsupported controller command: {cmd}")
@@ -79,6 +87,37 @@ def send_controller_command(
     path = state_path(data_dir, runtime_dir)
     state = _read_state(path)
     profile_id = Path(data_dir).parent.name
+
+    if state and state.get("engine") == "direct":
+        if not _valid_direct_state(state, profile_id):
+            raise ProfileRunningError(f"invalid direct runtime state for '{profile_id}'")
+        if cmd == "probe":
+            if _is_matching_process_impl(
+                int(state["pid"]), state.get("process_create_time"), require_verification=True
+            ):
+                return {"status": "ok"}
+            raise ProfileRunningError(f"profile '{profile_id}' is not running")
+        if cmd == "close":
+            from .direct import _close_direct
+
+            _close_direct(path, state, timeout)
+            return {"status": "ok"}
+        cdp_port = state.get("cdp_port")
+        if type(cdp_port) is not int or not 1 <= cdp_port <= 65535:
+            raise ProfileRunningError(
+                f"profile '{profile_id}' runs on the direct engine without a DevTools endpoint; "
+                "relaunch it to enable automation"
+            )
+        if not _is_matching_process_impl(
+            int(state["pid"]), state.get("process_create_time"), require_verification=True
+        ):
+            raise ProfileRunningError(f"profile '{profile_id}' is not running")
+        from .direct_bridge import run_direct_cdp_command
+
+        result = run_direct_cdp_command(data_dir, cmd, args, timeout=timeout, cdp_port=cdp_port)
+        if result.get("status") == "error":
+            raise BrowserLaunchError(str(result.get("message", "unknown direct browser error")))
+        return result
 
     if state:
         state = _upgrade_legacy_state(path, state, profile_id)
