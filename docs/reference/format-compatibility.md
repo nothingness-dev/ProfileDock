@@ -26,7 +26,7 @@ Launch configuration schema version 2 contains `schema_version`, `default_tabs`,
 
 `running.json` uses protocol version 2 and is discriminated by `engine`.
 
-- `direct` state identifies the browser process with `pid`, `launcher_pid`, and `process_create_time`, plus launch status and browser details. It never contains a controller token or port.
+- `direct` state identifies the browser process with `pid`, `launcher_pid`, and `process_create_time`, plus launch status and browser details. It never contains a controller token. A direct launch may include `cdp_port`, an ephemeral loopback DevTools port used only while the browser is running; absent or `null` means direct-browser automation is unavailable for that session.
 - `playwright` state identifies the local controller with `controller_pid`, `controller_started_at`, a loopback `port`, and an authentication `token`, plus launch status and page details. When the browser main process can be identified, the state also records `browser_pid` and `browser_create_time` for identity-verified process management, and `headless` records the visibility of the launch. A Playwright state never authorizes operating-system process termination as a Direct state, and a recorded browser PID is never signalled unless its create time matches `browser_create_time`.
 
 Playwright state may include `launcher_create_time`, a positive finite timestamp used to distinguish a pending launcher from a reused PID. Older states without this field retain their existing liveness checks. Older releases with strict field validation may reject newer runtime state; close profiles before switching releases.

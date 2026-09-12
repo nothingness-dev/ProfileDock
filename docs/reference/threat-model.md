@@ -64,6 +64,7 @@ Protections:
 - Malformed or ambiguous runtime state fails closed for destructive mutation.
 - Direct and Playwright active-state checks use engine-specific verification instead of trusting a generic PID field.
 - Runtime state is excluded from profile backup archives.
+- Direct-engine DevTools endpoints bind to loopback, use an ephemeral port, and are only consulted when the runtime state records that port for a live, identity-verified profile process.
 
 Residual risks:
 

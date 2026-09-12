@@ -197,6 +197,8 @@ Playwright launches open a visible Chromium window by default; pass `--headless`
 
 Readiness means the browser and authenticated controller are available; start URLs may still be loading. Slow start URLs do not delay readiness probes. Automation commands that start a stopped profile reuse its saved proxy, user-agent, locale, and timezone in both the CLI and interactive interface.
 
+Automation commands (read, eval, screenshot, pdf, cookies, tabs) work against both engines. A direct-engine launch publishes an ephemeral loopback DevTools endpoint and records it in the runtime state; the automation commands connect over it on demand. A direct launch where Chromium does not publish the endpoint (older browser variants that refuse the flag) remains a valid running session, but its automation commands fail with a relaunch hint. Direct-engine profiles are never silently auto-started for automation; launch them explicitly first.
+
 ## `close`
 
 ```text
