@@ -22,6 +22,7 @@ from .storage import (
     rename_profile_atomic,
     set_engine_atomic,
     set_launch_config_atomic,
+    set_tags_atomic,
 )
 from .validation import validate_engine, validate_launch_config
 
@@ -170,6 +171,23 @@ class ProfileManager:
         profile = self.resolve(identifier)
         doc = set_engine_atomic(profile.id, engine, self.profiles_file, self.profiles_dir, self.backup_file)
         return self._updated_profile(doc, profile.id)
+
+    def set_tags(self, identifier: str, tags: list[str]) -> Profile:
+        from .validation import validate_tags
+
+        cleaned = validate_tags(tags)
+        profile = self.resolve(identifier)
+        doc = set_tags_atomic(profile.id, cleaned, self.profiles_file, self.profiles_dir, self.backup_file)
+        return self._updated_profile(doc, profile.id)
+
+    def get_tags(self, identifier: str) -> list[str]:
+        return self.resolve(identifier).tags
+
+    def list_by_tag(self, tag: str) -> list[Profile]:
+        from .validation import validate_tags
+
+        normalized = validate_tags([tag])[0]
+        return [p for p in self.list_profiles() if normalized in p.tags]
 
     def _apply_launch_config(self, profile: Profile, config: LaunchConfig | None) -> Profile:
         if config is not None:

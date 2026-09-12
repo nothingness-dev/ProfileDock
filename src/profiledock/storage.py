@@ -12,7 +12,13 @@ from uuid import uuid4
 from .data_root import DataRootError, ensure_within_root
 from .fsops import replace_with_retry as _replace_with_retry
 from .fsops import write_all as _write_all
-from .models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile, migrate_metadata_value
+from .models import (
+    METADATA_SCHEMA_VERSION,
+    LaunchConfig,
+    MetadataDocument,
+    Profile,
+    migrate_metadata_value,
+)
 from .validation import ValidationError, validate_metadata_document
 
 
@@ -297,7 +303,7 @@ def save_metadata(
     backup_path: str | Path | None = None,
 ) -> None:
     if doc.schema_version != METADATA_SCHEMA_VERSION:
-        raise StorageError(f"refusing to write unsupported metadata schema version: {doc.schema_version}")
+        raise StorageError(f"refusing to write non-current metadata schema version: {doc.schema_version}")
     path = Path(path)
     profile_root = Path(profile_root)
     root = _validate_metadata_paths(path, profile_root, backup_path)
@@ -419,6 +425,18 @@ def set_engine_atomic(
 ) -> MetadataDocument:
     return _mutate_profile_atomic(
         profile_id, lambda p: replace(p, engine=engine), path, profile_root, backup_path
+    )
+
+
+def set_tags_atomic(
+    profile_id: str,
+    tags: list[str],
+    path: str | Path = "profiles.json",
+    profile_root: str | Path = "profiles",
+    backup_path: str | Path | None = None,
+) -> MetadataDocument:
+    return _mutate_profile_atomic(
+        profile_id, lambda p: replace(p, tags=tags), path, profile_root, backup_path
     )
 
 

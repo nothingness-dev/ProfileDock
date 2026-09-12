@@ -37,8 +37,10 @@ def test_metadata_v1_requires_engine():
 
 
 def test_metadata_future_version_is_rejected():
+    from profiledock.models import METADATA_SCHEMA_VERSION
+
     with pytest.raises(ValueError, match="unsupported"):
-        migrate_metadata_value({"schema_version": 2, "profiles": []})
+        migrate_metadata_value({"schema_version": METADATA_SCHEMA_VERSION + 99, "profiles": []})
 
 
 def test_metadata_migration_backup_and_rollback(tmp_path):

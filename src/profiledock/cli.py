@@ -87,6 +87,7 @@ from .commands.browser import (
     proxy_test_command,
     set_engine_command,
     status_command,
+    tags_command,
 )
 from .commands.config import (
     config_add_url_command,
@@ -386,6 +387,7 @@ app.command(name="show")(show_command)
 app.command(name="rename")(rename_command)
 app.command(name="set-engine")(set_engine_command)
 app.command(name="proxy-test")(proxy_test_command)
+app.command(name="tags")(tags_command)
 app.command(name="status")(status_command)
 app.command(
     name="launch",

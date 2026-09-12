@@ -875,7 +875,7 @@ def repair_environment(
                     DiagnosticCheck(
                         id="repair_metadata_migration",
                         status=STATUS_OK,
-                        summary="Migrated legacy bare-array metadata to schema_version 1.",
+                        summary=f"Migrated legacy bare-array metadata to schema_version {METADATA_SCHEMA_VERSION}.",
                     )
                 )
             elif _is_versioned_document(data):

@@ -27,7 +27,7 @@ from profiledock.doctor import (
     repair_environment,
     run_diagnostics,
 )
-from profiledock.models import LaunchConfig, MetadataDocument, Profile
+from profiledock.models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile
 from profiledock.storage import load_metadata, metadata_lock, save_metadata
 
 runner = CliRunner()
@@ -98,7 +98,7 @@ def test_check_metadata_schema_valid(tmp_path):
     profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
     doc = MetadataDocument(
-        schema_version=1,
+        schema_version=METADATA_SCHEMA_VERSION,
         profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(data_dir))],
     )
     save_metadata(doc, profiles_file, profiles_dir)
@@ -185,7 +185,7 @@ def test_check_profile_directories(tmp_path):
     data_dir = profiles_dir / "p1" / "browser-data"
     data_dir.mkdir(parents=True)
     doc = MetadataDocument(
-        schema_version=1,
+        schema_version=METADATA_SCHEMA_VERSION,
         profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(data_dir))],
     )
     save_metadata(doc, profiles_file, profiles_dir)
@@ -201,7 +201,7 @@ def test_check_profile_directories_missing(tmp_path):
     profiles_dir = layout.profiles_dir
     data_dir = profiles_dir / "p1" / "browser-data"
     doc = MetadataDocument(
-        schema_version=1,
+        schema_version=METADATA_SCHEMA_VERSION,
         profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", str(data_dir))],
     )
     save_metadata(doc, profiles_file, profiles_dir)
@@ -221,7 +221,7 @@ def test_check_playwright_chromium_action_guidance():
 
 def _store_profile_with_data_dir(layout, data_dir: str) -> None:
     doc = MetadataDocument(
-        schema_version=1,
+        schema_version=METADATA_SCHEMA_VERSION,
         profiles=[Profile("p1", "Name", "2026-01-01T00:00:00+00:00", data_dir)],
     )
     save_metadata(doc, layout.profiles_file, layout.profiles_dir)

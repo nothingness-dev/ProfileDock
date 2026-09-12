@@ -132,6 +132,24 @@ def validate_engine(engine: str | None) -> str | None:
     return engine
 
 
+def validate_tags(tags: list[str]) -> list[str]:
+    if not isinstance(tags, list):
+        raise ValidationError("tags must be a list")
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        if not isinstance(tag, str):
+            raise ValidationError("tags must be strings")
+        normalized = tag.strip()
+        if not normalized or re.search(r"\s", normalized):
+            raise ValidationError(f"unsafe tag: {tag!r} (tags must be non-empty, no spaces)")
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        cleaned.append(normalized)
+    return cleaned
+
+
 def validate_launch_config(
     config: LaunchConfig,
     profile_engine: str | None = None,
@@ -189,6 +207,7 @@ def validate_required_fields(profile: Profile) -> None:
         validate_timestamp(profile.last_launched_at, "last_launched_at")
     if profile.engine is not None and profile.engine not in {"direct", "playwright"}:
         raise ValidationError(f"invalid engine '{profile.engine}', must be 'direct' or 'playwright'")
+    validate_tags(profile.tags)
     if profile.launch_config is not None:
         validate_launch_config(profile.launch_config, profile.engine)
 

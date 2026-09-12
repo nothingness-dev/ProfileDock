@@ -49,7 +49,7 @@ def test_metadata_write_rejects_backup_outside_configured_root(tmp_path):
     )
     with pytest.raises(StorageError, match="unsafe metadata storage path"):
         save_metadata(
-            MetadataDocument(schema_version=1, profiles=[profile]),
+            MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile]),
             root / "metadata" / "profiles.json",
             profiles_dir,
             tmp_path / "outside.json.bak",
@@ -172,7 +172,7 @@ class TestUnsupportedFutureSchema:
 
     def test_refuse_writing_future_schema_version(self, metadata_path: Path, profiles_dir: Path) -> None:
         profiles_dir.mkdir(parents=True, exist_ok=True)
-        with pytest.raises(StorageError, match="refusing to write unsupported"):
+        with pytest.raises(StorageError, match="refusing to write non-current"):
             save_metadata(
                 MetadataDocument(schema_version=METADATA_SCHEMA_VERSION + 1, profiles=[]),
                 metadata_path,

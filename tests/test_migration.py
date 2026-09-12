@@ -16,7 +16,7 @@ from profiledock.migration import (
     SourceRunningError,
     migrate_project,
 )
-from profiledock.models import MetadataDocument, Profile
+from profiledock.models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from profiledock.process_manager import close_controller, is_running, start_controller
 from profiledock.storage import load_metadata, save_metadata
 
@@ -181,7 +181,7 @@ def test_migrate_id_conflict_raises(tmp_path):
     dst_p1_data.mkdir(parents=True)
 
     doc = MetadataDocument(
-        schema_version=1,
+        schema_version=METADATA_SCHEMA_VERSION,
         profiles=[Profile("p1", "Original Name", "2026-01-01T00:00:00+00:00", str(dst_p1_data))],
     )
     save_metadata(doc, dst_paths.profiles_file, dst_paths.profiles_dir)
@@ -220,7 +220,7 @@ def test_migrate_name_conflict_raises(tmp_path):
     dst_p1_data.mkdir(parents=True)
 
     doc = MetadataDocument(
-        schema_version=1,
+        schema_version=METADATA_SCHEMA_VERSION,
         profiles=[Profile("dst1", "SharedName", "2026-01-01T00:00:00+00:00", str(dst_p1_data))],
     )
     save_metadata(doc, dst_paths.profiles_file, dst_paths.profiles_dir)
@@ -906,6 +906,9 @@ def test_idempotent_profile_still_detects_duplicate_destination_name(tmp_path):
             "created_at": "2026-01-03T00:00:00+00:00",
             "data_dir": str(second_data),
             "last_launched_at": None,
+            "engine": None,
+            "launch_config": None,
+            "tags": [],
         }
     )
     destination.profiles_file.write_text(json.dumps(document), encoding="utf-8")

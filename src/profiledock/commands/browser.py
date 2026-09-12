@@ -68,7 +68,7 @@ def _resolve_launch_options(
         target_tabs = resolve_launch_tabs(profile, None)
     if target_tabs is None:
         if _non_interactive.get():
-            fail("tab count is required in non-interactive mode; use --tabs")
+            raise ValidationError("tab count is required in non-interactive mode; use --tabs")
         target_tabs = typer.prompt("How many tabs do you want to open?", type=int)
     try:
         plan = build_launch_plan(
@@ -83,7 +83,7 @@ def _resolve_launch_options(
             timezone=timezone,
         )
     except ValueError as exc:
-        fail(str(exc))
+        raise ValidationError(str(exc)) from exc
     return _LaunchOptions(
         profile=profile,
         plan=plan,
@@ -115,6 +115,33 @@ def set_engine_command(
     typer.echo(f"Set engine to '{clean_engine}' for profile '{profile.name}' ({profile.id})")
     if old_engine != clean_engine:
         typer.echo(f"  {old_engine or '(unset)'} -> {clean_engine}")
+
+
+def tags_command(
+    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    tags: list[str] | None = typer.Argument(
+        None, help="Tags replacing the profile's current list. Use --clear to remove all."
+    ),
+    clear: bool = typer.Option(
+        False,
+        "--clear",
+        help="Clear all tags from the profile.",
+    ),
+) -> None:
+    """Set a profile's fleet tags."""
+    if clear and tags:
+        fail("--clear cannot be combined with tags")
+    if not clear and not tags:
+        fail("provide at least one tag or use --clear")
+    cleaned: list[str] = [] if clear else list(tags or [])
+    try:
+        profile = _get_manager().set_tags(profile_id, cleaned)
+    except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValidationError, ValueError) as exc:
+        fail_exception(exc)
+    if profile.tags:
+        typer.echo(f"Tags for '{profile.name}': {', '.join(profile.tags)}")
+    else:
+        typer.echo(f"Tags for '{profile.name}' cleared.")
 
 
 def proxy_test_command(
@@ -324,9 +351,27 @@ def status_command(
 
 
 def launch_command(
-    profile_id: str = typer.Argument(..., help="Profile ID, unique ID prefix, or exact name."),
+    profile_id: str | None = typer.Argument(
+        None, help="Profile ID, unique ID prefix, or exact name. Omit with --tag or --all."
+    ),
     tabs: int | None = typer.Option(
         None, "--tabs", "-t", help="Number of tabs to open (at least 1). Prompts if no preset exists."
+    ),
+    tag: str | None = typer.Option(
+        None,
+        "--tag",
+        help="Launch every profile carrying this tag, one after another.",
+    ),
+    all_profiles: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Launch every profile, one after another.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit per-profile batch outcomes as JSON.",
     ),
     engine: str | None = typer.Option(
         None,
@@ -381,14 +426,62 @@ def launch_command(
     --headless for a background launch. Login is always manual. Relaunching the
     same profile reuses its saved cookies, sessions, and history. A duplicate
     launch is refused while the profile is starting or already running.
+
+    With ``--tag`` or ``--all``, every matching profile launches in turn; a
+    per-profile failure is reported and never aborts the rest of the batch.
     """
     from ..cli import runtime_path, start_controller, start_direct_chrome
 
     if wait_timeout <= 0:
         fail("wait timeout must be greater than 0")
+    batch_profiles: list[str] | None = None
+    if tag is not None or all_profiles:
+        if profile_id is not None:
+            fail("cannot specify both a profile identifier and --tag/--all")
+        if tag is not None and all_profiles:
+            fail("cannot specify both --tag and --all")
+        manager = _get_manager()
+        try:
+            profiles = manager.list_by_tag(tag) if tag is not None else manager.list_profiles()
+        except (StorageError, ProfileNotFoundError, AmbiguousProfileError, ValidationError, ValueError) as exc:
+            fail_exception(exc)
+        if not profiles:
+            scope = f"tag '{tag}'" if tag is not None else "any profile"
+            if json_output:
+                emit_json(
+                    "launch",
+                    {"scope": scope, "started": 0, "failed": 0, "outcomes": []},
+                )
+            else:
+                typer.echo(f"No profiles found for {scope}.")
+            return
+        batch_profiles = [profile.id for profile in profiles]
+    if profile_id is None and batch_profiles is None:
+        fail("must specify a profile identifier or use --tag/--all")
+    if json_output and batch_profiles is None:
+        fail("--json requires --tag or --all")
     corr_id = generate_correlation_id()
     paths = selected_paths()
+    if batch_profiles is not None:
+        _launch_batch(
+            batch_profiles,
+            tabs=tabs,
+            engine=engine,
+            browser=browser,
+            url=list(url) if url else None,
+            headless=headless,
+            wait_timeout=wait_timeout,
+            proxy=proxy,
+            user_agent=user_agent,
+            locale=locale,
+            timezone=timezone,
+            json_output=json_output,
+            log_dir=paths.logs_dir,
+            correlation_id=corr_id,
+        )
+        return
     try:
+        assert profile_id is not None
         opts = _resolve_launch_options(
             profile_id, tabs, engine, browser, url, proxy, user_agent, locale, timezone
         )
@@ -495,6 +588,113 @@ def launch_command(
         typer.echo(f"Launched '{profile.name}' (engine: {active_engine}, {mode}) with {target_tabs} tab(s).")
         return
     typer.echo(f"Launched '{profile.name}' (engine: {active_engine}) with {target_tabs} tab(s).")
+
+
+def _launch_batch(
+    profile_ids: list[str],
+    *,
+    tabs: int | None,
+    engine: str | None,
+    browser: str | None,
+    url: list[str] | None,
+    headless: bool,
+    wait_timeout: float,
+    proxy: str | None,
+    user_agent: str | None,
+    locale: str | None,
+    timezone: str | None,
+    json_output: bool,
+    log_dir: Any,
+    correlation_id: str,
+) -> None:
+    from ..cli import runtime_path, start_controller, start_direct_chrome
+
+    outcomes: list[dict[str, Any]] = []
+    for profile_id in profile_ids:
+        try:
+            opts = _resolve_launch_options(
+                profile_id, tabs, engine, browser, url, proxy, user_agent, locale, timezone
+            )
+        except (
+            ProfileNotFoundError,
+            AmbiguousProfileError,
+            StorageError,
+            ValueError,
+            ValidationError,
+        ) as exc:
+            outcomes.append(
+                {"profile": profile_id, "status": "failed", "error": redact_proxy(str(exc))}
+            )
+            continue
+        profile = opts.profile
+        plan = opts.plan
+        try:
+            if headless and opts.engine != "playwright":
+                raise ValueError("--headless requires the Playwright engine")
+            if plan.proxy and opts.engine == "direct" and "@" in plan.proxy:
+                raise ValueError(
+                    "direct engine does not support proxy credentials; use the playwright engine"
+                )
+            if opts.engine == "direct":
+                start_direct_chrome(
+                    profile.data_dir,
+                    opts.tabs,
+                    runtime_dir=runtime_path(profile),
+                    **direct_launch_options(plan),
+                )
+            else:
+                start_controller(
+                    profile.data_dir,
+                    opts.tabs,
+                    headless=headless,
+                    startup_timeout=wait_timeout,
+                    runtime_dir=runtime_path(profile),
+                    **controller_launch_options(plan),
+                )
+        except (
+            ProfileNotFoundError,
+            AmbiguousProfileError,
+            StorageError,
+            ProfileRunningError,
+            BrowserLaunchError,
+            ValueError,
+            ValidationError,
+        ) as exc:
+            write_log_entry(
+                log_dir=log_dir,
+                level="ERROR",
+                event="browser_launch_failed",
+                profile_id=profile.id,
+                correlation_id=correlation_id,
+                result="failed",
+                error_category=getattr(exc, "category", type(exc).__name__),
+                details={"error": redact_proxy(str(exc)), "mode": "launch_batch"},
+            )
+            outcomes.append(
+                {
+                    "profile": profile.id,
+                    "name": profile.name,
+                    "status": "failed",
+                    "error": redact_proxy(str(exc)),
+                }
+            )
+            continue
+        try:
+            _get_manager().mark_launched(profile.id)
+        except (ProfileNotFoundError, AmbiguousProfileError, StorageError, ValueError):
+            pass
+        outcomes.append({"profile": profile.id, "name": profile.name, "status": "started"})
+    started = sum(1 for item in outcomes if item["status"] == "started")
+    failed = len(outcomes) - started
+    if json_output:
+        emit_json("launch", {"started": started, "failed": failed, "outcomes": outcomes})
+        return
+    for item in outcomes:
+        if item["status"] == "started":
+            typer.echo(f"Launched '{item.get('name', item['profile'])}'.")
+        else:
+            typer.echo(f"Failed '{item.get('name', item['profile'])}': {item['error']}", err=True)
+    typer.echo(f"{started} started, {failed} failed.")
 
 
 def close_command(

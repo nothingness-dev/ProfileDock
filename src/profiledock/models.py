@@ -2,8 +2,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-METADATA_SCHEMA_VERSION = 1
-_SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1})
+METADATA_SCHEMA_VERSION = 2
+SUPPORTED_METADATA_SCHEMA_VERSIONS = frozenset({1, 2})
 LAUNCH_CONFIG_SCHEMA_VERSION = 2
 
 
@@ -63,7 +63,7 @@ def migrate_metadata_value(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("metadata must be a JSON object or legacy profile list")
     version = value.get("schema_version")
-    if type(version) is not int or version != METADATA_SCHEMA_VERSION:
+    if type(version) is not int or version not in SUPPORTED_METADATA_SCHEMA_VERSIONS:
         raise ValueError(f"unsupported metadata schema version: {version}")
     if set(value) != {"schema_version", "profiles"} or not isinstance(value["profiles"], list):
         raise ValueError("metadata fields must be exactly schema_version and profiles")
@@ -75,6 +75,10 @@ def migrate_metadata_value(value: Any) -> dict[str, Any]:
         profile.setdefault("last_launched_at", None)
         profile.setdefault("engine", None)
         profile.setdefault("launch_config", None)
+        if version == 1:
+            profile.setdefault("tags", [])
+        elif "tags" not in profile:
+            raise ValueError("profile metadata is missing a required field: tags")
         if profile["launch_config"] is not None:
             profile["launch_config"] = migrate_launch_config(profile["launch_config"])
         profiles.append(profile)
@@ -196,9 +200,11 @@ class Profile:
     last_launched_at: str | None = None
     engine: str | None = None
     launch_config: LaunchConfig | None = None
+    tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data["tags"] = list(self.tags)
         if self.launch_config is not None:
             data["launch_config"] = self.launch_config.to_dict()
         return data
@@ -216,14 +222,16 @@ class Profile:
                 "last_launched_at",
                 "engine",
                 "launch_config",
+                "tags",
             }
         )
         unknown = set(value) - fields
         if unknown:
             raise ValueError(f"profile metadata has unknown fields: {', '.join(sorted(unknown))}")
-        required = tuple(fields)
-        if any(key not in value for key in required):
-            raise ValueError("profile metadata is missing a required field")
+        required = ("id", "name", "created_at", "data_dir", "engine")
+        missing = [key for key in required if key not in value]
+        if missing:
+            raise ValueError(f"profile metadata is missing a required field: {', '.join(missing)}")
         for key in ("id", "name", "created_at", "data_dir"):
             if not isinstance(value[key], str):
                 raise ValueError(f"profile field {key} must be a string")
@@ -233,6 +241,9 @@ class Profile:
         engine = value.get("engine")
         if engine is not None and not isinstance(engine, str):
             raise ValueError("profile field engine must be a string or null")
+        tags_raw = value.get("tags", [])
+        if not isinstance(tags_raw, list) or any(not isinstance(t, str) for t in tags_raw):
+            raise ValueError("profile field tags must be a list of strings")
         launch_config = None
         if "launch_config" in value and value["launch_config"] is not None:
             launch_config = LaunchConfig.from_dict(value["launch_config"])
@@ -244,6 +255,7 @@ class Profile:
             last_launched_at=last_launched_at,
             engine=engine,
             launch_config=launch_config,
+            tags=list(tags_raw),
         )
 
 
@@ -265,12 +277,16 @@ class MetadataDocument:
         if set(value) != {"schema_version", "profiles"}:
             raise ValueError("metadata fields must be exactly schema_version and profiles")
         schema_version = value.get("schema_version")
-        if type(schema_version) is not int or schema_version not in _SUPPORTED_METADATA_SCHEMA_VERSIONS:
+        if type(schema_version) is not int or schema_version not in SUPPORTED_METADATA_SCHEMA_VERSIONS:
             raise ValueError(f"unsupported metadata schema version: {schema_version}")
         if "profiles" not in value:
             raise ValueError("metadata is missing required field: profiles")
         profiles_list = value["profiles"]
         if not isinstance(profiles_list, list):
             raise ValueError("profiles must be a list")
+        if schema_version == METADATA_SCHEMA_VERSION and any(
+            not isinstance(item, dict) or "tags" not in item for item in profiles_list
+        ):
+            raise ValueError("profile metadata is missing a required field: tags")
         profiles = [Profile.from_dict(item) for item in profiles_list]
         return cls(schema_version=int(schema_version), profiles=profiles)

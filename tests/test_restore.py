@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from profiledock.backup import create_backup_archive
 from profiledock.cli import EXIT_SUCCESS, app
 from profiledock.data_root import DataPaths
-from profiledock.models import LaunchConfig, MetadataDocument, Profile
+from profiledock.models import METADATA_SCHEMA_VERSION, LaunchConfig, MetadataDocument, Profile
 from profiledock.restore import (
     DecompressionSecurityError,
     InvalidArchiveError,
@@ -254,7 +254,7 @@ def test_restore_conflict_handling_and_force(tmp_path):
 
     dst_p = Profile("p1", "DifferentName", "2026-01-01T00:00:00+00:00", str(dst_p1_data), engine="playwright")
     save_metadata(
-        MetadataDocument(schema_version=1, profiles=[dst_p]), dst_paths.profiles_file, dst_paths.profiles_dir
+        MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[dst_p]), dst_paths.profiles_file, dst_paths.profiles_dir
     )
 
     with pytest.raises(RestoreConflictError, match="conflict: profile ID 'p1' already exists"):
@@ -350,7 +350,7 @@ def test_force_restore_refuses_running_profile(tmp_path):
     destination_data.mkdir(parents=True)
     save_metadata(
         MetadataDocument(
-            schema_version=1,
+            schema_version=METADATA_SCHEMA_VERSION,
             profiles=[Profile("p1", "Work", profile.created_at, str(destination_data))],
         ),
         destination.profiles_file,
@@ -422,7 +422,7 @@ def test_restore_quarantine_failure_rolls_back_existing_profiles(tmp_path):
             )
         )
     save_metadata(
-        MetadataDocument(schema_version=1, profiles=existing_profiles),
+        MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=existing_profiles),
         dst_paths.profiles_file,
         dst_paths.profiles_dir,
     )

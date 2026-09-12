@@ -17,7 +17,7 @@ from profiledock.backup import (
 )
 from profiledock.cli import EXIT_SUCCESS, app
 from profiledock.data_root import DataPaths
-from profiledock.models import MetadataDocument, Profile
+from profiledock.models import METADATA_SCHEMA_VERSION, MetadataDocument, Profile
 from profiledock.storage import save_metadata
 
 runner = CliRunner()
@@ -43,7 +43,7 @@ def test_backup_single_profile_direct_engine(tmp_path):
         data_dir=str(p_data),
         engine="direct",
     )
-    doc = MetadataDocument(schema_version=1, profiles=[profile])
+    doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[profile])
     save_metadata(doc, paths.profiles_file, paths.profiles_dir)
 
     out_archive = tmp_path / "backups" / "work_backup.tar.gz"
@@ -77,7 +77,7 @@ def test_backup_all_profiles_mixed_engines(tmp_path):
     p1 = Profile("p1", "DirectP", "2026-01-01T00:00:00+00:00", str(p1_data), engine="direct")
     p2 = Profile("p2", "PlaywrightP", "2026-01-02T00:00:00+00:00", str(p2_data), engine="playwright")
 
-    doc = MetadataDocument(schema_version=1, profiles=[p1, p2])
+    doc = MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[p1, p2])
     save_metadata(doc, paths.profiles_file, paths.profiles_dir)
 
     out_archive = tmp_path / "all_profiles.tar.gz"
