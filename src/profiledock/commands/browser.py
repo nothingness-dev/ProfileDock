@@ -442,8 +442,16 @@ def launch_command(
             fail("cannot specify both --tag and --all")
         manager = _get_manager()
         try:
-            profiles = manager.list_by_tag(tag) if tag is not None else manager.list_profiles()
-        except (StorageError, ProfileNotFoundError, AmbiguousProfileError, ValidationError, ValueError) as exc:
+            profiles = (
+                manager.list_by_tag(tag) if tag is not None else manager.list_profiles()
+            )
+        except (
+            StorageError,
+            ProfileNotFoundError,
+            AmbiguousProfileError,
+            ValidationError,
+            ValueError,
+        ) as exc:
             fail_exception(exc)
         if not profiles:
             scope = f"tag '{tag}'" if tag is not None else "any profile"
