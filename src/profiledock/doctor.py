@@ -347,7 +347,7 @@ def check_playwright_package() -> DiagnosticCheck:
             id=check_id,
             status=STATUS_FAILED,
             summary="Playwright package is not installed.",
-            action="Install playwright with 'pip install -r requirements.txt'.",
+            action="Install playwright with 'pip install -e \".[playwright]\"'.",
         )
 
 

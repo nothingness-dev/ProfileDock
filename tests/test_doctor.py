@@ -716,6 +716,14 @@ def test_doctor_without_playwright_reports_warning(tmp_path):
         assert chk.status in (STATUS_WARNING, STATUS_FAILED)
 
 
+def test_doctor_playwright_hint_points_at_playwright_extra():
+    with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
+        chk = check_playwright_package()
+        assert chk.action is not None
+        assert ".[playwright]" in chk.action
+        assert "requirements.txt" not in chk.action
+
+
 def test_check_disk_space_reports_low_space(tmp_path):
 
     from profiledock.doctor import check_disk_space

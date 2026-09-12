@@ -14,6 +14,14 @@ def test_runtime_requirements_install_only_base_project():
     assert lines == ["-e ."]
 
 
+def test_dev_lock_comments_explain_layering_and_psutil_omission():
+    content = (ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
+    header = content.splitlines()[0]
+    assert "requirements.txt" in content
+    assert "psutil" in content
+    assert "Base" in header
+
+
 def test_setup_script_exposes_documented_non_interactive_options():
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "setup_project.py"), "--help"],

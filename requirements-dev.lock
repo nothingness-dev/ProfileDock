@@ -1,4 +1,11 @@
-# Reproducible development lockfile for ProfileDock (Base + Test + Playwright + Interactive)
+# Reproducible development lockfile for ProfileDock (Base + Test + Playwright + Interactive).
+# Install order: requirements.txt first (-e ., the package itself), then this file.
+# This file pins tooling and extras only, never the package itself.
+# psutil (metrics extra) is intentionally unpinned: optional acceleration with a
+# platform-native fallback (see pyproject [project.optional-dependencies] metrics).
+# tzdata is Windows-only (pyproject base marker platform_system == 'Windows');
+# pin tested on Windows here: tzdata==2026.3 \
+#     --hash=sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931
 annotated-doc==0.0.5
 ast-serialize==0.8.0
 colorama==0.4.6
