@@ -140,12 +140,7 @@ def test_execute_ipc_command_eval_and_cookies():
 
 
 def test_execute_ipc_command_cookies_empty_url_list_exports_nothing():
-    """Regression: an explicit empty URL filter widened to 'export everything'.
 
-    urls=[] is falsy in Python, so `context.cookies(urls) if urls else
-    context.cookies()` silently returned the whole cookie jar for an explicit
-    empty filter — a credential-safety bug for scripted callers.
-    """
     mock_context = MagicMock()
     mock_context.pages = [MagicMock()]
     mock_context.cookies.return_value = [{"name": "all", "value": "leak"}]
@@ -212,14 +207,7 @@ def test_cookies_json_file_output_preserves_json_stdout(tmp_path: Path):
 
 
 def test_cookies_url_filter_rejects_bare_domain(tmp_path: Path):
-    """Cookie --url filters require full URLs, verified against live Chromium.
 
-    Playwright's context.cookies(urls) forwards filters to CDP, and CDP
-    rejects bare domains with 'Invalid URL' (confirmed on a real browser —
-    see the audit for this fix). Client-side validation must keep rejecting
-    them so the user gets a clear error instead of a cryptic controller
-    failure. Use --domain for domain-scoped filtering.
-    """
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     runner = CliRunner()
     with (
@@ -232,7 +220,7 @@ def test_cookies_url_filter_rejects_bare_domain(tmp_path: Path):
     assert result.exit_code == 1
     assert "invalid URL scheme" in result.output
 
-    # Full URL passes and reaches the controller.
+
     with (
         patch("profiledock.cli.manager") as selected_manager,
         patch(
@@ -249,12 +237,7 @@ def test_cookies_url_filter_rejects_bare_domain(tmp_path: Path):
 
 
 def test_cookies_session_only_filter_excludes_persistent_cookies(tmp_path: Path):
-    """Session cookies (no expiry) can be excluded with --session-only.
 
-    Long-lived tracking cookies persist on disk; a user hardening an export
-    wants current-session credentials only. --session-only must drop every
-    cookie whose expires is -1 (Playwright's marker for session cookies).
-    """
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     cookies = [
         {"name": "session", "value": "a", "expires": -1, "domain": "example.com"},
@@ -276,12 +259,7 @@ def test_cookies_session_only_filter_excludes_persistent_cookies(tmp_path: Path)
 
 
 def test_cookies_domain_filter_matches_suffix(tmp_path: Path):
-    """--domain filters by domain suffix, matching cookie-domain semantics.
 
-    A cookie set for '.example.com' must match --domain example.com, and
-    subdomains must match their parent: the filter mirrors how cookie domains
-    actually scope, not exact-string equality.
-    """
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     cookies = [
         {"name": "a", "value": "1", "domain": ".example.com"},
@@ -303,9 +281,9 @@ def test_cookies_domain_filter_matches_suffix(tmp_path: Path):
     assert sorted(names) == ["a", "b"]
 
 
-# ---------------------------------------------------------------------------
-# cookies import (--load), Netscape format, and redaction
-# ---------------------------------------------------------------------------
+
+
+
 
 NETSCAPE_SAMPLE = (
     "# Netscape HTTP Cookie File\n"
@@ -344,7 +322,7 @@ def test_netscape_preserves_cookie_scope_http_only_and_empty_values():
 
 
 def test_cookies_load_json_round_trip(tmp_path: Path):
-    """Importing a previously exported JSON file restores the cookie jar."""
+
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     jar = [{"name": "sid", "value": "v", "domain": "example.com", "path": "/", "expires": -1}]
     load_file = tmp_path / "jar.json"
@@ -368,12 +346,7 @@ def test_cookies_load_json_round_trip(tmp_path: Path):
 
 
 def test_cookies_load_netscape(tmp_path: Path):
-    """--load auto-detects Netscape cookies.txt and converts to Playwright shape.
 
-    Interop with the wider ecosystem (yt-dlp, curl, scripting) requires the
-    classic tab-separated format; expires 0 means a session cookie and must
-    map to expires -1.
-    """
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     load_file = tmp_path / "cookies.txt"
     load_file.write_text(NETSCAPE_SAMPLE, encoding="utf-8")
@@ -413,12 +386,7 @@ def test_cookies_load_netscape(tmp_path: Path):
 
 
 def test_cookies_load_rejects_malformed_entries(tmp_path: Path):
-    """A malformed cookie entry fails the import with a clear message.
 
-    Half-imported authentication state is worse than none: one bad line in a
-    Netscape file (wrong column count) or a JSON entry missing name/value
-    must abort the whole import before anything reaches the browser.
-    """
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     bad = tmp_path / "bad.txt"
     bad.write_text(
@@ -472,12 +440,7 @@ def test_cookies_invalid_format_fails_before_browser_start():
 
 
 def test_cookies_redact_values_masks_secrets(tmp_path: Path):
-    """--redact-values exports metadata without the secret values.
 
-    Exporting to stdout dumps raw authentication material into scrollback;
-    a redacted preview lets users audit names/domains/expiry before deciding
-    to save the real values. Empty strings cannot restore the original secrets.
-    """
     profile = Profile("abc123", "Work", "2026-01-01T00:00:00+00:00", str(tmp_path / "data"))
     cookies = [
         {"name": "sid", "value": "super-secret", "domain": "example.com", "expires": -1},
@@ -523,7 +486,7 @@ def test_execute_ipc_command_screenshot(tmp_path: Path):
     assert resp["url"] == "https://example.com"
     assert resp["title"] == "Example"
     assert should_exit is False
-    # full_page passed through to playwright
+
     assert mock_page.screenshot.call_args.kwargs["full_page"] is True
     assert out_file.read_bytes() == b"\x89PNG fake bytes"
 

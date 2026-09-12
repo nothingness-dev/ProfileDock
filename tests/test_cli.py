@@ -1068,7 +1068,7 @@ def test_pdf_command_rejects_non_pdf_output(tmp_path):
 
 
 def test_shot_unknown_profile_fails_cleanly_with_log(tmp_path):
-    """resolve() failures must produce a categorized error AND a log entry."""
+
     from profiledock.cli import EXIT_USER_ERROR
 
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "Known"])
@@ -1108,13 +1108,13 @@ def test_shot_default_filename_uses_profile_name(tmp_path, monkeypatch):
 
 
 def test_launch_proxy_flag_overrides_and_validates(tmp_path, monkeypatch):
-    """--proxy wins over the preset; bad proxies fail before any spawn."""
+
     from profiledock.data_root import resolve_data_root
     from profiledock.profile_manager import ProfileManager
 
     paths = resolve_data_root(Path(tmp_path), prepare=True)
-    # Playwright engine so the (patched) controller path is exercised; the
-    # direct default would otherwise spawn a real Chrome in tests.
+
+
     ProfileManager(paths).create("ProxyP", engine="playwright")
     ProfileManager(paths).update_launch_config("ProxyP", proxy="http://preset:1")
 
@@ -1181,7 +1181,7 @@ def test_launch_direct_rejects_credentialed_proxy(tmp_path):
 
 
 def test_config_set_proxy_round_trip_redacted(tmp_path):
-    """Storing a credentialed proxy works; show --json never leaks the password."""
+
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "SecProf"])
     res = runner.invoke(
         app,
@@ -1196,7 +1196,7 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
         ],
     )
     assert res.exit_code == EXIT_SUCCESS, res.output
-    assert "hunter2" not in res.output  # even the set command redacts
+    assert "hunter2" not in res.output
 
     shown = runner.invoke(app, ["--data-root", str(tmp_path), "config", "show", "SecProf", "--json"])
     assert shown.exit_code == EXIT_SUCCESS
@@ -1204,7 +1204,7 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
     assert payload["data"]["proxy"] == "http://user:***@127.0.0.1:8080"
     assert "hunter2" not in shown.output
 
-    # And the on-disk value keeps credentials for actual use.
+
     from profiledock.data_root import resolve_data_root
     from profiledock.profile_manager import ProfileManager
 

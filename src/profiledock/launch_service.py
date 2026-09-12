@@ -1,13 +1,4 @@
-"""Launch-plan resolution shared by the CLI and the TUI.
 
-Both surfaces must apply identical precedence (CLI flags > launch preset >
-profile engine > environment > default) and identical validation for tabs,
-start URLs, browser selection, and the data directory. This module holds that
-logic once, free of typer and Textual dependencies, and raises
-:class:`LaunchPlanError` so each surface can render the failure in its own
-style. Launcher invocation itself stays with the caller, preserving the
-``profiledock.cli.*`` monkeypatch surface used by the test suite.
-"""
 
 from __future__ import annotations
 
@@ -28,14 +19,14 @@ from .validation import (
 
 
 class LaunchPlanError(ValueError):
-    """Invalid launch parameters; carries a CLI error category."""
+
 
     category = "invalid_input"
 
 
 @dataclass(frozen=True)
 class LaunchPlan:
-    """A fully resolved, validated set of launch parameters."""
+
 
     engine: str
     tabs: int
@@ -50,7 +41,7 @@ class LaunchPlan:
 
 
 def resolve_launch_engine(engine: str | None, profile: Any) -> str:
-    """Resolve the effective engine, raising :class:`LaunchPlanError` on bad input."""
+
     try:
         return resolve_engine_strict(engine, profile)
     except ValueError as exc:
@@ -58,7 +49,7 @@ def resolve_launch_engine(engine: str | None, profile: Any) -> str:
 
 
 def resolve_launch_tabs(profile: Any, tabs: int | None) -> int | None:
-    """Fall back to the preset ``default-tabs``; ``None`` when still unresolved."""
+
     if tabs is not None:
         return tabs
     cfg = getattr(profile, "launch_config", None)
@@ -70,7 +61,7 @@ def resolve_launch_tabs(profile: Any, tabs: int | None) -> int | None:
 
 
 def _resolve_identity_field(flag_value: str | None, preset_value: str | None) -> str | None:
-    """One-launch flag wins; otherwise the stored preset applies."""
+
     if flag_value is not None and flag_value.strip():
         return flag_value.strip()
     return preset_value
@@ -88,13 +79,7 @@ def build_launch_plan(
     locale: str | None = None,
     timezone: str | None = None,
 ) -> LaunchPlan:
-    """Validate and resolve every launch parameter; raise before any side effect.
 
-    ``tabs`` must be resolved by the caller first (the CLI prompts; the TUI
-    defaults to 1) — pass :func:`resolve_launch_tabs` output or a concrete
-    value. Identity options follow flag-over-preset precedence; the stored
-    proxy keeps its credentials (redaction is a display concern only).
-    """
     cfg = getattr(profile, "launch_config", None)
     active_engine = resolve_launch_engine(engine, profile)
 
@@ -152,7 +137,7 @@ def build_launch_plan(
 
 
 def direct_launch_options(plan: LaunchPlan, extra_args: list[str] | None = None) -> dict[str, Any]:
-    """Assemble keyword options for :func:`start_direct_chrome` from a plan."""
+
     options: dict[str, Any] = {}
     identity_args: list[str] = []
     if plan.browser is not None:
@@ -186,7 +171,7 @@ def direct_launch_options(plan: LaunchPlan, extra_args: list[str] | None = None)
 
 
 def controller_launch_options(plan: LaunchPlan) -> dict[str, Any]:
-    """Assemble keyword options for :func:`start_controller` from a plan."""
+
     options: dict[str, Any] = {}
     if plan.browser is not None:
         options["browser_channel"] = plan.browser

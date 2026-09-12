@@ -1,4 +1,4 @@
-"""Global status bars: the header telemetry line and the footer command bar."""
+
 
 from __future__ import annotations
 
@@ -19,12 +19,12 @@ def _token(name: str, app_theme: str) -> str:
 
 
 def _contrast(app_theme: str) -> str:
-    """Readable text color for solid badges on the given theme."""
+
     return "black" if theme.is_dark(app_theme) else "white"
 
 
 class HeaderBar(Static):
-    """Single-row global header: workspace badge, title, live telemetry."""
+
 
     DEFAULT_CSS = """
     HeaderBar {
@@ -72,7 +72,7 @@ class HeaderBar(Static):
 
 
 class FooterBar(Widget):
-    """Two-row footer: breadcrumb/status line plus keyboard hint chips."""
+
 
     DEFAULT_CSS = """
     FooterBar {

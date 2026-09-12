@@ -1,23 +1,4 @@
-"""Low-level cross-platform process resource sampling.
 
-Discover Chromium process trees and sample per-process CPU/memory counters:
-
-- Linux:  ``/proc/[pid]/stat``, ``/proc/[pid]/statm``, ``/proc/[pid]/cmdline``.
-- Windows: tool-help snapshot enumeration plus ``GetProcessTimes`` and
-  ``GetProcessMemoryInfo`` per sampled PID.
-- macOS:  BSD ``ps`` batch queries (cumulative CPU ``TIME``, RSS/VSZ, ``etime``).
-- Any platform with the optional ``psutil`` package installed uses it instead.
-
-Design notes:
-
-- Enumeration (cheap: PID, PPID, name) is separated from detail sampling
-  (expensive: CPU/memory counters) so a full system scan never opens a handle
-  to every process; details are fetched only for tree members.
-- Identity validation compares process creation times with a tolerance before
-  a PID is trusted, guarding against PID recycling and phantom processes.
-- All sampling is best-effort: dead or unreadable processes are skipped, and
-  callers decide how to surface partial data (degraded telemetry).
-"""
 
 from __future__ import annotations
 
@@ -37,7 +18,7 @@ _PS_EXECUTABLE = "/bin/ps"
 
 @dataclass(frozen=True)
 class ProcessIdentity:
-    """Cheap per-process enumeration record: who the process is, not what it uses."""
+
 
     pid: int
     ppid: int
@@ -47,7 +28,7 @@ class ProcessIdentity:
 
 @dataclass(frozen=True)
 class ProcessSample:
-    """Full resource sample for one process."""
+
 
     identity: ProcessIdentity
     cpu_time: float = 0.0
@@ -79,7 +60,7 @@ def make_sample(
     create_time: float | None = None,
     cmdline: tuple[str, ...] = (),
 ) -> ProcessSample:
-    """Build a :class:`ProcessSample` directly; primarily for tests."""
+
     return ProcessSample(
         identity=ProcessIdentity(pid=pid, ppid=ppid, name=name, create_time=create_time),
         cpu_time=cpu_time,
@@ -91,7 +72,7 @@ def make_sample(
 
 
 class PlatformSampler:
-    """Two-phase sampling interface: cheap enumeration, then batched details."""
+
 
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -101,7 +82,7 @@ class PlatformSampler:
 
 
 class PsutilSampler(PlatformSampler):
-    """Sampler backed by the optional ``psutil`` package (any platform)."""
+
 
     def __init__(self) -> None:
         import psutil
@@ -147,7 +128,7 @@ class PsutilSampler(PlatformSampler):
 
 
 class LinuxSampler(PlatformSampler):
-    """Procfs-based sampler."""
+
 
     def __init__(self) -> None:
         self._proc = Path("/proc")
@@ -238,7 +219,7 @@ class LinuxSampler(PlatformSampler):
 
 
 class WindowsSampler(PlatformSampler):
-    """Tool-help enumeration plus per-PID Win32 counter queries."""
+
 
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -374,7 +355,7 @@ class WindowsSampler(PlatformSampler):
 
     @staticmethod
     def _filetime_duration_seconds(filetime: object) -> float:
-        """Convert a FILETIME *duration* (kernel/user CPU time) to seconds."""
+
         low: int = filetime.dwLowDateTime  # type: ignore[attr-defined]
         high: int = filetime.dwHighDateTime  # type: ignore[attr-defined]
         ticks = (high << 32) + low
@@ -382,7 +363,7 @@ class WindowsSampler(PlatformSampler):
 
 
 class MacOSSampler(PlatformSampler):
-    """BSD ``ps`` batch-query sampler (best-effort, stdlib only)."""
+
 
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:
         try:
@@ -442,7 +423,7 @@ class MacOSSampler(PlatformSampler):
 
     @staticmethod
     def _parse_ps_time(value: str) -> float:
-        """Parse ``ps`` durations like ``MM:SS``, ``HH:MM:SS``, or ``DD-HH:MM:SS``."""
+
         days_part, separator, rest = value.partition("-")
         try:
             days = float(days_part) if separator else 0.0
@@ -456,7 +437,7 @@ class MacOSSampler(PlatformSampler):
 
 
 class _FallbackSampler(PlatformSampler):
-    """Empty sampler for unsupported platforms."""
+
 
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:
         return {}
@@ -478,7 +459,7 @@ def _psutil_available() -> bool:
 
 
 def _get_sampler() -> PlatformSampler:
-    """Return the platform sampler; ``psutil`` is preferred when installed."""
+
     global _sampler_instance
     if _sampler_instance is not None:
         return _sampler_instance
@@ -496,7 +477,7 @@ def _get_sampler() -> PlatformSampler:
 
 
 def reset_sampler_cache() -> None:
-    """Forget the cached platform sampler (used after psutil installs, and by tests)."""
+
     global _sampler_instance
     _sampler_instance = None
 
@@ -506,12 +487,7 @@ def sample_process_tree(
     expected_create_time: float | None = None,
     sampler: PlatformSampler | None = None,
 ) -> list[ProcessSample]:
-    """Sample all processes belonging to ``root_pid``'s descendant tree.
 
-    The root PID is validated against ``expected_create_time`` (when both
-    timestamps are available) before it is trusted; a recycled PID yields an
-    empty tree. Children that exit or deny access mid-scan are skipped.
-    """
     sampler = sampler or _get_sampler()
     identities = sampler.enumerate_processes()
     root = identities.get(root_pid)
@@ -555,11 +531,7 @@ def cpu_percent_between(
     current: list[ProcessSample],
     wall_seconds: float,
 ) -> float:
-    """Aggregate tree CPU usage as a percentage over the wall-clock interval.
 
-    Processes present in both samples contribute their CPU-time delta; processes
-    that appeared or vanished mid-interval contribute nothing (conservative).
-    """
     if wall_seconds <= 0:
         return 0.0
     delta = sum(
@@ -575,7 +547,7 @@ def classify_role(
     browser_pid: int | None = None,
     controller_pid: int | None = None,
 ) -> str:
-    """Map a sample to a Chromium role: browser, renderer, gpu, utility, controller."""
+
     if controller_pid is not None and sample.pid == controller_pid:
         return "controller"
     if browser_pid is not None and sample.pid == browser_pid:

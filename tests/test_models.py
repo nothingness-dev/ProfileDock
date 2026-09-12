@@ -112,7 +112,7 @@ def test_launch_config_v1_document_migrates_with_identity_defaults():
     assert migrated["schema_version"] == 2
     for field in ("proxy", "user_agent", "locale", "timezone"):
         assert migrated[field] is None
-    # Migrating twice is a no-op.
+
     assert migrate_launch_config(migrated) == migrated
 
 

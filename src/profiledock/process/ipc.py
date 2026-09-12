@@ -1,9 +1,4 @@
-"""Controller client communication.
 
-The controller subprocess listens on a loopback socket; commands are
-authenticated with the per-launch token stored in the running-state file and
-responses are size-capped JSON lines.
-"""
 
 import json
 import socket

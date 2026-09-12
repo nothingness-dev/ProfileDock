@@ -36,30 +36,12 @@ def validate_url(url: str) -> None:
 
 
 def validate_cookie_url_filter(url: str) -> None:
-    """Validate a cookie --url filter.
 
-    Playwright's context.cookies(urls) passes filters to CDP, which requires
-    full URLs — a bare domain ('example.com') raises 'Invalid URL' there
-    (verified against a live Chromium). Keep validate_url's scheme requirement
-    so a bad filter fails with a clear message instead of a cryptic
-    controller error.
-    """
     validate_url(url)
 
 
 def validate_proxy(proxy: str | None) -> None:
-    """Validate a proxy URL: scheme://[user:pass@]host[:port].
 
-    Deliberately strict: a bare ``host:port`` (no scheme) is rejected because
-    the engines disagree on how to interpret it, and ``socks4`` is rejected
-    because neither Playwright nor Chromium flags document reliable support.
-    Credentials in http/https URLs are allowed in the stored value but must be
-    redacted before display (see cli_support.redact_proxy). Credentials in
-    socks5:// URLs are rejected: Chromium's --proxy-server flag cannot
-    authenticate SOCKS5 (RFC 1929), so they are silently dropped and the
-    session egresses unauthenticated — failing validation beats an identity
-    preset that leaks.
-    """
     if proxy is None:
         return
     if not isinstance(proxy, str) or not proxy.strip():

@@ -1,11 +1,4 @@
-"""Interactive form controls replacing raw text prompts.
 
-Each :class:`ActionSpec` renders into a :class:`FormPanel`: labeled rows with
-``[ARG]``/``[OPT]``/``[SEL]``/``[PICK]``/``[FLG]`` badges, radio choice lists
-for engines and detected browsers, a fuzzy profile picker with live status
-badges, a checkbox-style Chromium flag configurator, and live validation with
-an assembled CLI preview line.
-"""
 
 from __future__ import annotations
 
@@ -73,14 +66,14 @@ def _profile_prompt(row: ProfileRow, width: int, selected: bool) -> str:
 
 
 class FormInput(Input):
-    """Input that never triggers ancestor scrolling on focus."""
+
 
     def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
         return
 
 
 class ChoiceList(VimOptionList):
-    """Single-select radio list used for engines and browsers."""
+
 
     DEFAULT_CSS = """
     ChoiceList {
@@ -153,7 +146,7 @@ class ChoiceList(VimOptionList):
 
 
 class FlagsList(VimOptionList):
-    """Multi-select checkbox list for Chromium launch flags."""
+
 
     DEFAULT_CSS = """
     FlagsList {
@@ -211,7 +204,7 @@ class FlagsList(VimOptionList):
 
 
 class ProfilePicker(Vertical):
-    """Fuzzy-searchable profile selector with live status badges."""
+
 
     DEFAULT_CSS = """
     ProfilePicker {
@@ -330,7 +323,7 @@ class ProfilePicker(Vertical):
 
 
 class FieldRow(Horizontal):
-    """Label + control layout for one form field."""
+
 
     DEFAULT_CSS = """
     FieldRow {
@@ -362,7 +355,7 @@ class FieldRow(Horizontal):
 
 
 class FormPanel(VerticalScroll):
-    """Scrollable action fields with submit and cancel buttons docked below."""
+
 
     DEFAULT_CSS = """
     FormPanel {
@@ -524,11 +517,7 @@ class FormPanel(VerticalScroll):
 
     @staticmethod
     def _focus_target(widget: Widget) -> Widget | None:
-        """Resolve a field to the widget that can actually take focus.
 
-        Composite fields (ProfilePicker) are containers; calling .focus() on
-        them silently no-ops, which left picker-first forms without any focus.
-        """
         if widget.focusable:
             return widget
         for descendant in widget.walk_children():
@@ -537,12 +526,7 @@ class FormPanel(VerticalScroll):
         return None
 
     def focus_first(self) -> None:
-        """Focus the first field, retrying briefly.
 
-        ``set_context`` runs while the pane is still being shown; an immediate
-        focus() can silently no-op because the widget is not yet visible, and
-        the form then renders with no focus at all — every key dead.
-        """
         if not self._order:
             return
 
@@ -560,7 +544,7 @@ class FormPanel(VerticalScroll):
         try_focus(0)
 
     def _focused_field_index(self) -> int | None:
-        """Index of the field owning focus; a focused descendant counts as its owner."""
+
         focused = self.app.focused
         if focused is None:
             return None
@@ -785,7 +769,7 @@ class FormPanel(VerticalScroll):
         return Label(f"unsupported field: {spec.name}")
 
     def _simple_row(self, spec: FieldSpec, *controls: Widget, labeled: bool = True) -> Widget:
-        """Assemble one labeled form row; optional muted hint trails the controls."""
+
         widgets: list[Widget] = [self._field_label(spec)] if labeled else []
         widgets.extend(controls)
         self._order.extend(controls)
@@ -801,7 +785,7 @@ class FormPanel(VerticalScroll):
         secondary: Widget,
         focus_custom_on: bool = False,
     ) -> Widget:
-        """Labeled row whose controls (plus optional hint) sit in one vertical stack."""
+
         self._order.append(primary)
         if not focus_custom_on:
             self._order.append(secondary)

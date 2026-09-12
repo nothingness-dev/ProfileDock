@@ -184,13 +184,7 @@ def test_reap_failure_preserves_runtime_record(tmp_path):
 
 
 def test_close_protocol_survives_non_ascii_command_without_crashing():
-    """Regression: non-ASCII input raised TypeError out of hmac.compare_digest.
 
-    Any local unauthenticated process could send one malformed line (e.g.
-    b"\\x80\\n") and the uncaught TypeError would escape _wait_for_close,
-    crash the controller, and close the user's browser. Non-ASCII commands
-    must be answered with an error response instead.
-    """
     non_ascii = Connection(b"\x80\n")
     correct = Connection(b"close:secret\n")
     context = type("Context", (), {"pages": [object()]})()
@@ -200,11 +194,7 @@ def test_close_protocol_survives_non_ascii_command_without_crashing():
 
 
 def test_controller_listener_uses_exclusive_bind_on_windows(tmp_path):
-    """Regression: SO_REUSEADDR on Windows allows a second local user to
-    double-bind the controller's loopback port and capture probe/close
-    traffic carrying the IPC token. Windows must set SO_EXCLUSIVEADDRUSE;
-    POSIX keeps no reuse option (the port is ephemeral).
-    """
+
     from profiledock.process import controller as controller_module
 
     captured: dict = {}
@@ -683,7 +673,7 @@ def test_direct_launch_state_failure_stops_browser(tmp_path):
 
 
 def test_direct_launch_survives_unavailable_process_identity(tmp_path):
-    """Platforms without create-time support (macOS) must still launch and close."""
+
     from profiledock.process_manager import get_status, start_direct_chrome
 
     data_dir = tmp_path / "profile-unverified" / "browser-data"
@@ -818,15 +808,7 @@ def test_start_direct_chrome_operates_without_playwright(tmp_path):
 
 
 def test_controller_spawn_detaches_into_its_own_process_group(tmp_path):
-    """Regression: the controller inherited the launcher's process group.
 
-    A controller sharing the launcher's group dies together with it (terminal
-    SIGHUP / CTRL_CLOSE_EVENT) with no chance to run its finally-block, leaving
-    the whole Chromium tree orphaned. It must be spawned detached into a fresh
-    session (POSIX) / detached process group (Windows), mirroring the direct
-    engine, so teardown signals reach the group and terminal death does not
-    propagate.
-    """
     import subprocess
 
     from profiledock.process_manager import BrowserLaunchError, start_controller
@@ -870,13 +852,7 @@ def test_controller_spawn_detaches_into_its_own_process_group(tmp_path):
 
 
 def test_start_controller_drains_stderr_during_startup_poll():
-    """Regression: the controller's stderr=PIPE was never drained during the
-    startup poll. A chatty Playwright driver (GPU/fontconfig error loops,
-    DEBUG=pw:api) fills the OS pipe buffer (~4KB on Windows), the controller
-    blocks on its next stderr write, never publishes ready state, and the
-    launcher reports a misleading controller_timeout. The poll loop must
-    drain stderr while waiting.
-    """
+
     import subprocess as subprocess_module
 
     from profiledock.process_manager import BrowserLaunchError, start_controller
@@ -911,12 +887,7 @@ def test_start_controller_drains_stderr_during_startup_poll():
 
 
 def test_automation_autostart_forwards_identity():
-    """Regression: send_controller_command's auto-start spawned a bare
-    headless Chromium with no proxy, user-agent, locale or timezone. A
-    profile configured with a socks5 proxy silently egressed via the real
-    IP -- a privacy/identity violation. Auto-start must apply the same
-    identity options a manual launch would.
-    """
+
     data_dir = Path(tempfile.mkdtemp(prefix="pd-autostart-")) / "browser-data"
     data_dir.mkdir()
 
@@ -985,11 +956,7 @@ def data_dir_justify(data_dir):
 
 
 def test_mutation_check_treats_live_browser_as_active_even_without_controller():
-    """Regression: is_active_for_mutation read a controller-dead /
-    browser-alive profile as inactive, so a delete or backup could race a
-    live Chromium still writing to the browser-data directory. A recorded
-    browser whose identity matches is activity, full stop.
-    """
+
     data_dir = Path(tempfile.mkdtemp(prefix="pd-mutation-")) / "browser-data"
     data_dir.mkdir()
     path = state_path(str(data_dir))
@@ -1019,13 +986,7 @@ def test_mutation_check_treats_live_browser_as_active_even_without_controller():
 
 
 def test_stale_starting_state_ignores_reused_launcher_pid():
-    """Regression: stale 'starting' states (controller_pid=0) were kept alive
-    by a bare _alive(launcher_pid) check with no recorded create-time. When
-    Windows reused the launcher PID for an unrelated long-lived process,
-    every launch failed with 'profile is already running' until that
-    unrelated process exited. The launcher's create-time is now recorded and
-    verified, exactly like the browser's.
-    """
+
     data_dir = Path(tempfile.mkdtemp(prefix="pd-launcherpid-")) / "browser-data"
     data_dir.mkdir()
     path = state_path(str(data_dir))
@@ -1060,12 +1021,7 @@ def test_stale_starting_state_ignores_reused_launcher_pid():
 
 
 def test_clean_stale_terminates_recorded_browser_before_unlinking():
-    """Regression: get_status's clean_stale paths unlinked running.json
-    without terminating a recorded live browser_pid. The relaunch path then
-    destroyed the browser identity record while Chromium kept running,
-    holding the Windows profile lock; the next launch failed with a cryptic
-    browser_unavailable and the orphan was unmanageable.
-    """
+
     data_dir = Path(tempfile.mkdtemp(prefix="pd-cleanstale-")) / "browser-data"
     data_dir.mkdir()
     path = state_path(str(data_dir))
@@ -1103,12 +1059,7 @@ def test_clean_stale_terminates_recorded_browser_before_unlinking():
 
 
 def test_controller_rejects_redundant_launch_arguments():
-    """Regression: --browser-channel/--window-size/--url were parsed by main()
-    but start_controller never sent them -- channel/window/urls travel via the
-    running.json state file. Two parallel transport contracts meant a caller
-    wiring only argv got silently ignored values. The dead surface is gone;
-    the state file is the sole channel for those parameters.
-    """
+
     from profiledock.process import controller as controller_module
 
     real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
@@ -1151,12 +1102,7 @@ def test_controller_rejects_redundant_launch_arguments():
 
 
 def test_controller_credentials_use_environment():
-    """Regression: token and --proxy traveled as command-line arguments.
 
-    argv is world-readable on Linux (/proc/<pid>/cmdline) and readable by
-    same-user processes on Windows (WMI). The IPC token and a proxy URL with
-    embedded credentials must travel via an environment variable instead.
-    """
     from profiledock.process_manager import BrowserLaunchError, start_controller
 
     data_dir = Path(tempfile.mkdtemp(prefix="pd-argv-")) / "browser-data"
@@ -1200,13 +1146,7 @@ def test_controller_credentials_use_environment():
 
 
 def test_launch_rejects_unsupported_url_schemes():
-    """Regression: start_urls bypassed the tool's URL allowlist.
 
-    Every IPC command validates URLs against http/https/about, but
-    validate_launch_request counted only len(urls) <= tabs, so the public
-    start_controller API could navigate file://, data:, or javascript:
-    URLs at startup -- schemes the tool deliberately forbids elsewhere.
-    """
     from profiledock.process.launch import validate_launch_request
 
     data_dir = Path(tempfile.mkdtemp(prefix="pd-url-scheme-"))
@@ -1223,13 +1163,7 @@ def test_launch_rejects_unsupported_url_schemes():
 
 
 def test_launch_rejects_root_parented_data():
-    """Regression: Path(data_dir).parent.name == '' for root-parented data dirs.
 
-    start_controller('C:/mydata') derived profile_id='' which _valid_state
-    always rejects, so the launcher never accepted the ready state: the poll
-    loop timed out and a healthy browser was force-killed. Such a data_dir
-    must be rejected up front with a clear error.
-    """
     from profiledock.process.launch import validate_launch_request
 
     probe = Path(Path(tempfile.gettempdir()).anchor) / "profiledock-drive-root-probe"
@@ -1239,13 +1173,7 @@ def test_launch_rejects_root_parented_data():
 
 
 def test_stop_process_kills_the_whole_process_group_posix():
-    """Regression: _stop_process degraded to single-PID kill on POSIX.
 
-    The controller now runs as its own process-group leader (see
-    test_controller_spawn_detaches_into_its_own_process_group), so a
-    group-kill must be issued; a lone SIGTERM to the controller PID would
-    orphan the node driver and Chromium children.
-    """
     from profiledock.process_manager import _stop_process
 
     process = type("Process", (), {"pid": 4242, "poll": lambda self: None})()

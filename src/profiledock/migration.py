@@ -29,11 +29,7 @@ from .validation import ValidationError, validate_metadata_document
 
 
 def _ignore_runtime_files(directory: str, names: list[str]) -> set[str]:
-    """copytree ignore callback sharing backup's runtime-exclusion rule.
 
-    Uses ``_is_runtime_or_log_file`` so migrated copies and backup archives
-    skip the same transient files instead of maintaining a second list.
-    """
     return {name for name in names if _is_runtime_or_log_file(str(Path(directory) / name))}
 
 

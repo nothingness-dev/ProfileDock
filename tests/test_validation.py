@@ -96,7 +96,7 @@ def test_validate_proxy_rejects_invalid_forms():
     from profiledock.validation import ValidationError, validate_proxy
 
     with pytest.raises(ValidationError, match="scheme"):
-        validate_proxy("127.0.0.1:8080")  # bare host:port
+        validate_proxy("127.0.0.1:8080")
     with pytest.raises(ValidationError, match="unsupported proxy scheme"):
         validate_proxy("socks4://127.0.0.1:1080")
     with pytest.raises(ValidationError, match="missing a host"):
@@ -145,9 +145,7 @@ def test_validate_identity_fields():
 
 
 def test_validate_proxy_rejects_socks5_credentials():
-    """Chromium's --proxy-server flag cannot authenticate SOCKS5; credentials
-    embedded in a socks5:// URL are silently dropped and the session egresses
-    unauthenticated. Fail at validation instead of at the exit node."""
+
     from profiledock.validation import ValidationError, validate_proxy
 
     with pytest.raises(ValidationError, match="socks5"):

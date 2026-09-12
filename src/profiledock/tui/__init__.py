@@ -1,11 +1,4 @@
-"""ProfileDock interactive TUI package.
 
-Heavy modules (app, theme, widgets) require the optional Textual extra and
-are imported lazily via module ``__getattr__`` so that importing this package
-never fails when the extra is absent. The pure-Python action registry in
-:mod:`profiledock.tui.actions` and the service layer in
-:mod:`profiledock.tui.backend` are always importable.
-"""
 
 from __future__ import annotations
 

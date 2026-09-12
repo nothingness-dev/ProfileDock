@@ -1,12 +1,4 @@
-"""Action registry and field specifications for the ProfileDock TUI.
 
-This module is intentionally Textual-free so the command model can be unit
-tested without the interactive extra. Every user-facing command is described
-by an :class:`ActionSpec`; every parameter that action can take is described
-by a :class:`FieldSpec`. The TUI renders forms directly from these specs, and
-the backend executes them from the collected values, so adding a command or
-parameter in one place updates the palette, deck, forms, and preview lines.
-"""
 
 from __future__ import annotations
 
@@ -22,7 +14,7 @@ def icons_enabled() -> bool:
 
 
 class FieldKind(str, Enum):
-    """Widget kind used to render a field inside the form panel."""
+
 
     TEXT = "text"
     NUMBER = "number"
@@ -37,22 +29,7 @@ class FieldKind(str, Enum):
 
 @dataclass(frozen=True)
 class FieldSpec:
-    """One parameter of an action, rendered as a labeled form control.
 
-    ``argv`` controls how the value appears on the equivalent CLI command
-    line shown in the form preview and output header:
-
-    - ``"positional"``  — appended as a bare positional argument
-    - ``"flag"``        — ``--name value``
-    - ``"repeat"``      — ``--name value`` repeated for each item (list values)
-    - ``"boolean"``     — ``--name`` only when truthy
-    - ``"none"``        — not part of the CLI surface (e.g. the profile picker
-      label vs the profile itself is handled by naming; use ``none`` only for
-      purely internal fields)
-
-    Positional order follows field declaration order among ``positional``
-    fields; ``repeat``/``flag``/``boolean`` fields follow them.
-    """
 
     name: str
     label: str
@@ -71,7 +48,7 @@ class FieldSpec:
 
 @dataclass(frozen=True)
 class ActionSpec:
-    """A command exposed by the command deck and palette."""
+
 
     id: str
     label: str
@@ -507,7 +484,7 @@ ACTIONS_BY_ID: dict[str, ActionSpec] = {action.id: action for action in ACTIONS}
 
 
 def grouped_actions() -> list[tuple[str, list[ActionSpec]]]:
-    """Return actions grouped by their section, preserving registry order."""
+
     ordered_groups = [Group.LIFECYCLE.value, Group.CONFIG.value, Group.DATA.value]
     return [
         (group_id, [action for action in ACTIONS if action.group == group_id]) for group_id in ordered_groups
@@ -515,11 +492,7 @@ def grouped_actions() -> list[tuple[str, list[ActionSpec]]]:
 
 
 def fuzzy_score(query: str, text: str) -> int | None:
-    """Subsequence fuzzy match score; ``None`` when *query* is not contained.
 
-    Scoring favors prefix matches and consecutive character runs so that
-    ``se`` ranks ``set-engine`` above ``restore``.
-    """
     if not query:
         return 0
     q = query.lower()
@@ -545,7 +518,7 @@ def fuzzy_score(query: str, text: str) -> int | None:
 
 
 def _argv_mode(spec: FieldSpec) -> str:
-    """Resolve the effective argv rendering for a field."""
+
     if spec.argv != "auto":
         return spec.argv
     if spec.kind in (FieldKind.TOGGLE,):
@@ -563,13 +536,7 @@ def _cli_flag(spec: FieldSpec) -> str:
 
 
 def build_argv(action: ActionSpec, values: dict[str, object]) -> list[str]:
-    """Assemble the equivalent CLI argv for the command preview line.
 
-    Rendering follows the frozen CLI contract: positional fields in
-    declaration order, then flag/repeat/boolean options. Sentinel values
-    (``__all__``) map to their CLI spellings, and list-valued repeat fields
-    emit one flag per item.
-    """
     argv: list[str] = [action.id]
     tail: list[str] = []
     for spec in action.fields:

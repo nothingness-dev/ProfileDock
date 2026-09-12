@@ -1,4 +1,4 @@
-"""Root CLI application and command registration for ProfileDock."""
+
 
 import os
 from pathlib import Path

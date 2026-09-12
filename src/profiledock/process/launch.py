@@ -1,9 +1,4 @@
-"""Shared pre-flight validation and runtime-directory preparation for engine launchers.
 
-Both engine launchers (``direct`` and ``playwright``) enforce identical request
-validation and runtime-directory hygiene before starting their respective
-process trees; this module is the single source of that behavior.
-"""
 
 import os
 from pathlib import Path
@@ -22,12 +17,7 @@ def validate_launch_request(
     executable_path: Path | None = None,
     browser: str | None = None,
 ) -> None:
-    """Validate arguments common to every engine launch; raise before any side effect.
 
-    ``executable_path``/``browser`` are the direct-engine channel arguments; the
-    mutual-exclusion check lives here (rather than the caller) so error
-    precedence stays identical to the original inline validation order.
-    """
     if tabs < 1:
         raise ValueError("tab count must be at least 1")
     if executable_path is not None and browser is not None:
@@ -53,7 +43,7 @@ def validate_launch_request(
 
 
 def prepare_runtime_dir(data_dir: str, runtime_dir: Path | None) -> None:
-    """Create the private runtime directory and clear stale error reports."""
+
     path = state_path(data_dir, runtime_dir)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name != "nt":

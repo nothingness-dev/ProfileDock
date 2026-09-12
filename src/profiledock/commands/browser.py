@@ -1,4 +1,4 @@
-"""Browser lifecycle and inspection commands: launch, close, status, set-engine."""
+
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any

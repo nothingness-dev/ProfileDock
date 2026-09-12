@@ -1,12 +1,4 @@
-"""Service layer between the ProfileDock TUI and the core managers.
 
-The TUI never shells out through the Typer application; it calls these
-functions on background workers so the interface stays responsive while
-backups, launches, or diagnostics run. Every operation returns an
-:class:`ActionResult` carrying the equivalent CLI argv, an exit code, and a
-pre-formatted Rich body, which keeps the output pane byte-for-byte faithful
-to what the same command would print in a plain terminal.
-"""
 
 from __future__ import annotations
 
@@ -65,7 +57,7 @@ _HINTS = {
 
 
 class BackendError(Exception):
-    """A failed operation with a CLI-equivalent category and hint."""
+
 
     def __init__(self, message: str, category: str | None = None) -> None:
         super().__init__(message)
@@ -77,7 +69,7 @@ class BackendError(Exception):
 
 @dataclass
 class ProfileRow:
-    """A profile plus its cached runtime facts for list rendering."""
+
 
     profile: Profile
     status: str = "stopped"
@@ -95,7 +87,7 @@ class ProfileRow:
 
 @dataclass
 class BrowserInfo:
-    """An auto-detected browser binary for the launch/set-engine pickers."""
+
 
     name: str
     path: str
@@ -110,7 +102,7 @@ class BrowserInfo:
 
 @dataclass
 class ActionResult:
-    """Outcome of one backend operation, rendered verbatim in the TUI."""
+
 
     argv: list[str]
     exit_code: int
@@ -212,7 +204,7 @@ def effective_engine(profile: Profile) -> str:
 
 
 def profile_card(paths: DataPaths, row: ProfileRow) -> list[tuple[str, Text]]:
-    """Telemetry card entries for the inspector's detail view."""
+
     profile = row.profile
     config = getattr(profile, "launch_config", None)
     engine = effective_engine(profile)
@@ -237,10 +229,7 @@ def profile_card(paths: DataPaths, row: ProfileRow) -> list[tuple[str, Text]]:
 
 
 def _resource_entries(paths: DataPaths, profile: Any, row: ProfileRow) -> list[tuple[str, Text]]:
-    """Live CPU/RAM gauges plus disk breakdown for the inspector card.
 
-    Best-effort: telemetry failures simply omit the entries.
-    """
     from ..metrics import get_profile_metrics
 
     try:
@@ -285,7 +274,7 @@ _browser_version_cache: dict[str, str] = {}
 
 
 def _windows_file_version(executable: str) -> str:
-    """Read the VS_FIXEDFILEINFO product version from a PE image."""
+
     import ctypes
 
     version_api = ctypes.windll.version
@@ -342,7 +331,7 @@ def _probe_version(executable: str) -> str:
 
 
 def detect_browsers() -> list[BrowserInfo]:
-    """Detect installed browsers for the interactive browser picker."""
+
     found: list[BrowserInfo] = []
     for name, paths in browser_rows():
         for candidate in paths:
@@ -477,7 +466,7 @@ def _launch(paths: DataPaths, values: dict[str, object]) -> Text:
 
 
 def run_action(paths: DataPaths, action_id: str, values: dict[str, object]) -> ActionResult:
-    """Execute one action and return a CLI-faithful result."""
+
     spec = ACTIONS_BY_ID.get(action_id)
     argv = build_argv(spec, values) if spec is not None else [action_id]
     try:

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 
 class _RecordingPlaywright:
-    """Captures launch_persistent_context kwargs without a browser."""
+
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -59,7 +59,7 @@ def test_webrtc_not_sealed_without_proxy_playwright():
 
 
 def test_direct_launch_options_translate_identity_presets():
-    """Direct engine must forward UA/locale as Chromium flags, not drop them."""
+
     from profiledock.launch_service import direct_launch_options
 
     plan = MagicMock()

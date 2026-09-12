@@ -1,4 +1,4 @@
-"""Backup, restore, and structured logging commands: backup, restore, logs."""
+
 
 from pathlib import Path
 

@@ -162,13 +162,7 @@ def check_metadata_schema(root: Path) -> DiagnosticCheck:
 
 
 def _elevated_file_hint(path: Path, exc: Exception) -> str | None:
-    """Detect files created by an elevated process that now lock out the user.
 
-    When an administrator shell runs ProfileDock, Windows assigns the created
-    files to the Administrators group; the OWNER RIGHTS ACE then excludes the
-    normal account. The signature: reading fails with Permission denied while
-    the parent directory itself remains writable.
-    """
     message = str(exc).lower()
     if "permission" not in message and "denied" not in message and "errno 13" not in message:
         return None
@@ -239,13 +233,7 @@ def check_metadata_backup_state(root: Path) -> DiagnosticCheck:
 
 
 def _contained_within(child: Path, parent: Path) -> bool:
-    """Directory containment test honoring case-insensitive filesystems.
 
-    Strict ``relative_to`` misses real locations when segment casing differs,
-    which happens for missing leaf directories whose drive letter or folder
-    name was recorded with different case than the live tree (common on
-    Windows and macOS).
-    """
     try:
         return bool(child.relative_to(parent))
     except ValueError:
@@ -993,11 +981,7 @@ def _repair_recreate_and_reattach(
     reattach_orphans: bool,
     repairs: list[DiagnosticCheck],
 ) -> None:
-    """Recreate missing browser-data dirs and/or reattach orphan directories.
 
-    Raises on failure so the caller can report it; successful work is
-    appended to ``repairs`` as it commits.
-    """
     profiles_dir = paths.profiles_dir
     if recreate_missing_directories:
         recreated_count = 0

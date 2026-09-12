@@ -1,8 +1,4 @@
-"""Runtime state files: paths, atomic private writes, validation and error reports.
 
-Every byte written here lands in a runtime directory that must stay private to
-the current user (mode 0600 files, atomic replace-on-write).
-"""
 
 import json
 import math
@@ -330,12 +326,7 @@ def _unlink_quietly(path: Path) -> None:
 
 
 def state_file_is_unreadable(state_file: Path) -> bool:
-    """True when a running-state file exists but cannot be parsed as a JSON object.
 
-    An unparseable file cannot verify or protect a live process, so it is a safe
-    cleanup candidate; readable-but-invalid files are deliberately refused instead.
-    A missing file is not unreadable.
-    """
     if not state_file.is_file():
         return False
     return not isinstance(_read_state(state_file), dict)

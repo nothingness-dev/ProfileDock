@@ -1,9 +1,4 @@
-"""Terminal-aware output helpers.
 
-Human output adapts to the environment: color and Unicode symbols appear only
-when stdout is an interactive terminal that can render them, and never corrupt
-piped or redirected output. Machine JSON paths are untouched.
-"""
 
 import os
 import sys

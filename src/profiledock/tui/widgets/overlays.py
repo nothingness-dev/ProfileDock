@@ -1,4 +1,4 @@
-"""Overlay screens: destructive-action confirmation with countdown or typing."""
+
 
 from __future__ import annotations
 
@@ -14,12 +14,7 @@ from ..actions import ActionSpec
 
 
 class ConfirmModal(ModalScreen[bool]):
-    """Centered safeguard for destructive actions.
 
-    Two confirmation styles: a 10-second countdown with Y/N for reversible
-    operations (restore), and typed confirmation where the operator must
-    re-enter the target profile name for permanent deletes.
-    """
 
     DEFAULT_CSS = """
     ConfirmModal {

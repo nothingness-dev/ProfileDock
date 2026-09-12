@@ -225,7 +225,7 @@ class TestInteractiveApp:
 
     @pytest.mark.asyncio
     async def test_double_click_opens_command_form(self):
-        """Double click opens the clicked command's form."""
+
         self._make_profiles()
         from profiledock.interactive import ProfileDockApp
 
@@ -389,7 +389,7 @@ def test_action_hotkeys_are_unique():
 
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
 class TestInteractiveLifecycle:
-    """Regressions for TUI lifecycle bugs fixed in 0.17.x."""
+
 
     @pytest.fixture(autouse=True)
     def _isolated_data_root(self, tmp_path_factory, monkeypatch):
@@ -463,7 +463,7 @@ class TestInteractiveLifecycle:
 
     @pytest.mark.asyncio
     async def test_output_header_uses_cli_faithful_argv(self):
-        """The output pane argv must come from build_argv, never raw str(values)."""
+
         from unittest.mock import patch as _patch
 
         from rich.text import Text
@@ -506,7 +506,7 @@ class TestInteractiveLifecycle:
 
     @pytest.mark.asyncio
     async def test_launch_engine_inherit_does_not_override_stored_engine(self):
-        """Choosing (inherit) must launch with the profile's stored engine."""
+
         self._make_profiles(count=1)
         from profiledock.data_root import resolve_data_root
         from profiledock.interactive import ProfileDockApp
@@ -542,7 +542,7 @@ class TestInteractiveLifecycle:
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
 @pytest.mark.asyncio
 class TestDoubleClickUX:
-    """Single click previews, double click runs (deck only)."""
+
 
     @pytest.fixture(autouse=True)
     def _isolated_data_root(self, tmp_path_factory, monkeypatch):
@@ -582,7 +582,7 @@ class TestDoubleClickUX:
             assert form.spec is not None and form.spec.id == "launch"
 
     async def test_choice_select_does_not_submit_form(self):
-        """Choosing a radio option must not auto-submit single-field forms."""
+
         from profiledock.data_root import resolve_data_root
         from profiledock.interactive import ProfileDockApp
         from profiledock.profile_manager import ProfileManager
@@ -614,7 +614,7 @@ def app_instance_root():
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
 @pytest.mark.asyncio
 class TestSelectionAndRealtimeRegressions:
-    """Regressions: picker click commits, statuses poll in realtime."""
+
 
     @pytest.fixture(autouse=True)
     def _isolated_data_root(self, tmp_path_factory, monkeypatch):
@@ -650,7 +650,7 @@ class TestSelectionAndRealtimeRegressions:
 
     @pytest.mark.asyncio
     async def test_picker_click_commits_selection(self):
-        """Clicking a profile row in the form picker must change the value."""
+
         self._make_profiles()
         from textual.widgets import Input
 
@@ -713,14 +713,7 @@ class TestSelectionAndRealtimeRegressions:
 
     @pytest.mark.asyncio
     async def test_rail_double_click_opens_launch_form_exactly_once(self):
-        """Regression: stock OptionList._on_click double-fired on double click.
 
-        Textual dispatches every _on_click in the MRO. The VimOptionList
-        override did not stop the event, so on a chain-2 click the stock
-        handler ran action_select() a second time and begin_action was
-        re-entered after the busy flag cleared — the launch form (and the
-        delete confirmation) was effectively triggered twice per double click.
-        """
         self._make_profiles(1)
         from profiledock.interactive import ProfileDockApp
 
@@ -760,13 +753,7 @@ class TestSelectionAndRealtimeRegressions:
 
     @pytest.mark.asyncio
     async def test_deck_single_click_only_previews_not_runs(self):
-        """Regression: chain-1 click ran the command in single-click mode.
 
-        VimOptionList._on_click (double_click_selects=False) highlights and
-        selects; the stock handler then selected again. For instant commands
-        (list/status) a stray click would RUN the command; this test asserts
-        a single click on the deck never executes, only previews.
-        """
         self._make_profiles(1)
         from profiledock.interactive import ProfileDockApp
 
@@ -790,14 +777,7 @@ class TestSelectionAndRealtimeRegressions:
 
     @pytest.mark.asyncio
     async def test_profile_picker_click_selects_once(self):
-        """Regression: picker/radio lists posted Changed twice per click.
 
-        The picker's inner OptionList (double_click_selects=False) let the
-        stock _on_click run action_select() a second time after the Vim
-        handler, so on_option_list_option_selected fired twice and the picker
-        posted Changed twice — previews re-rendered and submit raced.
-        Uses the real app so the theme CSS and full compose tree are live.
-        """
         from unittest.mock import patch
 
         self._make_profiles(1)
@@ -830,13 +810,7 @@ class TestSelectionAndRealtimeRegressions:
 
     @pytest.mark.asyncio
     async def test_form_buttons_reachable_by_mouse_on_tall_form(self):
-        """Regression: submit/cancel rendered below the pane fold, unclickable.
 
-        FormPanel stubbed out every scroll method, so Textual's
-        scroll-into-view never ran; on tall forms (delete/launch with a
-        picker) the buttons row sat under the pane's clipped bottom and
-        clicks landed on the footer docked over it.
-        """
         self._make_profiles(1)
         from textual.widgets import Button
 
@@ -865,7 +839,7 @@ class TestSelectionAndRealtimeRegressions:
 
     @pytest.mark.asyncio
     async def test_cancel_button_click_closes_form(self):
-        """Regression: the cancel button had the same below-fold defect."""
+
         self._make_profiles(1)
         from textual.widgets import Button
 

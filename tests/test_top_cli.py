@@ -1,4 +1,4 @@
-"""CLI contract tests for the resource-monitoring surfaces (status --metrics, show, top)."""
+
 
 from __future__ import annotations
 
@@ -90,8 +90,8 @@ def _patch_manager(profiles):
     )
 
 
-# ---------------------------------------------------------------------------
-# top command
+
+
 
 
 def test_top_json_schema_contract():
@@ -193,8 +193,8 @@ def test_top_help_lists_options():
         assert flag in result.output
 
 
-# ---------------------------------------------------------------------------
-# formatting
+
+
 
 
 def test_format_cpu_percent():

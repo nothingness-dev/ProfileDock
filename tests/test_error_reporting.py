@@ -210,7 +210,7 @@ def test_browser_attempt_errors_identify_the_missing_channel():
 
 
 def test_fail_exception_redacts_proxy_credentials(tmp_path, monkeypatch, capsys):
-    """An exception message carrying proxy credentials must never reach output."""
+
     import typer
 
     from profiledock import cli as pd_cli
@@ -247,7 +247,7 @@ def test_log_details_redact_proxy_credentials(tmp_path):
 
 
 def test_tui_error_body_redacts_proxy_credentials(tmp_path, monkeypatch):
-    """TUI action errors carrying proxy credentials must render redacted."""
+
 
     from textual.widgets import OptionList  # noqa: F401 - ensures textual present
 

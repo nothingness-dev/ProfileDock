@@ -1,10 +1,4 @@
-"""Process identity, discovery and termination primitives.
 
-Platform-specific code (Windows kernel32 calls, Linux /proc reading, POSIX
-process groups) is deliberately concentrated in this module. Identity checks
-pair each PID with its creation time so a recycled PID is never mistaken for
-the recorded process.
-"""
 
 import ctypes
 import os
@@ -116,12 +110,7 @@ _MACOS_DATE_FORMAT = "%a %b %d %H:%M:%S %Y"
 
 
 def _macos_process_create_time(pid: int) -> float | None:
-    """Process start time on macOS as a UTC epoch via BSD ``ps lstart``.
 
-    ``lstart`` has one-second resolution, which is well inside the 2.0s
-    identity-match tolerance used by ``_is_matching_process``. ``LC_ALL=C``
-    pins the month/day names so strptime parsing survives non-English locales.
-    """
     try:
         output = subprocess.run(
             ["/bin/ps", "-o", "lstart=", "-p", str(pid)],
@@ -218,7 +207,7 @@ def _parse_linux_process_stat(value: str) -> tuple[int, str]:
 
 
 def _list_processes() -> list[tuple[int, int, str]]:
-    """Return (pid, parent_pid, executable_name) snapshots for all processes."""
+
     if sys.platform == "win32":
         import ctypes.wintypes as wintypes
 
@@ -299,12 +288,7 @@ def _list_processes() -> list[tuple[int, int, str]]:
 
 
 def _find_browser_pid(controller_pid: int) -> int:
-    """Locate the main Chromium process spawned by the controller process tree.
 
-    Returns the PID of the root of the Chromium subtree (the browser main
-    process), or 0 when it cannot be determined. Callers must treat 0 as
-    "unknown" and never signal it.
-    """
     if controller_pid < 1:
         return 0
 
@@ -342,11 +326,7 @@ def _find_browser_pid(controller_pid: int) -> int:
 
 
 def _terminate_matching_process(pid: int, expected_create_time: float | None, timeout: float) -> bool:
-    """Terminate a process tree only when its identity matches the recorded one.
 
-    Returns True when the process is gone (or was already absent). A PID whose
-    create time does not match the recorded value is never signalled.
-    """
 
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import _is_matching_process as _is_matching_process_impl

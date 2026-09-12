@@ -1,9 +1,4 @@
-"""Direct Chrome engine lifecycle.
 
-Launches a system Chrome/Chromium binary detached from the launcher process
-and records its identity (PID plus process creation time) so later closes can
-refuse to signal a recycled PID.
-"""
 
 import json
 import os
@@ -31,7 +26,7 @@ from .state import (
 
 
 def _system_browser_executable(preferred: str | None = None) -> Path | None:
-    """Thin delegation kept so callers and tests can patch this name."""
+
     return _system_browser_impl(preferred)
 
 

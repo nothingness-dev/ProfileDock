@@ -1,9 +1,4 @@
-"""Design tokens and theme registration for the ProfileDock TUI.
 
-Exactly two classic themes are registered — ``dark`` and ``light`` — plus the
-shared ``$pd-*`` component variables (border, selection, muted, accents) used
-across the TUI stylesheet.
-"""
 
 from __future__ import annotations
 
@@ -89,7 +84,7 @@ def next_theme(current: str) -> str:
 
 
 def is_dark(theme_name: str | None = None) -> bool:
-    """Whether the given (or configured) theme uses a dark background."""
+
     selected = theme_name or configured_theme()
     for theme in _CUSTOM_THEMES:
         if theme.name == selected:
@@ -98,7 +93,7 @@ def is_dark(theme_name: str | None = None) -> bool:
 
 
 def variable(name: str, theme_name: str | None = None) -> str:
-    """Resolve a ``$pd-*`` token to its hex value for markup strings."""
+
     themes = {theme.name: theme for theme in _CUSTOM_THEMES}
     selected = theme_name or configured_theme()
     theme = themes.get(selected)

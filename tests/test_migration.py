@@ -972,7 +972,7 @@ def test_migrate_excludes_runtime_state_files(tmp_path):
     src_root = tmp_path / "source"
     src_root.mkdir()
     _, data_dir = make_source(src_root)
-    # Crash leftovers that must not travel to the destination.
+
     (data_dir / "running.json").write_text('{"pid": 123}', encoding="utf-8")
     (data_dir / "controller.error").write_text("{}", encoding="utf-8")
     (data_dir / "scratch.tmp").write_text("temp", encoding="utf-8")

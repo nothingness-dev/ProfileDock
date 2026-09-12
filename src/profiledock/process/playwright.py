@@ -1,9 +1,4 @@
-"""Playwright engine launcher lifecycle.
 
-Starts the controller subprocess (``python -m profiledock.process_manager
---controller ...``), waits for it to publish a ready runtime state, and closes
-it through the authenticated IPC channel.
-"""
 
 import json
 import os
@@ -35,12 +30,7 @@ from .state import (
 
 
 class _StderrCapture:
-    """Drain a child's stderr pipe on a thread, keeping a bounded tail.
 
-    Keeps the pipe from filling (which would stall a chatty Playwright
-    driver and fake a startup timeout) while preserving the last bytes for
-    exit diagnostics instead of dropping them to devnull.
-    """
 
     def __init__(self, process: subprocess.Popen[bytes]) -> None:
         self._process = process

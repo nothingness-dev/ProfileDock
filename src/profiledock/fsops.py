@@ -11,12 +11,7 @@ from .data_root import _is_link
 
 
 def sha256_file(path: Path) -> str:
-    """Return the hexadecimal SHA-256 digest of a file, streaming in 1 MiB chunks.
 
-    Single shared implementation used by backup verification, restore checksum
-    validation, and migration manifests. Raises the underlying OSError (e.g.
-    PermissionError for locked files) to the caller for domain-specific wrapping.
-    """
     digest = sha256()
     with path.open("rb") as handle:
         while True:
@@ -42,14 +37,7 @@ def replace_with_retry(source: Path, target: Path, timeout: float = 2.0) -> None
 
 
 def rmtree_with_retry(directory: Path, timeout: float = 5.0) -> None:
-    """rmtree that rides out transient Windows sharing violations.
 
-    Antivirus scanners, search indexers and just-terminated browser processes
-    hold handles on files for a short window after a directory becomes
-    deletable; the first rmtree attempt then fails with PermissionError even
-    though removal would succeed moments later. Retry until the deadline
-    before surfacing the error. Directory entries already removed stay removed.
-    """
     deadline = time.monotonic() + timeout
     poll_interval = 0.02
     while True:

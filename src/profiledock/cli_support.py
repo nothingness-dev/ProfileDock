@@ -1,4 +1,4 @@
-"""Shared CLI runtime context, helpers, formatting, and error handling."""
+
 
 import json
 import os
@@ -109,7 +109,7 @@ def confirm(message: str) -> bool:
 
 
 def resolve_engine_strict(cli_engine: str | None, profile: Profile) -> str:
-    """Resolve the effective engine, raising ValueError instead of exiting."""
+
     if cli_engine:
         clean = cli_engine.strip().lower()
         if clean not in ("direct", "playwright"):
@@ -141,7 +141,7 @@ def resolve_engine(cli_engine: str | None, profile: Profile) -> str:
 
 
 def redact_proxy(value: str | None) -> str | None:
-    """Mask proxy credentials for display: user:secret@ -> user:***@."""
+
     if not value or "@" not in value:
         return value
     scheme_split = value.split("://", 1)

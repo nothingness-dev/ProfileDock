@@ -143,12 +143,7 @@ def test_controller_applies_launch_preset_options(controller_env):
 
 
 def test_ready_state_publishes_before_slow_start_urls(controller_env):
-    """Regression: ready state was published only after navigating every
-    start URL with Playwright's 30s default goto timeout. One slow URL made
-    the launcher time out and force-kill a healthy browser. The ready state
-    must publish before navigation so the launcher returns promptly even
-    when a start URL stalls.
-    """
+
     import threading
 
     manager, profile, data_dir, owned_pids = controller_env
@@ -275,12 +270,7 @@ def test_channel_included_in_controller_state(controller_env):
 
 
 def test_launch_with_http_proxy_and_credentials(controller_env):
-    """Regression: proxy options were splatted as top-level launch kwargs.
 
-    launch_persistent_context takes proxy as a nested dict; passing
-    server=/username= as kwargs raises TypeError (unexpected keyword
-    argument 'server'), so a proxied launch never started.
-    """
     from profiledock.process_manager import start_controller
 
     manager, profile, data_dir, owned_pids = controller_env
@@ -296,13 +286,7 @@ def test_launch_with_http_proxy_and_credentials(controller_env):
 
 
 def test_sigterm_to_controller_cleans_up_browser_and_state(controller_env):
-    """Regression: SIGTERM killed the controller with default disposition.
 
-    A graceful termination signal (system shutdown, process manager, kill)
-    must run the controller's teardown: context.close() flushes profile data,
-    the Chromium process exits, and running.json is removed. With default
-    disposition the browser was orphaned and state left behind.
-    """
     if sys.platform == "win32":
         pytest.skip("POSIX signal semantics; Windows relies on taskkill without /F")
 
@@ -323,12 +307,7 @@ def test_sigterm_to_controller_cleans_up_browser_and_state(controller_env):
 
 
 def test_controller_installs_graceful_termination_handlers(tmp_path, monkeypatch):
-    """The controller entry point must arm SIGTERM/SIGINT teardown handlers.
 
-    Without them a graceful kill uses the default disposition and skips
-    context.close() entirely, orphaning Chromium. The test drives
-    main()-level arming directly, so it is cross-platform.
-    """
     import argparse
     import signal as signal_module
 

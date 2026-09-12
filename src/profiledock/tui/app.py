@@ -1,18 +1,4 @@
-"""ProfileDock TUI application: layout, state machine, and key handling.
 
-State machine
--------------
-``BROWSE``  command deck + profile rail + telemetry preview (Mode A)
-``FORM``    interactive parameter entry for one action (Mode B)
-``OUTPUT``  scrollable CLI-faithful result view
-
-Transitions
------------
-BROWSE --Enter/hotkey (instant action)--> OUTPUT
-BROWSE --Enter/hotkey (parameterized)--> FORM --> (ConfirmModal if destructive) --> OUTPUT
-OUTPUT --Esc--> BROWSE,  FORM --Esc--> BROWSE,  any --q--> exit
-``/`` toggles in-place deck filtering; ``Tab`` cycles deck <-> rail in BROWSE.
-"""
 
 from __future__ import annotations
 
@@ -64,7 +50,7 @@ class Mode:
 
 
 class ProfileDockApp(App[None]):
-    """Keyboard-driven manager for isolated persistent Chromium profiles."""
+
 
     TITLE = "ProfileDock"
     SUB_TITLE = "isolated persistent Chromium profiles"

@@ -1,8 +1,4 @@
-"""Status reporting and close orchestration.
 
-``get_status`` maps runtime state files to CLI-visible statuses; ``close_controller``
-validates state ownership before delegating to the engine-specific close paths.
-"""
 
 from pathlib import Path
 
@@ -25,11 +21,7 @@ from .state import (
 
 
 def _reap_recorded_browser(state: StateDict, timeout: float) -> bool:
-    """Terminate a recorded live browser before destroying its state record.
 
-    Unlinking running.json without this leaks the Chromium tree: it keeps the
-    Windows profile lock and no later path can find or signal it.
-    """
     raw_browser_pid = state.get("browser_pid")
     if type(raw_browser_pid) is not int or raw_browser_pid <= 0:
         return True
@@ -41,12 +33,7 @@ def _reap_recorded_browser(state: StateDict, timeout: float) -> bool:
 
 
 def _launcher_starting(state: StateDict) -> bool:
-    """True when the state's launcher process is verifiably still alive.
 
-    A bare PID-liveness check keeps a dead launch looking 'starting' forever
-    once the OS reuses the launcher PID; when the state records the
-    launcher's create-time it must match too.
-    """
     from profiledock.process_manager import _alive as alive_impl
     from profiledock.process_manager import (
         _get_process_create_time as create_time_impl,

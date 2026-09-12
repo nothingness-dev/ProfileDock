@@ -1,4 +1,4 @@
-"""Legacy project migration commands: migrate."""
+
 
 from pathlib import Path
 

@@ -25,7 +25,7 @@ class MetadataCorruptedError(StorageError):
 
 
 class MetadataUnreadableError(StorageError):
-    """The metadata file could not be read (transient I/O failure, not corruption)."""
+    pass
 
 
 class MetadataLockedError(StorageError):

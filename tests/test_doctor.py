@@ -517,8 +517,8 @@ def test_repair_recreation_rolls_back_when_later_profile_is_active(tmp_path):
 
     with patch("profiledock.doctor.is_active_for_mutation", side_effect=active_state):
         repairs = repair_environment(tmp_path, recreate_missing_directories=True)
-    # Recreation aborts and rolls back, and the abort is reported as a failed
-    # repair (not silently swallowed).
+
+
     assert not first_data.exists()
     assert not second_data.exists()
     assert any(r.status == STATUS_FAILED for r in repairs)
@@ -717,13 +717,13 @@ def test_doctor_without_playwright_reports_warning(tmp_path):
 
 
 def test_check_disk_space_reports_low_space(tmp_path):
-    """New check: disk space below thresholds must surface as diagnostics."""
+
     from profiledock.doctor import check_disk_space
 
     chk = check_disk_space(tmp_path)
     assert chk.id == "disk_space"
-    # A tmp_path fixture is on a healthy disk in CI; expect OK or (on exotic
-    # mounts) at worst warning — never failed on a writable tmpfs.
+
+
     assert chk.status in (STATUS_OK, STATUS_WARNING)
 
 
@@ -733,7 +733,7 @@ def test_check_disk_space_flags_critical_free_space(tmp_path):
     with patch("profiledock.doctor.shutil.disk_usage") as usage:
         usage.return_value = type(
             "Usage", (), {"total": 100 * 2**30, "used": 99 * 2**30, "free": 50 * 2**20}
-        )()  # 50 MiB free
+        )()
         chk = check_disk_space(tmp_path)
     assert chk.status == STATUS_FAILED
     assert "MB" in chk.summary or "MiB" in chk.summary
@@ -742,14 +742,14 @@ def test_check_disk_space_flags_critical_free_space(tmp_path):
     with patch("profiledock.doctor.shutil.disk_usage") as usage:
         usage.return_value = type(
             "Usage", (), {"total": 100 * 2**30, "used": 98 * 2**30, "free": 500 * 2**20}
-        )()  # 500 MiB free
+        )()
         warn = check_disk_space(tmp_path)
     assert warn.status == STATUS_WARNING
 
     with patch("profiledock.doctor.shutil.disk_usage") as usage:
         usage.return_value = type(
             "Usage", (), {"total": 100 * 2**30, "used": 10 * 2**30, "free": 90 * 2**30}
-        )()  # plenty
+        )()
         ok = check_disk_space(tmp_path)
     assert ok.status == STATUS_OK
 
@@ -759,12 +759,12 @@ def test_check_disk_space_survives_disk_usage_failure(tmp_path):
 
     with patch("profiledock.doctor.shutil.disk_usage", side_effect=OSError("no stat")):
         chk = check_disk_space(tmp_path)
-    assert chk.status == STATUS_OK  # absence of information is not a failure
+    assert chk.status == STATUS_OK
     assert chk.summary
 
 
 def test_run_diagnostics_includes_new_checks(tmp_path):
-    """The diagnostics list must include disk space and lock liveness."""
+
     layout = paths(tmp_path)
     checks = run_diagnostics(layout.root)
     ids = [c.id for c in checks]
@@ -773,14 +773,14 @@ def test_run_diagnostics_includes_new_checks(tmp_path):
 
 
 def test_check_metadata_lock_state_reports_stuck_lock(tmp_path):
-    """New check: a lock held by a live foreign process must be reported."""
+
     import threading
 
     from profiledock.doctor import check_metadata_lock_state
 
     layout = paths(tmp_path)
-    # metadata_lock with a long timeout held from another thread simulates
-    # another ProfileDock process mid-mutation.
+
+
     release = threading.Event()
     acquired = threading.Event()
 
@@ -811,7 +811,7 @@ def test_check_metadata_lock_state_ok_when_free(tmp_path):
 
 
 def test_doctor_strict_flag_fails_on_warnings():
-    """New flag: --strict must exit non-zero when only warnings exist."""
+
     with patch("profiledock.cli.run_diagnostics") as mock_diag:
         mock_diag.return_value = [
             DiagnosticCheck(
@@ -822,7 +822,7 @@ def test_doctor_strict_flag_fails_on_warnings():
     assert result.exit_code == EXIT_USER_ERROR
     assert "WARNING" in result.output
 
-    # and JSON strict output carries the strict_healthy marker
+
     with patch("profiledock.cli.run_diagnostics") as mock_diag:
         mock_diag.return_value = [
             DiagnosticCheck("orphan_profile_directories", STATUS_WARNING, "warn"),
@@ -830,7 +830,7 @@ def test_doctor_strict_flag_fails_on_warnings():
         result = runner.invoke(app, ["doctor", "--strict", "--json"])
     assert result.exit_code == EXIT_USER_ERROR
     data = json.loads(result.output)["data"]
-    assert data["healthy"] is True  # unchanged semantics
+    assert data["healthy"] is True
     assert data["strict_healthy"] is False
 
 
@@ -844,7 +844,7 @@ def test_doctor_strict_json_ok_when_healthy():
 
 
 def test_proxy_timezone_consistency_flags_unset_timezone(tmp_path):
-    """New check: proxy without timezone is the classic geo-mismatch leak."""
+
     from profiledock.doctor import check_proxy_timezone_consistency
 
     layout = paths(tmp_path)
@@ -875,7 +875,7 @@ def test_proxy_timezone_consistency_ok_when_timezone_matches_or_absent(tmp_path)
     layout = paths(tmp_path)
     data_dir = layout.profiles_dir / "p1" / "browser-data"
     data_dir.mkdir(parents=True)
-    # Proxy with explicit timezone: coherent, OK.
+
     with_proxy_tz = Profile(
         "p1",
         "ProxyWithTz",
@@ -883,7 +883,7 @@ def test_proxy_timezone_consistency_ok_when_timezone_matches_or_absent(tmp_path)
         str(data_dir),
         launch_config=LaunchConfig(proxy="socks5://127.0.0.1:9050", timezone="America/Los_Angeles"),
     )
-    # No proxy at all: out of scope for this check.
+
     without_proxy = Profile(
         "p2",
         "NoProxy",
@@ -900,7 +900,7 @@ def test_proxy_timezone_consistency_ok_when_timezone_matches_or_absent(tmp_path)
 
 
 def test_proxy_timezone_consistency_flags_invalid_timezone(tmp_path):
-    """A proxy with an unresolvable IANA timezone is incoherent by definition."""
+
     from profiledock.doctor import check_proxy_timezone_consistency
 
     layout = paths(tmp_path)
@@ -924,15 +924,7 @@ def test_proxy_timezone_consistency_flags_invalid_timezone(tmp_path):
 
 
 def test_recovery_preserves_corrupt_primary_for_inspection(tmp_path):
-    """Regression: metadata recovery destroyed the corrupt primary file.
 
-    When recovery rewrites profiles.json from the .bak backup, the corrupt
-    primary must be preserved under a diagnostic name first — otherwise a
-    stale backup silently replaces a primary that may have contained newer
-    recoverable data, and the evidence for diagnosing why it corrupted is
-    gone. The legacy-migration path already backs up before overwriting;
-    recovery must do the same.
-    """
     layout = paths(tmp_path)
     corrupt_content = "corrupt json {"
     layout.profiles_file.write_text(corrupt_content, encoding="utf-8")
@@ -944,7 +936,7 @@ def test_recovery_preserves_corrupt_primary_for_inspection(tmp_path):
     repairs = repair_environment(tmp_path)
     assert any(r.id == "repair_metadata_recovery" for r in repairs)
 
-    # Some artifact preserving the corrupt primary must survive the repair.
+
     preserved = list(layout.metadata_dir.glob("*profiles.json*")) + list(layout.root.glob("*profiles.json*"))
     preserved_contents = {p.name: p.read_text(encoding="utf-8") for p in preserved}
     assert any(content == corrupt_content for content in preserved_contents.values()), (
@@ -953,12 +945,7 @@ def test_recovery_preserves_corrupt_primary_for_inspection(tmp_path):
 
 
 def test_orphan_check_ignores_transient_operation_directories(tmp_path):
-    """Regression: transient op dirs were reported as orphans.
 
-    .deleting-*/.quarantine_*/.temp_restore_* directories are mid-operation
-    state, not orphaned profiles; flagging them alarms users during a delete
-    and contradicts --reattach-orphans, which correctly skips dot-dirs.
-    """
     layout = paths(tmp_path)
     layout.profiles_file.write_text(
         json.dumps({"schema_version": 1, "profiles": []}),
@@ -974,12 +961,7 @@ def test_orphan_check_ignores_transient_operation_directories(tmp_path):
 
 
 def test_repair_temp_cleanup_retries_through_transient_file_locks(tmp_path, monkeypatch):
-    """Regression: temp-dir cleanup had no Windows file-lock retry.
 
-    repair_environment is the recovery tool; a single transient
-    PermissionError (AV scan on a just-released handle) silently skipped the
-    cleanup. It must retry like every other mutation path (rmtree_with_retry).
-    """
     import shutil as shutil_module
 
     from profiledock import doctor as doctor_module
@@ -1007,13 +989,7 @@ def test_repair_temp_cleanup_retries_through_transient_file_locks(tmp_path, monk
 
 
 def test_repair_failure_is_reported_not_swallowed(tmp_path):
-    """Regression: recreate/reattach failures vanished silently.
 
-    The bare `except Exception: pass` around the recreate/reattach block
-    meant `doctor --repair --recreate-missing` could fail its entire job and
-    report zero repairs with no explanation — the user believes they are
-    healthy when they are not.
-    """
     layout = paths(tmp_path)
     missing_data_dir = layout.profiles_dir / "p1" / "browser-data"
     layout.profiles_file.write_text(
@@ -1035,10 +1011,10 @@ def test_repair_failure_is_reported_not_swallowed(tmp_path):
 
     with patch(
         "profiledock.doctor.is_active_for_mutation", return_value=True
-    ):  # every profile looks active → recreate raises
+    ):
         repairs = repair_environment(tmp_path, recreate_missing_directories=True)
     assert not missing_data_dir.exists()
-    # The failure must surface as a failed/warning diagnostic, not silence.
+
     assert repairs, "repair failure was swallowed silently"
     assert any(r.status != STATUS_OK for r in repairs), (
         f"failure was reported as a successful repair: {[r.summary for r in repairs]}"
@@ -1047,12 +1023,7 @@ def test_repair_failure_is_reported_not_swallowed(tmp_path):
 
 
 def test_repair_warning_renders_as_warning_not_repaired(tmp_path):
-    """Regression: every repair entry rendered as [repaired].
 
-    repair_environment can return warnings (e.g. MetadataLockedError skip),
-    but the CLI printed '[repaired] Skipped ...' — actively misleading.
-    Warnings must render as [warning].
-    """
     from profiledock.cli import app as _app  # noqa: F401 — imported for runner context
 
     with (

@@ -1,4 +1,4 @@
-"""Command deck: the categorized, filterable command list in the left pane."""
+
 
 from __future__ import annotations
 
@@ -16,14 +16,6 @@ CURSOR_GLYPH = ">"
 
 
 class VimOptionList(OptionList):
-    """OptionList with vim-style navigation.
-
-    ``double_click_selects`` controls mouse behavior: when False (default)
-    a single click selects like keyboard Enter; when True the first click
-    only highlights (letting the preview pane follow) and a double click
-    selects. Keyboard Enter always selects.
-    """
-
     BINDINGS: ClassVar[list[Any]] = [
         Binding("j", "cursor_down", show=False),
         Binding("k", "cursor_up", show=False),
@@ -35,11 +27,9 @@ class VimOptionList(OptionList):
         return
 
     def reset_armed(self) -> None:
-        """Kept for mode-switch call sites; nothing to reset without arming."""
         return
 
     async def _on_click(self, event: events.Click) -> None:
-        """Handle selection once, suppressing the inherited click handler."""
         clicked_option: int | None = event.style.meta.get("option")
         event.stop()
         event.prevent_default()
@@ -90,12 +80,6 @@ def _all_actions() -> list[ActionSpec]:
 
 
 def _filtered(actions: list[ActionSpec], query: str) -> list[ActionSpec]:
-    """Rank actions against a query spanning label, description, hotkey, and id.
-
-    Label matches outrank everything: typing ``la`` should surface ``launch``
-    before commands that merely contain those letters elsewhere. Subsequence
-    fuzzy matching keeps typos like ``lunch`` useful.
-    """
     if not query:
         return actions
     scored: list[tuple[int, int, str]] = []
@@ -119,12 +103,6 @@ def _filtered(actions: list[ActionSpec], query: str) -> list[ActionSpec]:
 
 
 class CommandDeck(VimOptionList):
-    """Grouped, filterable command list with a plain selection cursor.
-
-    Single click previews a command (the inspector follows the highlight);
-    double click runs it. Keyboard Enter always runs.
-    """
-
     double_click_selects = True
 
     DEFAULT_CSS = """
@@ -153,10 +131,10 @@ class CommandDeck(VimOptionList):
             return self.deck
 
     class Selected(DeckMessage):
-        """A command was chosen with Enter."""
+        pass
 
     class Highlighted(DeckMessage):
-        """The highlighted command changed; the preview pane follows."""
+        pass
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)

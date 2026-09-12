@@ -1,11 +1,4 @@
-"""Fixture tests for the TUI action registry and CLI-faithful argv rendering.
 
-The command preview line and the output pane header both go through
-:func:`build_argv`; these tests freeze its output against the frozen CLI
-contract so the TUI can never again display an invocations that the real CLI
-would reject (e.g. engines as bare positionals, ``__all__`` sentinels leaking
-into the command line, or ``--url`` collapsing into one flag).
-"""
 
 from __future__ import annotations
 
@@ -57,7 +50,7 @@ def test_launch_argv_engine_override_is_a_flag_not_a_positional():
         {"profile": "Work", "tabs": "1", "engine": "playwright", "flags": []},
     )
     assert argv == ["launch", "Work", "--tabs", "1", "--engine", "playwright"]
-    # Engine must never appear as a bare positional after the profile.
+
     assert "playwright" not in argv[: argv.index("--engine")]
 
 
@@ -169,8 +162,8 @@ def test_instant_actions_and_hotkeys_stay_unique():
 
 
 def test_field_spec_argv_mode_defaults():
-    # TOGGLE defaults to boolean rendering; NUMBER to --name value; flags are
-    # emitted in field declaration order.
+
+
     toggle = FieldSpec("verbose_out", "Verbose", FieldKind.TOGGLE)
     number = FieldSpec("count", "Count", FieldKind.NUMBER)
     assert build_argv(

@@ -70,12 +70,7 @@ class RestoreConflictError(RestoreError):
 
 
 def _restore_quarantines(quarantined: list[tuple[Path, Path]]) -> list[str]:
-    """Move quarantined original directories back to their canonical paths.
 
-    Contents were validated by ensure_tree_safe before quarantine, so this
-    prioritizes restoring user data over re-validation. Returns human-readable
-    descriptions of any directories that could not be restored.
-    """
     failures: list[str] = []
     for q_dir, final_dir in reversed(quarantined):
         if q_dir.exists() and not final_dir.exists():
@@ -88,12 +83,7 @@ def _restore_quarantines(quarantined: list[tuple[Path, Path]]) -> list[str]:
 
 @dataclass
 class ArchiveProfileResult:
-    """Per-profile outcome row shared by the backup and restore reports.
 
-    Single definition so both report schemas stay field-for-field identical;
-    ``BackupProfileResult`` and ``RestoreProfileResult`` are compatibility
-    aliases preserved for their historical import paths.
-    """
 
     id: str
     name: str

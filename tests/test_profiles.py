@@ -43,13 +43,7 @@ def test_delete_removes_metadata_when_profile_directory_is_missing(manager):
 
 
 def test_delete_retries_directory_removal_while_files_are_locked(manager, monkeypatch):
-    """Regression: quarantine rmtree had no Windows file-lock retry.
 
-    An antivirus/indexer/scanner holding a handle on a just-released file
-    makes the first rmtree attempt fail with PermissionError; without a
-    retry the delete command errored even though the metadata removal had
-    already committed, stranding the .deleting-* quarantine directory.
-    """
     import shutil as shutil_module
     import time as time_module
 
@@ -62,8 +56,8 @@ def test_delete_retries_directory_removal_while_files_are_locked(manager, monkey
     attempts = {"count": 0}
 
     def flaky_rmtree(path, *args, **kwargs):
-        # delete() renames the profile root to .deleting-<id>-<hex> before
-        # removing it; the transient lock hits that quarantine path.
+
+
         if f".deleting-{profile_id}-" in str(path) and attempts["count"] < 2:
             attempts["count"] += 1
             raise PermissionError(5, "Access is denied (transient AV scan)")

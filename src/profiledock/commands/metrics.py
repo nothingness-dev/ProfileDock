@@ -1,9 +1,4 @@
-"""Resource monitoring command: ``profiledock top``.
 
-Presents a live (or one-shot) resource snapshot across profiles: aggregated
-process-tree CPU %, resident memory, process counts, active tabs, and disk
-footprint. Mirrors ``status`` conventions for --watch/--json and TTY handling.
-"""
 
 import json
 import time
@@ -76,7 +71,7 @@ def _row_to_payload(row: _MetricsRow) -> dict[str, Any]:
 
 
 def _get_manager() -> Any:
-    """Late-bound so tests can patch ``profiledock.cli.manager``."""
+
     from ..cli import manager
 
     return manager()

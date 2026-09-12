@@ -1,10 +1,4 @@
-"""Controller subprocess entry point (IPC server side).
 
-This module runs inside the spawned controller process
-(``python -m profiledock.process_manager --controller ...``). It launches the
-Playwright context, serves the authenticated loopback IPC protocol, and writes
-the ready/error state files the launcher polls.
-"""
 
 import argparse
 import hmac
@@ -483,14 +477,7 @@ def _wait_for_close(
     startup: Callable[[], None] | None = None,
     data_dir: str | None = None,
 ) -> None:
-    """Serve the IPC protocol until a close command or browser death.
 
-    A listener thread accepts connections immediately and answers probe and
-    close lines without touching the browser, so local liveness checks never
-    starve behind a long command or the startup navigation. JSON commands
-    that need the browser context are handed to the main thread (the sync
-    Playwright API is single-threaded) through a queue.
-    """
     from profiledock.process_manager import _MAX_COMMAND_BYTES as max_command_bytes
 
     command_queue: queue.Queue[tuple[socket.socket, str] | None] = queue.Queue()
@@ -657,12 +644,7 @@ def _send_line(connection: socket.socket, payload: bytes) -> None:
 
 
 def _playwright_proxy_options(proxy_url: str | None) -> dict[str, Any]:
-    """Map a validated proxy URL onto Playwright's proxy option.
 
-    Credentials embedded in the URL are split out into username/password;
-    they are never logged — _write_error redacts the token, and the proxy
-    string itself must be run through cli_support.redact_proxy before display.
-    """
     if not proxy_url:
         return {}
     from urllib.parse import unquote, urlparse

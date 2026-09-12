@@ -1,30 +1,4 @@
-"""Process management facade.
 
-The implementation lives in the :mod:`profiledock.process` package:
-
-- ``process.errors``     — shared exception types
-- ``process.state``      — runtime state files (paths, atomic private writes,
-  schema validation, legacy upgrades, error reports)
-- ``process.identity``   — process identity, discovery and termination
-  primitives (all platform-specific code lives here)
-- ``process.ipc``        — controller client communication
-- ``process.direct``     — direct Chrome engine lifecycle
-- ``process.playwright`` — Playwright engine launcher lifecycle
-- ``process.controller`` — controller subprocess entry point (IPC server side)
-- ``process.manager``    — status reporting and close orchestration
-
-This module keeps the historical import surface stable: every name that used
-to be defined here is re-exported, and ``python -m profiledock.process_manager
---controller ...`` remains the controller subprocess entry point.
-
-A handful of primitives (``_alive``, ``_is_matching_process``,
-``_get_process_create_time``, ``_list_processes``, ``_stop_process``,
-``_atomic_private_json``, ``_controller_available``,
-``_system_browser_executable``, ``is_running``, ``_MAX_RESPONSE_BYTES``) are
-resolved through this facade at call time by the submodules, so monkeypatching
-``profiledock.process_manager.<name>`` keeps affecting behaviour exactly as it
-did before the split.
-"""
 
 import argparse
 import ctypes

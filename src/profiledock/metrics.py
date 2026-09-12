@@ -1,16 +1,4 @@
-"""Profile resource metrics: live process telemetry plus static disk footprint.
 
-Domain service layer between the low-level samplers in
-:mod:`profiledock.process.metrics` and the presentation surfaces (``status
---metrics``, ``show``, ``top``, and the TUI inspector). Aggregates:
-
-- Live usage: full Chromium process-tree CPU %, RSS, and process counts for
-  running profiles (both direct and Playwright engines).
-- Storage usage: on-disk breakdown of a profile's browser-data directory into
-  browser data, cache, cookie storage, and logs.
-
-All aggregates are typed dataclasses with ``to_dict()`` for the JSON envelope.
-"""
 
 from __future__ import annotations
 
@@ -114,7 +102,7 @@ _COOKIES_FILE_NAMES = frozenset({"cookies", "cookies-journal"})
 
 
 def _categorize(relative_parts: tuple[str, ...], file_name: str) -> str:
-    """Bucket one file into cache, logs, cookies, or browser data."""
+
     lowered_parts = [part.lower() for part in relative_parts]
     lowered_name = file_name.lower()
     if any("cache" in part for part in lowered_parts):
@@ -127,16 +115,7 @@ def _categorize(relative_parts: tuple[str, ...], file_name: str) -> str:
 
 
 def storage_usage(data_dir: str | Path) -> StorageResourceUsage:
-    """Compute the on-disk footprint breakdown for one profile's browser data.
 
-    Walking is best-effort: unreadable files and symlinked/junctioned entries
-    are skipped so a partially accessible profile still yields totals.
-
-    Results are memoized per (path, tree mtime) for a short window: watch loops
-    and TUI refreshes re-request the breakdown every frame, but a browser-data
-    tree's total only changes when its contents change. The mtime check is
-    cheap; a full walk is skipped while nothing underneath has been touched.
-    """
     root = Path(data_dir)
     if not root.is_dir():
         return _zero_storage_usage()
@@ -181,7 +160,7 @@ _storage_usage_cache: dict[Path, tuple[float, float, StorageResourceUsage]] = {}
 
 
 def reset_storage_cache() -> None:
-    """Forget memoized disk breakdowns (used by tests and long-lived embedders)."""
+
     _storage_usage_cache.clear()
 
 
@@ -205,13 +184,7 @@ def measure_live_usage(
     sleep: Any = time.sleep,
     clock: Any = time.monotonic,
 ) -> LiveResourceUsage:
-    """Sample one browser process tree twice over ``cpu_sample_interval`` seconds.
 
-    Returns ``status="stopped"`` when the tree vanished or the root PID was
-    recycled, and ``status="degraded"`` when the OS refused metric queries.
-    CPU percentages are computed from cumulative CPU-time deltas over the
-    measured wall-clock window; memory comes from the second sample.
-    """
     try:
         first = sample_process_tree(root_pid, expected_create_time, sampler)
     except OSError:
@@ -349,13 +322,7 @@ def get_profile_metrics(
     cpu_sample_interval: float = 0.25,
     sampler: PlatformSampler | None = None,
 ) -> ProfileMetrics:
-    """Build the full metric snapshot for one profile.
 
-    ``status`` may be supplied by callers that already computed it (avoiding a
-    duplicate runtime-state read). When the profile is not verifiably running,
-    ``live`` is ``None``; live sampling failures degrade to ``None`` as well so
-    disk metrics remain available.
-    """
     from .process_manager import get_status
 
     if status is None:
@@ -386,14 +353,7 @@ def collect_profiles_metrics(
     sampler: PlatformSampler | None = None,
     max_workers: int = 8,
 ) -> list[ProfileMetrics]:
-    """Build metric snapshots for many profiles concurrently.
 
-    Each profile's live sampling involves a wall-clock sleep, so serial
-    collection costs ``interval * running-profiles`` per frame; fan-out keeps
-    it near ``interval`` total. The optional ``sampler`` is shared across
-    workers (samplers are stateless per call). Results are returned in input
-    order.
-    """
     if not profiles:
         return []
     statuses = [""] * len(profiles)

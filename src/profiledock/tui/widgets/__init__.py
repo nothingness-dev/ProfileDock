@@ -1,4 +1,4 @@
-"""Widget toolkit for the ProfileDock TUI."""
+
 
 from __future__ import annotations
 

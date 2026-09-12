@@ -1,9 +1,4 @@
-"""Lightweight HTML-to-Markdown and text extractor for terminal reading.
 
-Extracts readable article content, headings, lists, tables, and links while
-stripping navigation boilerplate, scripts, stylesheets, and tracking pixels.
-Uses standard library html.parser without adding heavy external dependencies.
-"""
 
 from __future__ import annotations
 
@@ -22,7 +17,7 @@ def _safe_text(value: str) -> str:
 
 
 class PageContentExtractor(HTMLParser):
-    """Parses HTML DOM into structured clean text and Markdown."""
+
 
     _SKIP_TAGS = frozenset(
         {
@@ -210,7 +205,7 @@ class PageContentExtractor(HTMLParser):
 
 
 def extract_page_markdown(html: str, base_url: str = "") -> dict[str, Any]:
-    """Parse HTML string and extract clean title, Markdown content, and link references."""
+
     if not html:
         return {"title": "", "content": "", "links": []}
 

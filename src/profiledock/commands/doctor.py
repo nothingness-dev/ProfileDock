@@ -1,4 +1,4 @@
-"""Diagnostics and self-repair commands: doctor."""
+
 
 import typer
 

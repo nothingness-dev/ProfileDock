@@ -440,7 +440,7 @@ def test_restore_quarantine_failure_rolls_back_existing_profiles(tmp_path):
         with pytest.raises(PermissionError, match="simulated AV lock"):
             restore_backup_archive(archive_file, dst_paths, overwrite=True)
 
-    # 1: quarantine p1 (ok), 2: quarantine p2 (fails), 3: rollback of p1's quarantine
+
     assert calls["count"] == 3
     assert (dst_paths.profiles_dir / "p1" / "browser-data" / "p1.txt").read_text(
         encoding="utf-8"

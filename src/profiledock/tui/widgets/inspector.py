@@ -1,4 +1,4 @@
-"""Right-pane inspector widgets: profile rail, telemetry cards, output view."""
+
 
 from __future__ import annotations
 
@@ -38,12 +38,6 @@ def _status_badge(status: str, pid: int | None) -> str:
 
 
 class ProfileRail(VimOptionList):
-    """Compact profile list with live status badges.
-
-    Single click focuses a profile (telemetry follows); double click opens
-    the launch form. Keyboard Enter always opens launch.
-    """
-
     double_click_selects = True
 
     DEFAULT_CSS = """
@@ -72,10 +66,10 @@ class ProfileRail(VimOptionList):
             return self.rail
 
     class Highlighted(RailMessage):
-        """The highlighted profile changed."""
+        pass
 
     class Selected(RailMessage):
-        """A profile row was chosen with Enter."""
+        pass
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -168,8 +162,6 @@ def _row_prompt(row: ProfileRow, name_width: int, highlighted: bool) -> str:
 
 
 class TelemetryCards(Static):
-    """Label/value telemetry card grid for the selected profile."""
-
     DEFAULT_CSS = """
     TelemetryCards {
         background: transparent;
@@ -190,8 +182,6 @@ class TelemetryCards(Static):
 
 
 class CommandPreview(Static):
-    """Amber action-path banner describing the highlighted command."""
-
     DEFAULT_CSS = """
     CommandPreview {
         padding: 0 2;
@@ -212,8 +202,6 @@ class CommandPreview(Static):
 
 
 class OutputPane(VerticalScroll):
-    """Scrollable result view with a CLI-faithful exit badge."""
-
     can_focus = True
 
     DEFAULT_CSS = """

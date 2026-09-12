@@ -1,4 +1,4 @@
-"""Tests for the resource metrics subsystem (fully mocked OS telemetry)."""
+
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from profiledock.process.metrics import (
 
 
 class FakeSampler(PlatformSampler):
-    """Deterministic sampler returning scripted detail snapshots in order."""
+
 
     def __init__(
         self,
@@ -91,8 +91,8 @@ def _no_sleep(_seconds: float) -> None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Tree aggregation
+
+
 
 
 def test_single_process_tree_aggregation():
@@ -145,7 +145,7 @@ def test_multi_process_tree_aggregation_and_roles():
         sleep=_no_sleep,
         clock=_clock([0.0, 1.0]),
     )
-    # Unrelated PID 99 must not leak into the tree.
+
     assert usage.process_count == 3
     assert usage.total_cpu_percent == pytest.approx((1.0 + 1.0 + 0.5) * 100.0)
     assert usage.total_memory_rss_bytes == float(120 + 340 + 60)
@@ -189,7 +189,7 @@ def test_child_spawned_mid_interval_gets_zero_cpu():
     first = {10: _sample(10, 1, 1.0, 100)}
     second = {
         10: _sample(10, 1, 1.5, 100),
-        11: _sample(11, 10, 9.9, 80),  # not present in the first sample
+        11: _sample(11, 10, 9.9, 80),
     }
     sampler = FakeSampler(identities, [first, second])
     usage = measure_live_usage(
@@ -213,7 +213,7 @@ def test_child_exit_mid_sample_is_skipped_gracefully():
         10: _sample(10, 1, 1.0, 100),
         11: _sample(11, 10, 0.5, 80),
     }
-    second = {10: _sample(10, 1, 1.5, 100)}  # PID 11 exited during the window
+    second = {10: _sample(10, 1, 1.5, 100)}
     sampler = FakeSampler(identities, [first, second])
     usage = measure_live_usage(
         10,
@@ -291,7 +291,7 @@ def test_tree_vanishing_mid_window_returns_stopped():
 
 def test_cpu_percent_between_helper():
     prev = {1: _sample(1, 0, 1.0, 0), 2: _sample(2, 1, 0.5, 0)}
-    current = [_sample(1, 0, 1.25, 0), _sample(2, 1, 0.25, 0)]  # PID 2 went backwards
+    current = [_sample(1, 0, 1.25, 0), _sample(2, 1, 0.25, 0)]
     assert cpu_percent_between(prev, current, 1.0) == pytest.approx(25.0)
     assert cpu_percent_between(prev, current, 0.0) == 0.0
     assert cpu_percent_between({}, current, 1.0) == 0.0
@@ -312,8 +312,8 @@ def test_classify_role_precedence():
     assert classify_role(unknown) == "utility"
 
 
-# ---------------------------------------------------------------------------
-# Disk storage breakdown
+
+
 
 
 def test_storage_usage_buckets_dummy_tree(tmp_path):
@@ -360,11 +360,11 @@ def test_storage_skips_symlink_entries(tmp_path):
     except OSError:
         pytest.skip("symlinks unavailable on this platform")
     usage = storage_usage(root)
-    assert usage.cache_bytes == 100  # symlink target not followed
+    assert usage.cache_bytes == 100
 
 
-# ---------------------------------------------------------------------------
-# Domain service aggregation
+
+
 
 
 def _fake_profile(profile_id="abc123", name="Work", engine="direct", data_dir="/tmp/pd"):

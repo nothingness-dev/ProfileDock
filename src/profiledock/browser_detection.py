@@ -1,8 +1,4 @@
-"""Single source of truth for supported system browser discovery.
 
-Shared by the direct engine launcher and the interactive TUI so candidate
-paths, command names, and aliases never drift apart.
-"""
 
 import os
 import shutil
@@ -81,7 +77,7 @@ def _candidate_paths(group: str) -> list[Path]:
 
 
 def system_browser_executable(preferred: str | None = None) -> Path | None:
-    """Return the first existing Chrome or Chromium binary, honoring an alias."""
+
     group = _PREFERRED_GROUP.get(preferred.lower()) if preferred else None
     if preferred and group is None:
         return None
@@ -94,5 +90,5 @@ def system_browser_executable(preferred: str | None = None) -> Path | None:
 
 
 def browser_rows() -> tuple[tuple[str, tuple[str, ...]], ...]:
-    """Static display rows for interactive pickers; callers filter by existence."""
+
     return _BROWSER_ROWS

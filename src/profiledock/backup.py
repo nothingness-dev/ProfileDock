@@ -65,7 +65,7 @@ class BackupReport:
 
 
 class _HashingFileReader:
-    """Streams data from a file handle while computing SHA-256 digest and counting bytes."""
+
 
     def __init__(self, handle: IO[bytes]) -> None:
         self._handle = handle
@@ -103,7 +103,7 @@ def _is_runtime_or_log_file(rel_path_str: str) -> bool:
 
 
 def _is_cache_file(rel_path_str: str) -> bool:
-    """Detect transient Chromium cache files and directories that can be safely excluded."""
+
     parts = Path(rel_path_str).parts
     for part in parts:
         lower = part.lower()
@@ -126,7 +126,7 @@ def _is_cache_file(rel_path_str: str) -> bool:
 
 
 def _scan_directory_branch(sub_dir: Path, data_dir: Path, exclude_cache: bool = False) -> list[str]:
-    """Scans a subdirectory branch and returns relative file paths under data_dir."""
+
     branch_files: list[str] = []
     for root_dir, directory_names, filenames in os.walk(sub_dir, followlinks=False):
         root_path = Path(root_dir)
@@ -321,13 +321,7 @@ class VerifyReport:
 
 
 def verify_backup_archive(archive_path: Path) -> VerifyReport:
-    """Validate a backup archive without touching any destination data.
 
-    Runs the same structural checks as restore (manifest schema, totals,
-    member paths and sizes) and then verifies every file member's SHA-256
-    against the manifest. Content verification reads each member through the
-    streaming hasher so archives are checked without extracting to disk.
-    """
     from .restore import (
         MAX_MEMBER_SIZE_BYTES,
         MAX_TOTAL_EXTRACT_BYTES,

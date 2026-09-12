@@ -481,7 +481,7 @@ def test_close_all_closes_running_and_counts_stopped(tmp_path):
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "One"])
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "Two"])
 
-    # Keep the real close path from signalling anything; only count behavior.
+
     def fake_close_controller(data_dir, timeout=15, runtime_dir=None):
         return None
 
@@ -538,12 +538,7 @@ def test_close_rejects_profile_and_all_together(tmp_path):
 
 
 def test_hand_closed_browser_reports_crashed_and_cleans_state(tmp_path):
-    """Closing the browser window by hand (clicking X) must not read 'running'.
 
-    The controller process survives a hand-closed browser, so a running verdict
-    requires the recorded browser process to be alive as well; its death is a
-    crash and the stale state file is removed.
-    """
     from profiledock.data_root import resolve_data_root
     from profiledock.process_manager import get_status
     from profiledock.profile_manager import ProfileManager
@@ -560,7 +555,7 @@ def test_hand_closed_browser_reports_crashed_and_cleans_state(tmp_path):
             "protocol_version": 2,
             "engine": "playwright",
             "profile_id": profile.id,
-            "controller_pid": 424242,  # a PID that is actually alive-ish per patch below
+            "controller_pid": 424242,
             "browser_pid": 424243,
             "browser_create_time": 1000.0,
             "launcher_pid": 0,
@@ -579,7 +574,7 @@ def test_hand_closed_browser_reports_crashed_and_cleans_state(tmp_path):
 
     state_path = tmp_path / "runtime" / profile.id / "running.json"
     if not state_path.exists():
-        return  # engine path unavailable in this environment; nothing to assert
+        return
 
     with (
         patch("profiledock.process_manager._alive", side_effect=lambda pid: pid == 424242),
