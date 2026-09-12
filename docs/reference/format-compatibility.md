@@ -14,9 +14,9 @@ ProfileDock versions every persistent or machine-consumed format independently. 
 
 ## Profile metadata
 
-`profiles.json` uses schema version 1. The document contains exactly `schema_version` and `profiles`. Every version 1 profile contains `id`, `name`, `created_at`, `data_dir`, `last_launched_at`, `engine`, and `launch_config`. The `engine` value is `direct`, `playwright`, or `null`.
+`profiles.json` uses schema version 2. The document contains exactly `schema_version` and `profiles`. Every version 2 profile contains `id`, `name`, `created_at`, `data_dir`, `last_launched_at`, `engine`, `launch_config`, and `tags`. `tags` is an ordered list of unique, non-empty tags without whitespace. The `engine` value is `direct`, `playwright`, or `null`.
 
-The historical version 0 format was a bare array. Early version 1 files that omitted optional fields are accepted by the compatibility adapter and canonicalized. Migration writes the original to the configured metadata backup location before replacing it.
+The historical version 0 format was a bare array. Version 1 files are upgraded to version 2 by adding `tags: []`. Early version 1 files that omitted optional fields are accepted by the compatibility adapter and canonicalized. Migration writes the original to the configured metadata backup location before replacing it.
 
 ## Launch configuration
 

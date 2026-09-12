@@ -4,7 +4,7 @@ This document freezes the command-line interface planned for ProfileDock 1.0. Th
 
 ## Command surface
 
-The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `proxy-test`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, `cookies`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, and `config`.
+The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `tags`, `proxy-test`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, `cookies`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, and `config`.
 
 The `config` commands are `show`, `set`, `add-url`, `remove-url`, and `reset`. `config set` accepts the setting names `default-tabs`, `engine`, `browser`, and `window-size`.
 
@@ -20,6 +20,8 @@ The only engine values are `direct` and `playwright`.
 - `set-engine <profile> <engine>` updates profile metadata.
 - `config set <profile> engine <engine>` updates the launch preset.
 - Launch resolution is: explicit `launch --engine`, launch-config engine, profile engine, `PROFILEDOCK_DEFAULT_ENGINE`, then `direct`. Playwright launches open a visible Chromium window unless `--headless` is supplied.
+- `tags <profile> [tag ...]` replaces fleet tags. At least one tag or `--clear` is required; `--clear` cannot be combined with tags.
+- `launch` accepts exactly one target selector: a profile argument, `--tag`, or `--all`. `launch --json` is valid only with `--tag` or `--all` and emits a version-1 batch outcome envelope.
 - Profile JSON returned by `list`, `show`, and `status` exposes the effective engine, not merely the nullable metadata value.
 - Launch-config JSON exposes its independently stored engine value.
 

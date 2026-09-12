@@ -35,11 +35,11 @@ Chromium stores cookies, sessions, local storage, cache, history, extensions, an
 
 ## Metadata
 
-`metadata/profiles.json` uses schema version 1:
+`metadata/profiles.json` uses schema version 2:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profiles": [
     {
       "id": "abc123",
@@ -48,7 +48,8 @@ Chromium stores cookies, sessions, local storage, cache, history, extensions, an
       "data_dir": "/path/to/profiles/abc123/browser-data",
       "last_launched_at": null,
       "engine": "direct",
-      "launch_config": null
+      "launch_config": null,
+      "tags": []
     }
   ]
 }

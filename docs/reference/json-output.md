@@ -89,6 +89,10 @@ The `storage` object is always present. `live` is `null` when the profile is not
 
 With `--metrics`/`-m`, each item gains a `metrics` key carrying the same object described under `show PROFILE --json`; the default (no `--metrics`) payload is unchanged.
 
+## `launch --tag TAG --json` and `launch --all --json`
+
+`command` is `launch`. JSON output is available only for batch launches. `data` contains `started`, `failed`, and `outcomes`. Every outcome contains `profile`, `status` (`started` or `failed`), and a `name` when the profile could be resolved. Failed outcomes also include a redacted `error` string.
+
 ## `top [PROFILE] --json`
 
 `command` is `top`. `data` is an object with `interval_seconds`, `watch`, and a `profiles` array. Each row:
@@ -111,17 +115,21 @@ Live columns (`cpu_percent`, `memory_rss_bytes`, `process_count`, `tab_count`) a
 
 ## `config show PROFILE --json`
 
-`command` is `config show`. `data` follows launch-configuration schema version 1:
+`command` is `config show`. `data` follows launch-configuration schema version 2:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "default_tabs": 4,
   "start_urls": ["https://example.com"],
   "engine": "playwright",
   "browser": "chromium",
   "window_width": 1440,
-  "window_height": 900
+  "window_height": 900,
+  "proxy": null,
+  "user_agent": null,
+  "locale": null,
+  "timezone": null
 }
 ```
 

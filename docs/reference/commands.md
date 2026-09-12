@@ -66,6 +66,23 @@ profiledock set-engine PROFILE direct|playwright
 
 Updates the profile-level engine. A launch-config engine can still override it.
 
+## `tags`
+
+```text
+profiledock tags PROFILE [TAG ...] [--clear]
+```
+
+Sets a profile's fleet tags, replacing the current list. Tags are normalized
+(no spaces, deduplicated, order preserved). Supply one or more tags, or use
+`--clear` to remove all tags. `--clear` cannot be combined with tags.
+
+Examples:
+
+```bash
+profiledock tags Work fleet core
+profiledock tags Work --clear
+```
+
 ## `proxy-test`
 
 ```text
@@ -173,7 +190,7 @@ Without a selector, reports every profile. With a selector, reports one. Status 
 ## `launch`
 
 ```text
-profiledock launch PROFILE [OPTIONS]
+profiledock launch [PROFILE] [OPTIONS] [--tag TAG | --all] [--json]
 ```
 
 Options:
@@ -181,6 +198,9 @@ Options:
 | Option | Meaning |
 |---|---|
 | `--tabs N`, `-t N` | Number of tabs or pages, at least 1. |
+| `--tag TAG` | Launch every profile carrying this tag, one after another. |
+| `--all`, `-a` | Launch every profile, one after another. |
+| `--json` | Batch mode only: emit per-profile outcomes as JSON. |
 | `--engine VALUE`, `-e VALUE` | One-launch `direct` or `playwright` override. |
 | `--browser VALUE`, `-b VALUE` | Browser name or executable path. |
 | `--url URL`, `-u URL` | Start URL; repeat for multiple pages. |
@@ -194,6 +214,8 @@ Options:
 Proxy strings with embedded credentials are accepted by the Playwright engine and are always redacted to `user:***@host` in `show`, `config show`, and logs. The Direct engine supports only credentialess proxies via `--proxy-server`.
 
 Playwright launches open a visible Chromium window by default; pass `--headless` for a background Playwright launch. The Direct engine does not accept `--headless`. The command returns only after the controller and browser are fully ready, and a failed startup rolls back all runtime artifacts. When no tab count or preset exists, interactive mode prompts. Non-interactive mode requires `--tabs`. Start URLs cannot outnumber tabs. Duplicate launch is refused while the profile is starting or already running. Launch writes runtime state outside `browser-data` and records the launch timestamp after success.
+
+Batch mode (`--tag TAG` or `--all`) launches each matching profile in metadata order with the same per-launch overrides (`--tabs`, `--engine`, `--url`, identity presets apply to every profile). A per-profile failure is reported and never aborts the rest of the batch; the command prints one line per profile plus a `N started, M failed` summary, or a per-profile outcome array with `--json`. Specify exactly one profile selector: a profile, `--tag`, or `--all`. `--json` is available only for batch mode. Tag with `profiledock tags PROFILE TAG...`.
 
 Readiness means the browser and authenticated controller are available; start URLs may still be loading. Slow start URLs do not delay readiness probes. Automation commands that start a stopped profile reuse its saved proxy, user-agent, locale, and timezone in both the CLI and interactive interface.
 
