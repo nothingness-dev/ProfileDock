@@ -66,6 +66,29 @@ profiledock set-engine PROFILE direct|playwright
 
 Updates the profile-level engine. A launch-config engine can still override it.
 
+## `proxy-test`
+
+```text
+profiledock proxy-test [PROFILE] [--proxy URL] [--timeout SECONDS] [--write]
+```
+
+Tests proxy egress: resolves the exit IP through the proxy itself, reports
+latency, and shows the IANA timezone the IP belongs to. It supports HTTP(S)
+proxies; SOCKS5 testing is not available through this command. With a PROFILE,
+the stored preset proxy is used unless `--proxy` overrides it. `--write` saves
+the suggested timezone (and locale when the geo service provides one) into the
+profile's launch config, keeping the browser clock aligned with the exit IP.
+The lookup calls `ipapi.co` through the proxy, so that service receives the
+proxy exit IP and request metadata.
+
+Examples:
+
+```bash
+profiledock proxy-test Work
+profiledock proxy-test --proxy http://user:pass@proxy.example.com:8080
+profiledock proxy-test Work --write
+```
+
 ## `config show`
 
 ```text

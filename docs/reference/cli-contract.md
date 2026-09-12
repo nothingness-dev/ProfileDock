@@ -4,7 +4,7 @@ This document freezes the command-line interface planned for ProfileDock 1.0. Th
 
 ## Command surface
 
-The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, `cookies`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, and `config`.
+The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `proxy-test`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, `cookies`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, and `config`.
 
 The `config` commands are `show`, `set`, `add-url`, `remove-url`, and `reset`. `config set` accepts the setting names `default-tabs`, `engine`, `browser`, and `window-size`.
 
