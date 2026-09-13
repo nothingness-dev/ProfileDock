@@ -36,9 +36,28 @@ MAX_ARCHIVE_MEMBERS = 100000
 
 _WINDOWS_RESERVED_NAMES = frozenset(
     {
-        "con", "prn", "aux", "nul",
-        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        "com1",
+        "com2",
+        "com3",
+        "com4",
+        "com5",
+        "com6",
+        "com7",
+        "com8",
+        "com9",
+        "lpt1",
+        "lpt2",
+        "lpt3",
+        "lpt4",
+        "lpt5",
+        "lpt6",
+        "lpt7",
+        "lpt8",
+        "lpt9",
     }
 )
 
@@ -83,8 +102,6 @@ def _restore_quarantines(quarantined: list[tuple[Path, Path]]) -> list[str]:
 
 @dataclass
 class ArchiveProfileResult:
-
-
     id: str
     name: str
     engine: str | None
@@ -325,9 +342,7 @@ def _restore_stream(
     format_version = manifest.get("format_version")
     if type(format_version) is not int or format_version != 1:
         raise InvalidArchiveError(f"unsupported backup archive format version: {format_version}")
-    if not isinstance(manifest["profiledock_version"], str) or not isinstance(
-        manifest["created_at"], str
-    ):
+    if not isinstance(manifest["profiledock_version"], str) or not isinstance(manifest["created_at"], str):
         raise InvalidArchiveError("manifest version and creation time must be strings")
     for field in ("total_profiles", "total_files", "total_bytes"):
         if type(manifest[field]) is not int or manifest[field] < 0:
@@ -370,9 +385,7 @@ def _restore_stream(
         if not member.isfile() and not member.isdir():
             raise DecompressionSecurityError(f"archive member has an unsafe type: {member.name}")
         if member.size > MAX_MEMBER_SIZE_BYTES:
-            raise DecompressionSecurityError(
-                f"archive member exceeds maximum allowed size: {member.name}"
-            )
+            raise DecompressionSecurityError(f"archive member exceeds maximum allowed size: {member.name}")
         total_extracted_bytes += member.size
         if total_extracted_bytes > MAX_TOTAL_EXTRACT_BYTES:
             raise DecompressionSecurityError(
@@ -485,9 +498,7 @@ def _restore_stream(
                     try:
                         member = tar.getmember(member_path)
                     except KeyError as exc:
-                        raise InvalidArchiveError(
-                            f"archive missing member for file '{member_path}'"
-                        ) from exc
+                        raise InvalidArchiveError(f"archive missing member for file '{member_path}'") from exc
 
                     target_file_path = temp_browser_data / rel_file_path
                     target_file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

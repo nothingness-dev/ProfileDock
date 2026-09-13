@@ -481,7 +481,6 @@ def test_close_all_closes_running_and_counts_stopped(tmp_path):
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "One"])
     runner.invoke(app, ["--data-root", str(tmp_path), "create", "Two"])
 
-
     def fake_close_controller(data_dir, timeout=15, runtime_dir=None):
         return None
 

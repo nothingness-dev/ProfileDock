@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,15 +17,11 @@ from .validation import (
 
 
 class LaunchPlanError(ValueError):
-
-
     category = "invalid_input"
 
 
 @dataclass(frozen=True)
 class LaunchPlan:
-
-
     engine: str
     tabs: int
     urls: tuple[str, ...]

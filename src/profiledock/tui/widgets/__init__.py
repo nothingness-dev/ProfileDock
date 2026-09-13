@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from .bars import FooterBar, HeaderBar, breadcrumb

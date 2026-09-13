@@ -65,8 +65,6 @@ class BackupReport:
 
 
 class _HashingFileReader:
-
-
     def __init__(self, handle: IO[bytes]) -> None:
         self._handle = handle
         self._hasher = sha256()

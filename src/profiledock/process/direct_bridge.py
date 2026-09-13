@@ -202,9 +202,7 @@ def run_direct_cdp_command(
                 if not str(cookie.get("name", "")).strip() or not isinstance(cookie.get("value"), str):
                     raise BrowserLaunchError("each cookie needs a non-empty name and a string value")
                 if not cookie.get("domain") and not cookie.get("url"):
-                    raise BrowserLaunchError(
-                        f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'"
-                    )
+                    raise BrowserLaunchError(f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'")
             context.add_cookies(cookies)
             return {"status": "ok", "added": len(cookies), "total_cookies": len(context.cookies())}
 
@@ -223,9 +221,7 @@ def run_direct_cdp_command(
                     if not str(cookie.get("name", "")).strip():
                         raise BrowserLaunchError("each cookie needs a non-empty name to delete")
                     if not cookie.get("domain") and not cookie.get("url"):
-                        raise BrowserLaunchError(
-                            f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'"
-                        )
+                        raise BrowserLaunchError(f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'")
                     checked_entries.append(cookie)
             checked_urls: list[str] = []
             if urls is not None:

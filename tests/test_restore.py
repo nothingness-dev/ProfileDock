@@ -254,7 +254,9 @@ def test_restore_conflict_handling_and_force(tmp_path):
 
     dst_p = Profile("p1", "DifferentName", "2026-01-01T00:00:00+00:00", str(dst_p1_data), engine="playwright")
     save_metadata(
-        MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[dst_p]), dst_paths.profiles_file, dst_paths.profiles_dir
+        MetadataDocument(schema_version=METADATA_SCHEMA_VERSION, profiles=[dst_p]),
+        dst_paths.profiles_file,
+        dst_paths.profiles_dir,
     )
 
     with pytest.raises(RestoreConflictError, match="conflict: profile ID 'p1' already exists"):
@@ -439,7 +441,6 @@ def test_restore_quarantine_failure_rolls_back_existing_profiles(tmp_path):
     with patch("profiledock.restore._replace_with_retry", side_effect=flaky_replace):
         with pytest.raises(PermissionError, match="simulated AV lock"):
             restore_backup_archive(archive_file, dst_paths, overwrite=True)
-
 
     assert calls["count"] == 3
     assert (dst_paths.profiles_dir / "p1" / "browser-data" / "p1.txt").read_text(

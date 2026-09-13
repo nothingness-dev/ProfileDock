@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -24,8 +22,6 @@ def _contrast(app_theme: str) -> str:
 
 
 class HeaderBar(Static):
-
-
     DEFAULT_CSS = """
     HeaderBar {
         dock: top;
@@ -72,8 +68,6 @@ class HeaderBar(Static):
 
 
 class FooterBar(Widget):
-
-
     DEFAULT_CSS = """
     FooterBar {
         dock: bottom;

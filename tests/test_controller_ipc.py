@@ -220,7 +220,6 @@ def test_cookies_url_filter_rejects_bare_domain(tmp_path: Path):
     assert result.exit_code == 1
     assert "invalid URL scheme" in result.output
 
-
     with (
         patch("profiledock.cli.manager") as selected_manager,
         patch(
@@ -279,10 +278,6 @@ def test_cookies_domain_filter_matches_suffix(tmp_path: Path):
     assert envelope["command"] == "cookies"
     names = [c["name"] for c in envelope["data"]]
     assert sorted(names) == ["a", "b"]
-
-
-
-
 
 
 NETSCAPE_SAMPLE = (
@@ -729,7 +724,11 @@ def test_execute_ipc_command_current_generation_accepted():
     mock_context = MagicMock()
     mock_context.pages = [MagicMock(), mock_page]
 
-    cmd = {"cmd": "close_tab", "token": "tok", "args": {"index": 1, "generation": controller_module._tabs_generation}}
+    cmd = {
+        "cmd": "close_tab",
+        "token": "tok",
+        "args": {"index": 1, "generation": controller_module._tabs_generation},
+    }
     resp, _ = _execute_ipc_command(cmd, mock_context, token="tok")
     assert resp["status"] == "ok"
     mock_page.close.assert_called_once()

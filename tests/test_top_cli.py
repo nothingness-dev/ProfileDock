@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import json
@@ -88,10 +86,6 @@ def _patch_manager(profiles):
             runtime_path=lambda profile_id: "/tmp/runtime",
         ),
     )
-
-
-
-
 
 
 def test_top_json_schema_contract():
@@ -191,10 +185,6 @@ def test_top_help_lists_options():
     assert result.exit_code == 0
     for flag in ("--watch", "-w", "--interval", "-i", "--json"):
         assert flag in result.output
-
-
-
-
 
 
 def test_format_cpu_percent():

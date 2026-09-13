@@ -518,7 +518,6 @@ def test_repair_recreation_rolls_back_when_later_profile_is_active(tmp_path):
     with patch("profiledock.doctor.is_active_for_mutation", side_effect=active_state):
         repairs = repair_environment(tmp_path, recreate_missing_directories=True)
 
-
     assert not first_data.exists()
     assert not second_data.exists()
     assert any(r.status == STATUS_FAILED for r in repairs)
@@ -731,7 +730,6 @@ def test_check_disk_space_reports_low_space(tmp_path):
     chk = check_disk_space(tmp_path)
     assert chk.id == "disk_space"
 
-
     assert chk.status in (STATUS_OK, STATUS_WARNING)
 
 
@@ -788,7 +786,6 @@ def test_check_metadata_lock_state_reports_stuck_lock(tmp_path):
 
     layout = paths(tmp_path)
 
-
     release = threading.Event()
     acquired = threading.Event()
 
@@ -829,7 +826,6 @@ def test_doctor_strict_flag_fails_on_warnings():
         result = runner.invoke(app, ["doctor", "--strict"])
     assert result.exit_code == EXIT_USER_ERROR
     assert "WARNING" in result.output
-
 
     with patch("profiledock.cli.run_diagnostics") as mock_diag:
         mock_diag.return_value = [
@@ -944,7 +940,6 @@ def test_recovery_preserves_corrupt_primary_for_inspection(tmp_path):
     repairs = repair_environment(tmp_path)
     assert any(r.id == "repair_metadata_recovery" for r in repairs)
 
-
     preserved = list(layout.metadata_dir.glob("*profiles.json*")) + list(layout.root.glob("*profiles.json*"))
     preserved_contents = {p.name: p.read_text(encoding="utf-8") for p in preserved}
     assert any(content == corrupt_content for content in preserved_contents.values()), (
@@ -1017,9 +1012,7 @@ def test_repair_failure_is_reported_not_swallowed(tmp_path):
         encoding="utf-8",
     )
 
-    with patch(
-        "profiledock.doctor.is_active_for_mutation", return_value=True
-    ):
+    with patch("profiledock.doctor.is_active_for_mutation", return_value=True):
         repairs = repair_environment(tmp_path, recreate_missing_directories=True)
     assert not missing_data_dir.exists()
 

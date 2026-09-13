@@ -29,9 +29,7 @@ def _ctx_with_cookies(stored):
 
     session.send.side_effect = _send
     context.new_cdp_session.return_value = session
-    context.cookies.side_effect = lambda urls=None: [
-        c for c in jar if not urls or c.get("url") in urls
-    ]
+    context.cookies.side_effect = lambda urls=None: [c for c in jar if not urls or c.get("url") in urls]
     context.pages = [MagicMock(url="https://example.com")]
     context.sent = sent
     return context, jar
@@ -95,9 +93,7 @@ def test_controller_delete_cookies_bulk_by_urls():
 def test_direct_bridge_delete_cookies_parity(monkeypatch):
     from profiledock.process import direct_bridge as bridge
 
-    context, jar = _ctx_with_cookies(
-        [{"name": "a", "value": "1", "domain": ".example.com", "path": "/"}]
-    )
+    context, jar = _ctx_with_cookies([{"name": "a", "value": "1", "domain": ".example.com", "path": "/"}])
     playwright = MagicMock()
     browser = MagicMock()
     browser.contexts = [context]

@@ -1,5 +1,3 @@
-
-
 from pathlib import Path
 
 from .direct import _close_direct

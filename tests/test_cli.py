@@ -1114,7 +1114,6 @@ def test_launch_proxy_flag_overrides_and_validates(tmp_path, monkeypatch):
 
     paths = resolve_data_root(Path(tmp_path), prepare=True)
 
-
     ProfileManager(paths).create("ProxyP", engine="playwright")
     ProfileManager(paths).update_launch_config("ProxyP", proxy="http://preset:1")
 
@@ -1203,7 +1202,6 @@ def test_config_set_proxy_round_trip_redacted(tmp_path):
     payload = json.loads(shown.output)
     assert payload["data"]["proxy"] == "http://user:***@127.0.0.1:8080"
     assert "hunter2" not in shown.output
-
 
     from profiledock.data_root import resolve_data_root
     from profiledock.profile_manager import ProfileManager

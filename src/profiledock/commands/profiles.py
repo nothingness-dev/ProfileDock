@@ -1,5 +1,3 @@
-
-
 import typer
 
 from ..cli_support import (

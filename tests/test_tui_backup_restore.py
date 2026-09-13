@@ -16,7 +16,9 @@ def _fresh_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     from profiledock import cli_support
 
     monkeypatch.setattr(cli_support, "_paths", cli_support.ContextVar("pd_test_paths", default=None))
-    monkeypatch.setattr(cli_support, "_paths_prepared", cli_support.ContextVar("pd_test_prepared", default=False))
+    monkeypatch.setattr(
+        cli_support, "_paths_prepared", cli_support.ContextVar("pd_test_prepared", default=False)
+    )
     return tmp
 
 
@@ -31,9 +33,7 @@ def _make_profile_with_data(paths, name: str = "Work") -> Profile:
     return profile
 
 
-def test_backup_output_shows_elapsed_seconds(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_backup_output_shows_elapsed_seconds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import asyncio
 
     from textual.widgets import Input
@@ -86,9 +86,7 @@ def test_backup_output_shows_elapsed_seconds(
     asyncio.run(scenario())
 
 
-def test_restore_modal_has_clickable_confirm_button(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_restore_modal_has_clickable_confirm_button(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import asyncio
 
     from textual.widgets import Button, Input
@@ -143,9 +141,7 @@ def test_restore_modal_has_clickable_confirm_button(
     asyncio.run(scenario())
 
 
-def test_restore_modal_cancel_button_returns_to_form(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_restore_modal_cancel_button_returns_to_form(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import asyncio
 
     from textual.widgets import Button, Input

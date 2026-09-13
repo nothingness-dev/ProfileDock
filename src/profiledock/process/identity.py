@@ -1,5 +1,3 @@
-
-
 import ctypes
 import os
 import signal
@@ -326,7 +324,6 @@ def _find_browser_pid(controller_pid: int) -> int:
 
 
 def _terminate_matching_process(pid: int, expected_create_time: float | None, timeout: float) -> bool:
-
 
     from profiledock.process_manager import _alive as _alive_impl
     from profiledock.process_manager import _is_matching_process as _is_matching_process_impl

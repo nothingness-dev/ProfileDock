@@ -1,5 +1,3 @@
-
-
 import argparse
 import hmac
 import json
@@ -101,9 +99,7 @@ def _tabs_snapshot(context: "BrowserContext") -> list[dict[str, Any]]:
     return pages_info
 
 
-def _delete_cookies_live(
-    context: "BrowserContext", entries: list[dict[str, Any]], urls: list[str]
-) -> int:
+def _delete_cookies_live(context: "BrowserContext", entries: list[dict[str, Any]], urls: list[str]) -> int:
     for entry in entries:
         if not isinstance(entry.get("name"), str) or not entry["name"]:
             raise ValueError("cookie name must be a non-empty string")
@@ -306,9 +302,7 @@ def _execute_ipc_command(
                 "const timer = new Promise((_, reject) => {"
                 "setTimeout(() => reject(new Error('JavaScript evaluation timed out')), 10000);"
                 "});"
-                "return await Promise.race([Promise.resolve((0, eval)("
-                + json.dumps(script)
-                + ")), timer]);"
+                "return await Promise.race([Promise.resolve((0, eval)(" + json.dumps(script) + ")), timer]);"
                 "})()"
             )
             evaluation = session.send(

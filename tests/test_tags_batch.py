@@ -184,13 +184,25 @@ def test_launch_batch_tag_selects_subset_and_reports_per_profile_outcomes(monkey
         engine="direct", tabs=1, urls=[], browser=None, window_width=None, window_height=None
     )
     runner = CliRunner()
-    with patch(
-        "profiledock.commands.browser._resolve_launch_options",
-        side_effect=[
-            MagicMock(profile=a, plan=good_plan, engine="direct", tabs=1, urls=[], browser=None, width=None, height=None),
-            ProfileNotFoundError("boom"),
-        ],
-    ), patch("profiledock.cli.start_direct_chrome", return_value={"pid": 123}):
+    with (
+        patch(
+            "profiledock.commands.browser._resolve_launch_options",
+            side_effect=[
+                MagicMock(
+                    profile=a,
+                    plan=good_plan,
+                    engine="direct",
+                    tabs=1,
+                    urls=[],
+                    browser=None,
+                    width=None,
+                    height=None,
+                ),
+                ProfileNotFoundError("boom"),
+            ],
+        ),
+        patch("profiledock.cli.start_direct_chrome", return_value={"pid": 123}),
+    ):
         result = runner.invoke(app, ["launch", "--tag", "fleet", "--tabs", "1"])
     assert result.exit_code == 0, result.output
     assert "Launched 'BatchA'." in result.output
@@ -220,9 +232,11 @@ def test_launch_batch_all_reports_json_outcomes(monkeypatch, tmp_path):
     from unittest.mock import MagicMock, patch
 
     runner = CliRunner()
-    with patch(
-        "profiledock.cli.start_direct_chrome", return_value={"pid": 1}
-    ), patch("profiledock.commands.browser._resolve_launch_options") as resolver:
+    with (
+        patch("profiledock.cli.start_direct_chrome", return_value={"pid": 1}),
+        patch("profiledock.commands.browser._resolve_launch_options") as resolver,
+    ):
+
         def _resolve(profile_id, *args, **kwargs):
             profile = manager.resolve(profile_id)
             return MagicMock(

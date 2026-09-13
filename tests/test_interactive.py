@@ -389,8 +389,6 @@ def test_action_hotkeys_are_unique():
 
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
 class TestInteractiveLifecycle:
-
-
     @pytest.fixture(autouse=True)
     def _isolated_data_root(self, tmp_path_factory, monkeypatch):
         from profiledock import cli as pd_cli
@@ -542,8 +540,6 @@ class TestInteractiveLifecycle:
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
 @pytest.mark.asyncio
 class TestDoubleClickUX:
-
-
     @pytest.fixture(autouse=True)
     def _isolated_data_root(self, tmp_path_factory, monkeypatch):
         from profiledock import cli as pd_cli
@@ -614,8 +610,6 @@ def app_instance_root():
 @pytest.mark.skipif(not TEXTUAL_INSTALLED, reason="textual extra not installed")
 @pytest.mark.asyncio
 class TestSelectionAndRealtimeRegressions:
-
-
     @pytest.fixture(autouse=True)
     def _isolated_data_root(self, tmp_path_factory, monkeypatch):
         from profiledock import cli as pd_cli

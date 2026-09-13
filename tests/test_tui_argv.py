@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from profiledock.tui.actions import (
@@ -162,7 +160,6 @@ def test_instant_actions_and_hotkeys_stay_unique():
 
 
 def test_field_spec_argv_mode_defaults():
-
 
     toggle = FieldSpec("verbose_out", "Verbose", FieldKind.TOGGLE)
     number = FieldSpec("count", "Count", FieldKind.NUMBER)

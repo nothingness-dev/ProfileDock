@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import pytest
@@ -22,8 +20,6 @@ from profiledock.process.metrics import (
 
 
 class FakeSampler(PlatformSampler):
-
-
     def __init__(
         self,
         identities: dict[int, ProcessIdentity],
@@ -89,10 +85,6 @@ def _clock(pairs: list[float]):
 
 def _no_sleep(_seconds: float) -> None:
     return None
-
-
-
-
 
 
 def test_single_process_tree_aggregation():
@@ -312,10 +304,6 @@ def test_classify_role_precedence():
     assert classify_role(unknown) == "utility"
 
 
-
-
-
-
 def test_storage_usage_buckets_dummy_tree(tmp_path):
     root = tmp_path / "browser-data"
     (root / "Default" / "Cache").mkdir(parents=True)
@@ -361,10 +349,6 @@ def test_storage_skips_symlink_entries(tmp_path):
         pytest.skip("symlinks unavailable on this platform")
     usage = storage_usage(root)
     assert usage.cache_bytes == 100
-
-
-
-
 
 
 def _fake_profile(profile_id="abc123", name="Work", engine="direct", data_dir="/tmp/pd"):

@@ -68,9 +68,7 @@ def test_proxy_test_rejects_invalid_geo_response() -> None:
     assert "exit IP" in str(result["error"])
 
 
-def test_proxy_test_command_writes_suggested_preset(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_proxy_test_command_writes_suggested_preset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from typer.testing import CliRunner
 
     from profiledock.cli import app

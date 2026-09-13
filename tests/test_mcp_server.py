@@ -14,7 +14,6 @@ EXPECTED_TOOLS = [
 
 
 class FakeDispatcher:
-
     def __init__(self, results=None):
         self.calls = []
         self.results = results or {}

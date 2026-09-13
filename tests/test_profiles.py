@@ -57,7 +57,6 @@ def test_delete_retries_directory_removal_while_files_are_locked(manager, monkey
 
     def flaky_rmtree(path, *args, **kwargs):
 
-
         if f".deleting-{profile_id}-" in str(path) and attempts["count"] < 2:
             attempts["count"] += 1
             raise PermissionError(5, "Access is denied (transient AV scan)")

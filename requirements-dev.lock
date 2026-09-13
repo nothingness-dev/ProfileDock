@@ -31,9 +31,9 @@ pytest-asyncio==1.4.0
 pytest-timeout==2.4.0
 pytest-xdist==3.8.0
 rich==15.0.0
-ruff==0.16.4
+ruff==0.16.7
 shellingham==1.5.4
 textual==8.2.8
-typer==0.27.1
+typer==0.27.2
 typing_extensions==4.16.0
 uc-micro-py==2.0.0

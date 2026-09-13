@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import json
@@ -57,8 +55,6 @@ _HINTS = {
 
 
 class BackendError(Exception):
-
-
     def __init__(self, message: str, category: str | None = None) -> None:
         super().__init__(message)
         resolved = category or error_category(message)
@@ -69,8 +65,6 @@ class BackendError(Exception):
 
 @dataclass
 class ProfileRow:
-
-
     profile: Profile
     status: str = "stopped"
     pid: int | None = None
@@ -87,8 +81,6 @@ class ProfileRow:
 
 @dataclass
 class BrowserInfo:
-
-
     name: str
     path: str
     version: str = ""
@@ -102,8 +94,6 @@ class BrowserInfo:
 
 @dataclass
 class ActionResult:
-
-
     argv: list[str]
     exit_code: int
     body: Text

@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -66,15 +64,11 @@ def _profile_prompt(row: ProfileRow, width: int, selected: bool) -> str:
 
 
 class FormInput(Input):
-
-
     def scroll_visible(self, *args: Any, **kwargs: Any) -> None:
         return
 
 
 class ChoiceList(VimOptionList):
-
-
     DEFAULT_CSS = """
     ChoiceList {
         height: auto;
@@ -146,8 +140,6 @@ class ChoiceList(VimOptionList):
 
 
 class FlagsList(VimOptionList):
-
-
     DEFAULT_CSS = """
     FlagsList {
         height: auto;
@@ -204,8 +196,6 @@ class FlagsList(VimOptionList):
 
 
 class ProfilePicker(Vertical):
-
-
     DEFAULT_CSS = """
     ProfilePicker {
         height: auto;
@@ -323,8 +313,6 @@ class ProfilePicker(Vertical):
 
 
 class FieldRow(Horizontal):
-
-
     DEFAULT_CSS = """
     FieldRow {
         height: auto;
@@ -355,8 +343,6 @@ class FieldRow(Horizontal):
 
 
 class FormPanel(VerticalScroll):
-
-
     DEFAULT_CSS = """
     FormPanel {
         background: transparent;

@@ -1,0 +1,40 @@
+# Normalize all text files to LF in the repository and working tree.
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.lock text eol=lf
+*.txt text eol=lf
+*.sh text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.svg text eol=lf
+
+# Windows scripts keep CRLF so cmd/PowerShell parse them reliably.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets are never normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.whl binary
+*.exe binary
+*.dll binary
+*.woff binary
+*.woff2 binary
+*.ttf binary

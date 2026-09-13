@@ -367,8 +367,6 @@ def test_verify_backup_archive_detects_corrupted_content(tmp_path):
     out_archive = tmp_path / "work.tar.gz"
     create_backup_archive([profile], paths, out_archive)
 
-
-
     corrupted = tmp_path / "corrupted.tar.gz"
     with tarfile.open(out_archive, "r:gz") as src, tarfile.open(corrupted, "w:gz") as dst:
         for member in src.getmembers():

@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import re
@@ -17,8 +15,6 @@ def _safe_text(value: str) -> str:
 
 
 class PageContentExtractor(HTMLParser):
-
-
     _SKIP_TAGS = frozenset(
         {
             "script",

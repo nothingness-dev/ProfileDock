@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import os
@@ -14,8 +12,6 @@ def icons_enabled() -> bool:
 
 
 class FieldKind(str, Enum):
-
-
     TEXT = "text"
     NUMBER = "number"
     PATH = "path"
@@ -29,8 +25,6 @@ class FieldKind(str, Enum):
 
 @dataclass(frozen=True)
 class FieldSpec:
-
-
     name: str
     label: str
     kind: FieldKind
@@ -48,8 +42,6 @@ class FieldSpec:
 
 @dataclass(frozen=True)
 class ActionSpec:
-
-
     id: str
     label: str
     description: str

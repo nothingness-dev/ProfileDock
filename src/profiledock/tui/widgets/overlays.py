@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from typing import Any, ClassVar
@@ -14,8 +12,6 @@ from ..actions import ActionSpec
 
 
 class ConfirmModal(ModalScreen[bool]):
-
-
     DEFAULT_CSS = """
     ConfirmModal {
         align: center middle;

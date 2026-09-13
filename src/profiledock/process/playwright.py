@@ -1,5 +1,3 @@
-
-
 import json
 import os
 import socket
@@ -30,8 +28,6 @@ from .state import (
 
 
 class _StderrCapture:
-
-
     def __init__(self, process: subprocess.Popen[bytes]) -> None:
         self._process = process
         self._buffer = b""

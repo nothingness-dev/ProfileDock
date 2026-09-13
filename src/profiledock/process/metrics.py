@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 import os
@@ -18,8 +16,6 @@ _PS_EXECUTABLE = "/bin/ps"
 
 @dataclass(frozen=True)
 class ProcessIdentity:
-
-
     pid: int
     ppid: int
     name: str
@@ -28,8 +24,6 @@ class ProcessIdentity:
 
 @dataclass(frozen=True)
 class ProcessSample:
-
-
     identity: ProcessIdentity
     cpu_time: float = 0.0
     rss_bytes: int = 0
@@ -72,8 +66,6 @@ def make_sample(
 
 
 class PlatformSampler:
-
-
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:  # pragma: no cover - abstract
         raise NotImplementedError
 
@@ -82,8 +74,6 @@ class PlatformSampler:
 
 
 class PsutilSampler(PlatformSampler):
-
-
     def __init__(self) -> None:
         import psutil
 
@@ -128,8 +118,6 @@ class PsutilSampler(PlatformSampler):
 
 
 class LinuxSampler(PlatformSampler):
-
-
     def __init__(self) -> None:
         self._proc = Path("/proc")
 
@@ -219,8 +207,6 @@ class LinuxSampler(PlatformSampler):
 
 
 class WindowsSampler(PlatformSampler):
-
-
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:
@@ -363,8 +349,6 @@ class WindowsSampler(PlatformSampler):
 
 
 class MacOSSampler(PlatformSampler):
-
-
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:
         try:
             res = subprocess.run(
@@ -437,8 +421,6 @@ class MacOSSampler(PlatformSampler):
 
 
 class _FallbackSampler(PlatformSampler):
-
-
     def enumerate_processes(self) -> dict[int, ProcessIdentity]:
         return {}
 

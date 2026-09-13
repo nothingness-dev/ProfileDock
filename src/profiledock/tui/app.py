@@ -1,5 +1,3 @@
-
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -50,8 +48,6 @@ class Mode:
 
 
 class ProfileDockApp(App[None]):
-
-
     TITLE = "ProfileDock"
     SUB_TITLE = "isolated persistent Chromium profiles"
 

@@ -1,5 +1,3 @@
-
-
 import json
 import os
 from datetime import datetime, timezone
@@ -758,21 +756,25 @@ def _delete_cookies(
     try:
         profile = _get_manager().resolve(profile_id)
         live = send_controller_command(
-            profile.data_dir, cmd="cookies",
+            profile.data_dir,
+            cmd="cookies",
             args={"urls": url} if url is not None else {},
-            runtime_dir=runtime_path(profile), auto_start_headless=True,
+            runtime_dir=runtime_path(profile),
+            auto_start_headless=True,
             **_identity_preset_kwargs(profile),
         )
         matches = _apply_cookie_filters(live.get("cookies", []), domains=domain, session_only=False)
         if any(cookie.get("partitionKey") for cookie in matches):
             fail("partitioned cookie deletion is not supported; no cookies were deleted")
         entries = [
-            {"name": cookie["name"], "domain": cookie["domain"], "path": cookie["path"]}
-            for cookie in matches
+            {"name": cookie["name"], "domain": cookie["domain"], "path": cookie["path"]} for cookie in matches
         ]
         res = send_controller_command(
-            profile.data_dir, cmd="delete_cookies", args={"delete_cookies": entries},
-            runtime_dir=runtime_path(profile), auto_start_headless=True,
+            profile.data_dir,
+            cmd="delete_cookies",
+            args={"delete_cookies": entries},
+            runtime_dir=runtime_path(profile),
+            auto_start_headless=True,
             **_identity_preset_kwargs(profile),
         )
     except (

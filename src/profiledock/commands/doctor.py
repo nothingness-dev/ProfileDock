@@ -1,5 +1,3 @@
-
-
 import typer
 
 from ..cli_contract import EXIT_USER_ERROR

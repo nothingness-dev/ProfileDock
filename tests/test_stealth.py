@@ -4,8 +4,6 @@ from unittest.mock import MagicMock
 
 
 class _RecordingPlaywright:
-
-
     def __init__(self) -> None:
         self.calls: list[dict] = []
 

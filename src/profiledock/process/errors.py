@@ -1,6 +1,3 @@
-
-
-
 class ProfileRunningError(Exception):
     def __init__(self, message: str, stopped: bool = False) -> None:
         super().__init__(message)

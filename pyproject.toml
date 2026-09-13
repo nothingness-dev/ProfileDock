@@ -9,7 +9,7 @@ description = "A lightweight CLI for isolated persistent Chromium profiles"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "typer>=0.12",
+    "typer>=0.27",
     "rich>=13.0",
     "tzdata>=2025.2; platform_system == 'Windows'",
 ]

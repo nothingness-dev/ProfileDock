@@ -1,5 +1,3 @@
-
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -442,9 +440,7 @@ def launch_command(
             fail("cannot specify both --tag and --all")
         manager = _get_manager()
         try:
-            profiles = (
-                manager.list_by_tag(tag) if tag is not None else manager.list_profiles()
-            )
+            profiles = manager.list_by_tag(tag) if tag is not None else manager.list_profiles()
         except (
             StorageError,
             ProfileNotFoundError,
@@ -630,9 +626,7 @@ def _launch_batch(
             ValueError,
             ValidationError,
         ) as exc:
-            outcomes.append(
-                {"profile": profile_id, "status": "failed", "error": redact_proxy(str(exc))}
-            )
+            outcomes.append({"profile": profile_id, "status": "failed", "error": redact_proxy(str(exc))})
             continue
         profile = opts.profile
         plan = opts.plan
