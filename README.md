@@ -1,6 +1,23 @@
 # ProfileDock
 
-ProfileDock is a lightweight Python CLI for managing isolated, persistent Chromium profiles. Every profile has its own browser user-data directory, preserving cookies, sessions, local storage, cache, history, and login state independently. It also automates through each profile's authenticated session (read, screenshot, PDF, JavaScript, cookies), pins per-profile identity presets (proxy, user agent, locale, timezone), and monitors live resource usage.
+Persistent, auditable browser identities for humans and AI agents — local-first.
+
+The only browser profile platform with a published threat model, anti-PID-recycling
+process guarantees, and a machine-stable contract. Every profile has its own browser
+user-data directory, preserving cookies, sessions, local storage, cache, history, and
+login state independently. It also automates through each profile's authenticated
+session (read, screenshot, PDF, JavaScript, live cookie surgery), pins per-profile
+identity presets (proxy, user agent, locale, timezone), serves an MCP interface for
+LLM agents (Claude Code, Cursor, AutoGen), and monitors live resource usage.
+
+- **Machine-stable contract**: versioned CLI exit codes and frozen JSON schemas backed
+  by golden fixtures (`docs/reference/cli-contract.md`).
+- **Auditable process identity**: zero PID-recycling hazards via Win32 kernel32
+  process times, Linux `/proc` boot epochs, and BSD macOS start times.
+- **In-memory session integrity**: live CDP cookie surgery and session extraction
+  resilient against Windows DPAPI App-Bound Encryption — no browser restart required.
+- **Published threat model**: transparent security boundaries documenting exact
+  containment rules (`docs/reference/threat-model.md`).
 
 ## Installation
 
