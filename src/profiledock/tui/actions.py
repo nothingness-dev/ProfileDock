@@ -411,6 +411,13 @@ ACTIONS: tuple[ActionSpec, ...] = (
                 hint="import instead of exporting",
             ),
             FieldSpec(
+                "clear",
+                "Delete matches",
+                FieldKind.TOGGLE,
+                hint="delete instead of exporting",
+                argv="boolean",
+            ),
+            FieldSpec(
                 "redact_values",
                 "Redact values",
                 FieldKind.TOGGLE,

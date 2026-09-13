@@ -99,6 +99,7 @@ from .commands.config import (
 from .commands.doctor import (
     doctor_command,
 )
+from .commands.mcp import mcp_app
 from .commands.metrics import (
     top_command,
 )
@@ -276,6 +277,8 @@ app = typer.Typer(
 
 config_app = typer.Typer(help="Manage launch configuration presets for a profile.")
 app.add_typer(config_app, name="config")
+
+app.add_typer(mcp_app, name="mcp")
 
 _DOCTOR_EXPORTS = frozenset(
     {

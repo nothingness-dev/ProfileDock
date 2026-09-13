@@ -693,6 +693,16 @@ def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object
     profile = _resolve_profile(manager, values)
     output_raw = str(values.get("output") or "").strip()
     load_raw = str(values.get("load") or "").strip()
+    if bool(values.get("clear")):
+        if load_raw or output_raw:
+            raise BackendError("--clear cannot be combined with --load or --output", "invalid_input")
+        if (
+            values.get("session_only")
+            or values.get("redact_values")
+            or str(values.get("format") or "json").lower() != "json"
+        ):
+            raise BackendError("--clear cannot be combined with export options", "invalid_input")
+        return _cookies_clear(paths, manager, profile, values)
     format_name = str(values.get("format") or "json").strip().lower()
     if format_name not in {"json", "netscape"}:
         raise BackendError(
@@ -778,6 +788,66 @@ def _cookies(paths: DataPaths, manager: ProfileManager, values: dict[str, object
     if summary:
         body.append(f"\nDomains: {summary}", style="dim")
     return body
+
+
+def _cookies_clear(
+    paths: DataPaths, manager: ProfileManager, profile: Any, values: dict[str, object]
+) -> Text:
+    from ..commands.automation import _apply_cookie_filters
+
+    domain_raw = str(values.get("domain") or "").strip()
+    domains = [d.strip() for d in domain_raw.split(",") if d.strip()] if domain_raw else None
+    try:
+        res = send_controller_command(
+            profile.data_dir,
+            cmd="cookies",
+            args={},
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+    entries: list[dict[str, Any]] = []
+    matches = _apply_cookie_filters(res.get("cookies", []), domains=domains, session_only=False)
+    if any(cookie.get("partitionKey") for cookie in matches):
+        raise BackendError("partitioned cookie deletion is not supported", "invalid_input")
+    for cookie in matches:
+        name = cookie.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        entry: dict[str, Any] = {"name": name}
+        if cookie.get("domain"):
+            entry["domain"] = cookie["domain"]
+        elif cookie.get("url"):
+            entry["url"] = cookie["url"]
+        else:
+            continue
+        if cookie.get("path"):
+            entry["path"] = cookie["path"]
+        entries.append(entry)
+    if not entries:
+        return Text("No matching cookies to delete.", style="dim")
+    try:
+        deleted = send_controller_command(
+            profile.data_dir,
+            cmd="delete_cookies",
+            args={"delete_cookies": entries},
+            runtime_dir=paths.runtime_dir / profile.id,
+            auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
+        )
+    except Exception as exc:
+        category = getattr(exc, "category", None) or error_category(str(exc))
+        raise BackendError(str(exc), category) from exc
+    removed = int(deleted.get("deleted", 0))
+    total = int(deleted.get("total_cookies", 0))
+    return (
+        Text("Deleted ", style="green")
+        .append(f"{removed}", style="bold")
+        .append(f" cookie(s) from '{profile.name}' (jar now holds {total}).")
+    )
 
 
 def _render_list(rows: list[ProfileRow]) -> Text:

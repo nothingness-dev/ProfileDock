@@ -29,6 +29,9 @@ _IPC_COMMANDS = frozenset(
         "eval",
         "cookies",
         "set_cookies",
+        "delete_cookies",
+        "snapshot",
+        "interact",
         "screenshot",
         "pdf",
     }

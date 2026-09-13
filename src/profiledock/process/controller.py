@@ -101,6 +101,50 @@ def _tabs_snapshot(context: "BrowserContext") -> list[dict[str, Any]]:
     return pages_info
 
 
+def _delete_cookies_live(
+    context: "BrowserContext", entries: list[dict[str, Any]], urls: list[str]
+) -> int:
+    for entry in entries:
+        if not isinstance(entry.get("name"), str) or not entry["name"]:
+            raise ValueError("cookie name must be a non-empty string")
+        for key in ("domain", "url", "path"):
+            if key in entry and (not isinstance(entry[key], str) or not entry[key]):
+                raise ValueError(f"cookie {key} must be a non-empty string")
+        if entry.get("url"):
+            from ..validation import validate_cookie_url_filter
+
+            validate_cookie_url_filter(entry["url"])
+    live = context.cookies(urls) if urls else context.cookies()
+    doomed = {}
+    for entry in entries:
+        candidates = context.cookies([entry["url"]]) if entry.get("url") else live
+        for cookie in candidates:
+            if entry.get("domain") is not None and cookie.get("domain") != entry["domain"]:
+                continue
+            if entry.get("path") is not None and cookie.get("path") != entry["path"]:
+                continue
+            if cookie.get("name") != entry.get("name"):
+                continue
+            if urls and cookie not in live:
+                continue
+            doomed[(cookie.get("name"), cookie.get("domain"), cookie.get("path"))] = cookie
+    if urls and not entries:
+        doomed = {(c.get("name"), c.get("domain"), c.get("path")): c for c in live}
+    if any(cookie.get("partitionKey") for cookie in doomed.values()):
+        raise ValueError("partitioned cookie deletion is not supported; no cookies were deleted")
+    if not doomed:
+        return 0
+    if not context.pages:
+        raise ValueError("profile has no open tabs; open one with 'profiledock open-tab'")
+    session = context.new_cdp_session(context.pages[0])
+    try:
+        for name, domain, path in doomed:
+            session.send("Network.deleteCookies", {"name": name, "domain": domain, "path": path})
+    finally:
+        session.detach()
+    return len(doomed)
+
+
 def _capture_output_guard(output_path: str, data_dir: str | None) -> str | None:
     if not data_dir:
         return None
@@ -344,6 +388,68 @@ def _execute_ipc_command(
             context.add_cookies(set_cookies)
             total = len(context.cookies())
             return ({"status": "ok", "added": len(set_cookies), "total_cookies": total}, False)
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd == "delete_cookies":
+        delete_cookies = args.get("delete_cookies")
+        urls = args.get("urls")
+        if delete_cookies is None and urls is None:
+            return (
+                {"status": "error", "message": "delete_cookies needs entries or urls to delete"},
+                False,
+            )
+        entries: list[dict[str, Any]] = []
+        if delete_cookies is not None:
+            if not isinstance(delete_cookies, list) or not all(isinstance(c, dict) for c in delete_cookies):
+                return (
+                    {"status": "error", "message": "delete_cookies must be a list of cookie objects"},
+                    False,
+                )
+            for cookie in delete_cookies:
+                if not str(cookie.get("name", "")).strip():
+                    return (
+                        {"status": "error", "message": "each cookie needs a non-empty name to delete"},
+                        False,
+                    )
+                if not cookie.get("domain") and not cookie.get("url"):
+                    return (
+                        {
+                            "status": "error",
+                            "message": f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'",
+                        },
+                        False,
+                    )
+                entries.append(cookie)
+        url_list: list[str] = []
+        if urls is not None:
+            if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
+                return (
+                    {"status": "error", "message": "cookie URLs must be a list of strings"},
+                    False,
+                )
+            try:
+                from ..validation import validate_cookie_url_filter
+
+                for url in urls:
+                    validate_cookie_url_filter(url)
+            except Exception as exc:
+                return ({"status": "error", "message": str(exc)}, False)
+            url_list = list(urls)
+        try:
+            deleted = _delete_cookies_live(context, entries, url_list)
+            return ({"status": "ok", "deleted": deleted, "total_cookies": len(context.cookies())}, False)
+        except Exception as exc:
+            return ({"status": "error", "message": str(exc)}, False)
+
+    if cmd in {"snapshot", "interact"}:
+        tab_index = args.get("tab", 0)
+        if type(tab_index) is not int or not (0 <= tab_index < len(context.pages)):
+            return ({"status": "error", "message": f"tab index out of range: {tab_index}"}, False)
+        try:
+            from ..ax_snapshot import execute_snapshot_command
+
+            return (execute_snapshot_command(context.pages[tab_index], cmd, args), False)
         except Exception as exc:
             return ({"status": "error", "message": str(exc)}, False)
 

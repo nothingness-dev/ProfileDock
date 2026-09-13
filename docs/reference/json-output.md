@@ -2,6 +2,10 @@
 
 ## Envelope
 
+`mcp serve` is a separate MCP JSON-RPC transport and does not use this envelope.
+`cookies --clear --json` uses `command: "cookies"` with
+`data: {"deleted": N, "total_cookies": M}`, including zero counts for empty matches.
+
 Commands supporting `--json` emit output version 1:
 
 ```json

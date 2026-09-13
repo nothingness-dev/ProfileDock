@@ -170,6 +170,43 @@ profiledock config reset PROFILE
 
 Clears the complete launch preset and restores inherited/default launch behavior.
 
+## `mcp`
+
+```text
+profiledock mcp serve
+```
+
+Serves ProfileDock's persistent browser sessions to AI agents over stdio using
+MCP protocol version `2024-11-05`. Configure the client's executable as
+`profiledock` and its arguments as `["--data-root", "/absolute/data/root", "mcp", "serve"]`.
+The transport uses newline-delimited JSON-RPC 2.0; Content-Length framing is
+not supported. It handles `initialize`, `ping`, `tools/list`, and `tools/call`.
+Notifications produce no response. Tool results use MCP text content blocks;
+execution failures set `isError: true`. Invalid parameters return `-32602`,
+malformed JSON returns `-32700`, and the loop continues. Input lines are limited
+to 65,536 characters. No MCP SDK dependency is required.
+
+Tools: `profile_list`, `profile_launch`, `profile_read_state`,
+`profile_get_snapshot` (deterministic `@eN` accessibility refs, pre-order
+numbering, 12-deep / 200-node caps), `profile_interact` (click/fill/press/
+select against a snapshot ref), `profile_eval` (deadline-wrapped like the CLI),
+`profile_close`. Snapshot refs belong to the most recent snapshot in the selected
+tab's main document and retain the actual DOM element, including duplicate names.
+Navigation or removing the element invalidates its reference. Request a new
+snapshot after navigation or major page changes. Unnamed nodes have no refs.
+
+`profile_launch` accepts a profile selector, optional positive `tabs`, and boolean
+`headless`. It uses the configured engine and launch preset; tabs default to the
+preset or 1. Headless launch requires Playwright. A running session is attached
+without opening extra tabs or changing its settings. Other MCP tools require an
+already-running profile; launch it first. `tab_index` defaults to zero.
+
+The connected client has authority to read and interact with logged-in pages,
+evaluate page JavaScript, and close profiles under the selected data root.
+Use a trusted client. Page JavaScript is not a separate security sandbox.
+Disconnecting the MCP client leaves browser sessions running; use
+`profile_close` or the CLI to close them.
+
 ## `status`
 
 ```text
@@ -372,7 +409,7 @@ Evaluates a JavaScript expression in the active page context and prints the seri
 ## `cookies`
 
 ```text
-profiledock cookies PROFILE [--output FILE] [--url URL] [--domain DOMAIN] [--session-only] [--redact-values] [--format json|netscape] [--load FILE] [--json]
+profiledock cookies PROFILE [--output FILE] [--url URL] [--domain DOMAIN] [--session-only] [--redact-values] [--format json|netscape] [--load FILE] [--clear] [--json]
 ```
 
 Exports live session cookies directly from browser RAM, bypassing SQLite filesystem locks, or imports a saved cookie jar with `--load`. Cookie output is sensitive authentication material. File output uses a private atomic write (0600) and refuses links or non-file targets. A stopped profile is started headlessly and remains active until explicitly closed.
@@ -384,6 +421,20 @@ Formats (export): `--format json` (default) writes a Playwright-shaped JSON arra
 Redaction (export): `--redact-values` replaces every cookie value with an empty string for a metadata-only preview. Redacted files retain valid cookie syntax but cannot restore the original credentials; importing them can replace existing values with empty strings.
 
 Import (`--load FILE`): accepts a JSON array produced by `--output` or a Netscape `cookies.txt` file (auto-detected). Netscape expiry `0` maps to a session cookie; host-only scope and the `#HttpOnly_` prefix are preserved. File parsing finishes before cookies are sent to the browser. Browser-side failures are reported, but import does not provide transactional rollback of the live cookie jar. Save an export before replacing important cookies. `--load` is mutually exclusive with `--output` and export filters.
+
+Delete (`--clear`): removes matching live cookies via CDP `Network.deleteCookies`
+without restarting Chromium. Chromium may persist these changes to disk.
+With no filters, deletes the current jar. `--url` selects cookies applicable to
+that URL using Chromium's matching rules; `--domain` matches an exact domain or
+subdomain. Combined filters intersect. No matches is a successful no-op.
+Cookie names, exact stored domains, and paths are preserved when selecting
+deletion targets. Partitioned-cookie deletion is refused before any deletion.
+`--clear` conflicts with `--load`, `--output`, `--session-only`,
+`--redact-values`, and non-JSON `--format` values.
+Human output reports the deletion count and remaining jar size; `--json`
+emits `{"deleted": N, "total_cookies": M}` in the normal CLI envelope.
+Export a backup first: deletion is not transactional and a browser error can
+leave a partially deleted jar.
 
 ## `top`
 

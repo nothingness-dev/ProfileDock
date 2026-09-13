@@ -4,7 +4,12 @@ This document freezes the command-line interface planned for ProfileDock 1.0. Th
 
 ## Command surface
 
-The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `tags`, `proxy-test`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, `cookies`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, and `config`.
+The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `tags`, `proxy-test`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `shot`, `pdf`, `eval`, `cookies`, `top`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, `config`, and `mcp`.
+
+`mcp serve` uses MCP JSON-RPC over stdio, independently of the CLI JSON envelope.
+Its lifecycle and tool results follow [MCP version 2024-11-05](https://modelcontextprotocol.io/specification/2024-11-05/server/tools).
+The `cookies --clear` operation returns deletion counts through the existing
+CLI JSON envelope; its filters and limitations are described in the command reference.
 
 The `config` commands are `show`, `set`, `add-url`, `remove-url`, and `reset`. `config set` accepts the setting names `default-tabs`, `engine`, `browser`, and `window-size`.
 

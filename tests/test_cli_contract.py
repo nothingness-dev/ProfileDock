@@ -53,7 +53,7 @@ def test_golden_command_surface_matches_typer_application():
             "arguments": expected["arguments"],
             "options": expected["options"],
         }
-        if name == "config":
+        if "commands" in expected:
             assert set(actual.commands) == set(expected["commands"])
             for child_name, child_expected in expected["commands"].items():
                 assert parameter_contract(actual.commands[child_name]) == {

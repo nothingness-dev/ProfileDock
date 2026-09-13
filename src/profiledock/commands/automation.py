@@ -638,15 +638,25 @@ def export_cookies_command(
     format: str = typer.Option(
         "json", "--format", "-f", help="Export format: 'json' (default) or 'netscape' (cookies.txt)."
     ),
+    clear: bool = typer.Option(
+        False,
+        "--clear",
+        help="Delete matching live session cookies instead of exporting.",
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
-    """Export live session cookies from browser RAM, or import cookies with --load."""
+    """Export live session cookies from browser RAM, import with --load, or delete with --clear."""
     from ..cli import runtime_path, send_controller_command
 
     if load_file is not None and output_file is not None:
         fail("--load and --output are mutually exclusive")
-    if load_file is not None and (url or domain or session_only or redact_values):
-        fail("--load cannot be combined with export filters")
+    if load_file is not None and (url or domain or session_only or redact_values or clear):
+        fail("--load cannot be combined with export filters or --clear")
+    if clear and (output_file is not None or session_only or redact_values or format.lower() != "json"):
+        fail("--clear cannot be combined with --output, --session-only, --redact-values, or --format")
+    if clear:
+        _delete_cookies(profile_id, url=url, domain=domain, json_output=json_output)
+        return
 
     normalized_format = format.lower()
     if normalized_format not in {"json", "netscape"}:
@@ -726,6 +736,61 @@ def export_cookies_command(
         typer.echo("\n".join(lines))
     else:
         typer.echo(json.dumps(cookies_list, indent=2))
+
+
+def _delete_cookies(
+    profile_id: str,
+    *,
+    url: list[str] | None,
+    domain: list[str] | None,
+    json_output: bool,
+) -> None:
+    from ..cli import runtime_path, send_controller_command
+
+    if url is not None:
+        for item in url:
+            try:
+                validate_cookie_url_filter(item)
+            except ValidationError as exc:
+                fail_exception(exc)
+    if domain is not None and any(not item.strip().lstrip(".") for item in domain):
+        fail("cookie domain filters must be non-empty")
+    try:
+        profile = _get_manager().resolve(profile_id)
+        live = send_controller_command(
+            profile.data_dir, cmd="cookies",
+            args={"urls": url} if url is not None else {},
+            runtime_dir=runtime_path(profile), auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
+        )
+        matches = _apply_cookie_filters(live.get("cookies", []), domains=domain, session_only=False)
+        if any(cookie.get("partitionKey") for cookie in matches):
+            fail("partitioned cookie deletion is not supported; no cookies were deleted")
+        entries = [
+            {"name": cookie["name"], "domain": cookie["domain"], "path": cookie["path"]}
+            for cookie in matches
+        ]
+        res = send_controller_command(
+            profile.data_dir, cmd="delete_cookies", args={"delete_cookies": entries},
+            runtime_dir=runtime_path(profile), auto_start_headless=True,
+            **_identity_preset_kwargs(profile),
+        )
+    except (
+        ProfileNotFoundError,
+        AmbiguousProfileError,
+        StorageError,
+        ProfileRunningError,
+        BrowserLaunchError,
+        ValueError,
+    ) as exc:
+        fail_exception(exc)
+
+    deleted = int(res.get("deleted", 0))
+    total = int(res.get("total_cookies", 0))
+    if json_output:
+        emit_json("cookies", {"deleted": deleted, "total_cookies": total})
+        return
+    typer.echo(f"Deleted {deleted} cookie(s) from '{profile.name}' (jar now holds {total}).")
 
 
 def _import_cookies(profile_id: str, load_file: Path, *, json_output: bool) -> None:

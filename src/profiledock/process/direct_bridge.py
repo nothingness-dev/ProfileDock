@@ -208,6 +208,45 @@ def run_direct_cdp_command(
             context.add_cookies(cookies)
             return {"status": "ok", "added": len(cookies), "total_cookies": len(context.cookies())}
 
+        if cmd == "delete_cookies":
+            from .controller import _delete_cookies_live
+
+            entries = command_args.get("delete_cookies")
+            urls = command_args.get("urls")
+            if entries is None and urls is None:
+                raise BrowserLaunchError("delete_cookies needs entries or urls to delete")
+            checked_entries: list[dict[str, Any]] = []
+            if entries is not None:
+                if not isinstance(entries, list) or not all(isinstance(c, dict) for c in entries):
+                    raise BrowserLaunchError("delete_cookies must be a list of cookie objects")
+                for cookie in entries:
+                    if not str(cookie.get("name", "")).strip():
+                        raise BrowserLaunchError("each cookie needs a non-empty name to delete")
+                    if not cookie.get("domain") and not cookie.get("url"):
+                        raise BrowserLaunchError(
+                            f"cookie '{cookie.get('name')}' needs a 'domain' or 'url'"
+                        )
+                    checked_entries.append(cookie)
+            checked_urls: list[str] = []
+            if urls is not None:
+                if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
+                    raise BrowserLaunchError("cookie URLs must be a list of strings")
+                for url in urls:
+                    validate_cookie_url_filter(url)
+                checked_urls = list(urls)
+            deleted = _delete_cookies_live(context, checked_entries, checked_urls)
+            return {
+                "status": "ok",
+                "deleted": deleted,
+                "total_cookies": len(context.cookies()),
+            }
+
+        if cmd in {"snapshot", "interact"}:
+            from ..ax_snapshot import execute_snapshot_command
+
+            page = _page_for_index(context, command_args.get("tab", 0))
+            return execute_snapshot_command(page, cmd, command_args)
+
         if cmd in {"screenshot", "pdf"}:
             page = _page_for_index(context, command_args.get("tab", 0))
             output = command_args.get("output", "")
