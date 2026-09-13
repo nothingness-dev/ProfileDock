@@ -195,6 +195,7 @@ def serve_stdio(dispatcher: Any, stdin: Any = None, stdout: Any = None) -> None:
         if hasattr(stdout, "reconfigure"):
             stdout.reconfigure(encoding="utf-8")
     limit = 65536
+    response: dict[str, Any] | None = None
     while True:
         raw = stdin.readline(limit + 1)
         if not raw:

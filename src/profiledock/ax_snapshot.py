@@ -10,9 +10,9 @@ _REGISTRY = "profiledock.snapshot.refs"
 
 
 def _snapshot_entries(ax_tree: dict[str, Any]) -> list[dict[str, Any]]:
-    entries = []
+    entries: list[dict[str, Any]] = []
     stack = [(ax_tree, 0)]
-    seen = set()
+    seen: set[int] = set()
     while stack and len(entries) <= MAX_SNAPSHOT_NODES:
         node, depth = stack.pop()
         if not isinstance(node, dict) or depth > MAX_SNAPSHOT_DEPTH or id(node) in seen:
