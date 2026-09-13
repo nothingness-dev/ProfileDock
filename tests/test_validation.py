@@ -142,6 +142,8 @@ def test_validate_identity_fields():
         validate_time_zone("")
     with pytest.raises(ValidationError):
         validate_time_zone("host")
+    with pytest.raises(ValidationError, match="not a valid IANA timezone"):
+        validate_time_zone("Not/AZone")
 
 
 def test_validate_proxy_rejects_socks5_credentials():

@@ -903,28 +903,28 @@ def test_proxy_timezone_consistency_ok_when_timezone_matches_or_absent(tmp_path)
     assert chk.status == STATUS_OK
 
 
-def test_proxy_timezone_consistency_flags_invalid_timezone(tmp_path):
+def test_launch_config_rejects_invalid_timezone_at_load():
 
-    from profiledock.doctor import check_proxy_timezone_consistency
+    from profiledock.models import LaunchConfig
+    from profiledock.validation import ValidationError
 
-    layout = paths(tmp_path)
-    data_dir = layout.profiles_dir / "p1" / "browser-data"
-    data_dir.mkdir(parents=True)
-    profile = Profile(
-        "p1",
-        "BadTz",
-        "2026-01-01T00:00:00+00:00",
-        str(data_dir),
-        launch_config=LaunchConfig(proxy="socks5://127.0.0.1:9050", timezone="Mars/Olympus_Mons"),
-    )
-    layout.profiles_file.write_text(
-        json.dumps({"schema_version": 1, "profiles": [profile.to_dict()]}),
-        encoding="utf-8",
-    )
-
-    chk = check_proxy_timezone_consistency(tmp_path)
-    assert chk.status == STATUS_WARNING
-    assert "BadTz" in chk.summary
+    with pytest.raises(ValidationError) as exc:
+        LaunchConfig.from_dict(
+            {
+                "schema_version": 2,
+                "default_tabs": None,
+                "start_urls": [],
+                "engine": None,
+                "browser": None,
+                "window_width": None,
+                "window_height": None,
+                "proxy": "socks5://127.0.0.1:9050",
+                "user_agent": None,
+                "locale": None,
+                "timezone": "Mars/Olympus_Mons",
+            }
+        )
+    assert "not a valid IANA timezone" in str(exc.value)
 
 
 def test_recovery_preserves_corrupt_primary_for_inspection(tmp_path):

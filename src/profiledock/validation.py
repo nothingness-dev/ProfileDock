@@ -105,6 +105,12 @@ def validate_time_zone(time_zone: str | None) -> None:
         raise ValidationError("timezone contains invalid characters or is too long")
     if clean.lower() == "host":
         raise ValidationError("timezone 'host' is not a valid IANA timezone")
+    try:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        ZoneInfo(clean)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValidationError(f"timezone '{clean}' is not a valid IANA timezone") from None
 
 
 def validate_browser(browser: str, engine: str, require_executable: bool = False) -> None:
