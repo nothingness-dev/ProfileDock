@@ -1,4 +1,5 @@
 import gzip
+import io
 import json
 import os
 import re
@@ -6,7 +7,7 @@ import shutil
 import tarfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 from uuid import uuid4
 
 from .data_root import (
@@ -282,13 +283,39 @@ def restore_backup_archive(
     archive_path: Path,
     data_paths: DataPaths,
     overwrite: bool = False,
+    passphrase: str | None = None,
 ) -> RestoreReport:
     archive = Path(archive_path).resolve()
     if not archive.exists() or not archive.is_file():
         raise InvalidArchiveError(f"backup archive file does not exist: {archive}", category="not_found")
 
+    from .backup import BackupError, is_encrypted_archive
+
+    fileobj: IO[bytes] | None = None
+    if is_encrypted_archive(archive):
+        from .crypto import MAX_ENCRYPTED_PAYLOAD_BYTES, decrypt_payload
+
+        if not passphrase:
+            raise InvalidArchiveError(
+                "archive is encrypted; supply the passphrase to restore it "
+                "(--passphrase or PROFILEDOCK_BACKUP_PASSPHRASE)"
+            )
+        archive_size = archive.stat().st_size
+        if archive_size > MAX_ENCRYPTED_PAYLOAD_BYTES:
+            raise InvalidArchiveError(
+                f"encrypted archive is {archive_size} bytes, exceeding the "
+                f"{MAX_ENCRYPTED_PAYLOAD_BYTES}-byte encrypted-backup limit"
+            )
+        try:
+            payload = decrypt_payload(archive.read_bytes(), passphrase)
+        except BackupError as exc:
+            raise InvalidArchiveError(str(exc), category="invalid_input") from exc
+        except Exception as exc:
+            raise InvalidArchiveError(f"could not decrypt archive: {exc}") from exc
+        fileobj = io.BytesIO(payload)
+
     try:
-        tar = tarfile.open(archive, "r:gz")  # noqa: SIM115 - closed by the `with tar` below
+        tar = tarfile.open(fileobj=fileobj, name=str(archive), mode="r:gz")  # noqa: SIM115 - closed by the `with tar` below
     except (tarfile.TarError, EOFError, OSError) as exc:
         raise InvalidArchiveError(f"corrupted backup archive: {exc}") from exc
     except Exception as exc:

@@ -51,7 +51,8 @@ Protections:
 Residual risks:
 
 - SHA-256 verifies archive consistency, not authenticity. An attacker who can rebuild an archive can also generate matching checksums.
-- Archives are not signed or encrypted and may expose browser data to anyone who can read them.
+- Archives are not signed. Unencrypted archives may expose browser data to anyone who can read them; optional `--passphrase` encryption (AES-256-GCM, PBKDF2-HMAC-SHA256) protects archive contents at rest but provides no authenticity either.
+- The passphrase is provided on the command line or through the `PROFILEDOCK_BACKUP_PASSPHRASE` environment variable; either channel can be observed by other local processes. Passphrase-based encryption does not defend against a compromised local account.
 - Size and member limits reduce resource abuse but cannot guarantee protection from all decompression CPU, memory, or disk-exhaustion attacks.
 - Only restore archives from a trusted source when profile confidentiality or authenticity matters.
 
@@ -193,7 +194,7 @@ Residual risks:
 
 ## Security properties ProfileDock does not provide
 
-ProfileDock does not provide password management, credential encryption, archive signatures, archive encryption, browser sandboxing, malware isolation, website isolation beyond separate Chromium user-data directories, secure deletion, anti-forensics, network anonymity, proxy isolation, or protection from a compromised OS account.
+ProfileDock does not provide password management, credential encryption, archive signatures, browser sandboxing, malware isolation, website isolation beyond separate Chromium user-data directories, secure deletion, anti-forensics, network anonymity, proxy isolation, or protection from a compromised OS account. Optional passphrase-encrypted backups (AES-256-GCM) protect archive contents at rest; they do not add authenticity and trust a passphrase supplied through the local environment.
 
 Profile separation prevents normal Chromium state from being shared through the same user-data directory. It does not guarantee that websites, extensions, browser synchronization, downloaded files, the clipboard, DNS, the network, or the operating system cannot correlate or exchange information across profiles.
 

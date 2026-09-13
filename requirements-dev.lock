@@ -9,6 +9,7 @@
 annotated-doc==0.0.5
 ast-serialize==0.8.0
 colorama==0.4.6
+cryptography==46.0.5
 execnet==2.1.2
 greenlet==3.5.5
 iniconfig==2.3.0

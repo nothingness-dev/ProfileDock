@@ -20,6 +20,12 @@ from .version import __version__
 
 BACKUP_ARCHIVE_SCHEMA_VERSION = 1
 
+# Encrypted backups wrap the standard .tar.gz payload in a self-describing
+# envelope: a JSON header line (marked by this magic prefix) followed by
+# AES-256-GCM ciphertext. Plain archives begin with the gzip magic instead,
+# so detection never needs the passphrase.
+ENCRYPTED_ARCHIVE_MAGIC = b"PROFILEDOCK-ENC-V1\n"
+
 
 class BackupError(Exception):
     category = "storage_error"
@@ -98,6 +104,15 @@ def _is_runtime_or_log_file(rel_path_str: str) -> bool:
     if name in ("running.json", "controller.error", "profiles.lock"):
         return True
     return name.endswith(".tmp")
+
+
+def is_encrypted_archive(archive_path: Path) -> bool:
+    archive = Path(archive_path)
+    try:
+        with archive.open("rb") as handle:
+            return handle.read(len(ENCRYPTED_ARCHIVE_MAGIC)) == ENCRYPTED_ARCHIVE_MAGIC
+    except OSError:
+        return False
 
 
 def _is_cache_file(rel_path_str: str) -> bool:
@@ -318,7 +333,7 @@ class VerifyReport:
         }
 
 
-def verify_backup_archive(archive_path: Path) -> VerifyReport:
+def verify_backup_archive(archive_path: Path, passphrase: str | None = None) -> VerifyReport:
 
     from .restore import (
         MAX_MEMBER_SIZE_BYTES,
@@ -330,8 +345,31 @@ def verify_backup_archive(archive_path: Path) -> VerifyReport:
     if not archive.exists() or not archive.is_file():
         raise BackupError(f"backup archive file does not exist: {archive}")
 
+    fileobj: IO[bytes] | None = None
+    if is_encrypted_archive(archive):
+        from .crypto import MAX_ENCRYPTED_PAYLOAD_BYTES, decrypt_payload
+
+        if not passphrase:
+            raise BackupError(
+                "archive is encrypted; supply the passphrase to verify it "
+                "(--passphrase or PROFILEDOCK_BACKUP_PASSPHRASE)"
+            )
+        archive_size = archive.stat().st_size
+        if archive_size > MAX_ENCRYPTED_PAYLOAD_BYTES:
+            raise BackupError(
+                f"encrypted archive is {archive_size} bytes, exceeding the "
+                f"{MAX_ENCRYPTED_PAYLOAD_BYTES}-byte encrypted-backup limit"
+            )
+        try:
+            payload = decrypt_payload(archive.read_bytes(), passphrase)
+        except BackupError:
+            raise
+        except Exception as exc:
+            raise BackupError(f"could not decrypt archive: {exc}") from exc
+        fileobj = io.BytesIO(payload)
+
     try:
-        tar = tarfile.open(archive, "r:gz")  # noqa: SIM115 - closed by the `with tar` below
+        tar = tarfile.open(fileobj=fileobj, name=str(archive), mode="r:gz")  # noqa: SIM115 - closed by the `with tar` below
     except (tarfile.TarError, EOFError, OSError) as exc:
         raise BackupError(f"corrupted backup archive: {exc}") from exc
     except Exception as exc:
@@ -442,6 +480,8 @@ def create_backup_archive(
     output_file: Path,
     force: bool = False,
     exclude_cache: bool = False,
+    passphrase: str | None = None,
+    use_env_passphrase: bool = False,
 ) -> BackupReport:
     requested_output = Path(output_file).expanduser()
     if _is_link(requested_output):
@@ -517,6 +557,24 @@ def create_backup_archive(
                 )
 
         _verify_archive_structure(temp_archive)
+
+        resolved_passphrase = passphrase
+        if resolved_passphrase is None and use_env_passphrase:
+            resolved_passphrase = os.environ.get("PROFILEDOCK_BACKUP_PASSPHRASE")
+        if resolved_passphrase == "":
+            raise BackupError("passphrase must not be empty; omit --passphrase for an unencrypted archive")
+        if resolved_passphrase is not None:
+            from .crypto import MAX_ENCRYPTED_PAYLOAD_BYTES, encrypt_payload
+
+            payload_size = temp_archive.stat().st_size
+            if payload_size > MAX_ENCRYPTED_PAYLOAD_BYTES:
+                raise BackupError(
+                    f"archive is {payload_size} bytes, exceeding the encrypted-backup limit of "
+                    f"{MAX_ENCRYPTED_PAYLOAD_BYTES} bytes; use --exclude-cache or split profiles "
+                    "across multiple backups."
+                )
+            encrypted = encrypt_payload(temp_archive.read_bytes(), resolved_passphrase)
+            temp_archive.write_bytes(encrypted)
 
         temp_archive.replace(out_path)
 

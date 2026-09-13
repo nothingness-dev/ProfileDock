@@ -20,6 +20,7 @@ version = {attr = "profiledock.version.__version__"}
 [project.optional-dependencies]
 playwright = ["playwright>=1.49"]
 interactive = ["textual>=1.0"]
+encryption = ["cryptography>=44"]
 # Optional acceleration for resource metrics: the samplers fall back to
 # platform-native /proc, tool-help, and ps queries when psutil is absent.
 metrics = ["psutil>=5.9"]

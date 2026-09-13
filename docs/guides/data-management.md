@@ -71,6 +71,16 @@ profiledock backup --all --output all-profiles.tar.gz
 
 Use `--force` only to replace an existing output archive deliberately. Use `--json` for a versioned report.
 
+### Encrypted backups
+
+Archives contain live session cookies, so an unencrypted archive is as sensitive as the profile itself. Pass `--passphrase` to wrap the archive in an AES-256-GCM envelope (key derived with PBKDF2-HMAC-SHA256, 600,000 iterations):
+
+```bash
+profiledock backup Work --output work.tar.gz --passphrase
+```
+
+Encrypted backups require the optional `cryptography` dependency (`pip install profiledock[encryption]`). When `--passphrase` is given without a value or omitted, the `PROFILEDOCK_BACKUP_PASSPHRASE` environment variable is used; unencrypted output remains the default so existing automation is unaffected. `restore` and `verify` detect the envelope automatically and require the passphrase only when the archive is encrypted. Encrypted archives are capped at 2 GiB.
+
 Backup guarantees:
 
 - Refuses active or starting profiles.
@@ -89,7 +99,7 @@ profiledock restore work-profile.tar.gz
 profiledock restore work-profile.tar.gz --json
 ```
 
-Restore validates the complete archive before committing. It rejects absolute paths, `..` traversal, backslashes used for cross-platform escape, Windows reserved device names, links, unsafe types, duplicate members, oversized archives, bad manifests, unknown future versions, unsafe profile IDs, inconsistent totals, and checksum mismatches.
+Restore validates the complete archive before committing. It rejects absolute paths, `..` traversal, backslashes used for cross-platform escape, Windows reserved device names, links, unsafe types, duplicate members, oversized archives, bad manifests, unknown future versions, unsafe profile IDs, inconsistent totals, and checksum mismatches. Encrypted archives are detected by their header and decrypted before validation.
 
 Conflicting IDs and names are refused. `--force` permits supported replacement but never permits active-profile overwrite or filesystem-boundary escape. Temporary extraction and quarantined replacement make restore rollback-safe.
 
@@ -100,7 +110,7 @@ profiledock verify work-profile.tar.gz
 profiledock verify work-profile.tar.gz --json
 ```
 
-`verify` checks a backup archive without restoring it: manifest schema, totals, member paths and sizes, then every file's SHA-256 against the manifest. Nothing is written to any data root, so it is safe to run against archives from untrusted sources before choosing to restore them. A non-zero exit lists the members whose content no longer matches the archive manifest.
+`verify` checks a backup archive without restoring it: manifest schema, totals, member paths and sizes, then every file's SHA-256 against the manifest. Nothing is written to any data root, so it is safe to run against archives from untrusted sources before choosing to restore them. A non-zero exit lists the members whose content no longer matches the archive manifest. Encrypted archives are verified after in-memory decryption and require the passphrase.
 
 ## Migrate project-local data
 

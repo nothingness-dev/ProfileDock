@@ -199,6 +199,8 @@ Each profile result includes `id`, `name`, nullable metadata `engine`, status, f
 - `checksum_failures` — array of archive member names whose content does not match the manifest
 - `valid` — boolean, `true` when `checksum_failures` is empty
 
+Encrypted archives are verified after in-memory decryption and use the same fields; a missing passphrase is a version-1 error on standard error with category `storage_error`.
+
 ## `logs --json`
 
 `command` is `logs`. `data` is an array of structured entries:

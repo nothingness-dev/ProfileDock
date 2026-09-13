@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import typer
@@ -48,6 +49,13 @@ def backup_command(
         "-C",
         help="Exclude transient browser cache directories to reduce archive size.",
     ),
+    passphrase: str | None = typer.Option(
+        None,
+        "--passphrase",
+        help="Encrypt the archive with this passphrase (AES-256-GCM). "
+        "Falls back to PROFILEDOCK_BACKUP_PASSPHRASE when omitted; "
+        "without either, the archive stays unencrypted.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -59,7 +67,8 @@ def backup_command(
     Every selected profile must be stopped. The archive includes metadata,
     engine and launch configuration, file sizes, and SHA-256 checksums.
     --exclude-cache skips recreatable browser caches to shrink the archive.
-    Existing output requires --force.
+    Existing output requires --force. Pass --passphrase to encrypt the
+    archive with AES-256-GCM.
     """
     from ..backup import (
         BackupError,
@@ -96,6 +105,8 @@ def backup_command(
             output_file=output,
             force=force,
             exclude_cache=exclude_cache,
+            passphrase=passphrase,
+            use_env_passphrase=passphrase is None,
         )
     except (
         ProfileNotFoundError,
@@ -157,6 +168,12 @@ def restore_command(
         "-f",
         help="Replace existing profiles with conflicting IDs. Never overwrites active profiles.",
     ),
+    passphrase: str | None = typer.Option(
+        None,
+        "--passphrase",
+        help="Passphrase for encrypted archives (auto-detected). "
+        "Falls back to PROFILEDOCK_BACKUP_PASSPHRASE when omitted.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -166,8 +183,9 @@ def restore_command(
     """Restore profiles from a verified backup archive.
 
     The complete archive is validated (manifest, paths, sizes, checksums)
-    before anything is committed. Conflicting IDs or names are refused unless
-    --force is given; running profiles are never overwritten.
+    before anything is committed. Encrypted archives are detected
+    automatically. Conflicting IDs or names are refused unless --force is
+    given; running profiles are never overwritten.
     """
     from ..restore import (
         DecompressionSecurityError,
@@ -185,6 +203,9 @@ def restore_command(
             archive_path=archive,
             data_paths=paths,
             overwrite=force,
+            passphrase=passphrase
+            if passphrase is not None
+            else os.environ.get("PROFILEDOCK_BACKUP_PASSPHRASE"),
         )
     except InvalidArchiveError as exc:
         if getattr(exc, "category", None) == "not_found":
@@ -261,6 +282,12 @@ def restore_command(
 
 def verify_command(
     archive: Path = typer.Argument(..., help="Path to the backup archive (.tar.gz) to verify."),
+    passphrase: str | None = typer.Option(
+        None,
+        "--passphrase",
+        help="Passphrase for encrypted archives (auto-detected). "
+        "Falls back to PROFILEDOCK_BACKUP_PASSPHRASE when omitted.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -270,15 +297,21 @@ def verify_command(
     """Verify a backup archive without restoring it.
 
     Checks the manifest, totals, member paths and sizes, and every file's
-    SHA-256 checksum. Exits non-zero when the archive is structurally invalid
-    or any content checksum fails.
+    SHA-256 checksum. Encrypted archives require --passphrase. Exits
+    non-zero when the archive is structurally invalid or any content
+    checksum fails.
     """
     from ..backup import BackupError, verify_backup_archive
 
     paths = selected_paths()
     corr_id = generate_correlation_id()
     try:
-        report = verify_backup_archive(archive)
+        report = verify_backup_archive(
+            archive,
+            passphrase=passphrase
+            if passphrase is not None
+            else os.environ.get("PROFILEDOCK_BACKUP_PASSPHRASE"),
+        )
     except BackupError as exc:
         write_log_entry(
             log_dir=paths.logs_dir,

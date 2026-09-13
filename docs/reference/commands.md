@@ -318,29 +318,31 @@ JSON success reports use stdout. JSON failure reports use stderr and leave stdou
 ## `backup`
 
 ```text
-profiledock backup PROFILE --output ARCHIVE [--force] [--exclude-cache] [--json]
-profiledock backup --all --output ARCHIVE [--force] [--exclude-cache] [--json]
+profiledock backup PROFILE --output ARCHIVE [--force] [--exclude-cache] [--passphrase PASSPHRASE] [--json]
+profiledock backup --all --output ARCHIVE [--force] [--exclude-cache] [--passphrase PASSPHRASE] [--json]
 ```
 
-Options are `--all`/`-a`, required `--output`/`-o`, `--force`/`-f`, `--exclude-cache`/`-C`, and `--json`. Specify either one profile or `--all`, not both. Every selected profile must be stopped. Pass `--exclude-cache`/`-C` to skip transient Chromium caches and optimize archive size.
+Options are `--all`/`-a`, required `--output`/`-o`, `--force`/`-f`, `--exclude-cache`/`-C`, optional `--passphrase`, and `--json`. Specify either one profile or `--all`, not both. Every selected profile must be stopped. Pass `--exclude-cache`/`-C` to skip transient Chromium caches and optimize archive size.
 
 The command creates a versioned `.tar.gz` archive with metadata, engine and launch configuration, file sizes, and SHA-256 checksums. Runtime files, logs, links, junctions, and temporary files are excluded or rejected. Output is staged and verified before atomic replacement. Existing output requires `--force`.
+
+With `--passphrase`, the archive is wrapped in an AES-256-GCM envelope (PBKDF2-HMAC-SHA256, 600,000 iterations) and requires the `cryptography` extra (`pip install profiledock[encryption]`). When `--passphrase` is omitted, the `PROFILEDOCK_BACKUP_PASSPHRASE` environment variable is honored if set. Unencrypted archives remain the default.
 
 ## `restore`
 
 ```text
-profiledock restore ARCHIVE [--force] [--json]
+profiledock restore ARCHIVE [--force] [--passphrase PASSPHRASE] [--json]
 ```
 
-Validates archive type, paths, member count, expanded size, manifest schema, IDs, metadata, totals, sizes, and checksums before committing. Conflicting IDs or names are refused unless the supported conflict can be replaced with `--force`; active profiles are never overwritten. Extraction and metadata update are transactional.
+Validates archive type, paths, member count, expanded size, manifest schema, IDs, metadata, totals, sizes, and checksums before committing. Encrypted archives are detected automatically by their header and decrypted with `--passphrase` (or `PROFILEDOCK_BACKUP_PASSPHRASE`). Conflicting IDs or names are refused unless the supported conflict can be replaced with `--force`; active profiles are never overwritten. Extraction and metadata update are transactional.
 
 ## `verify`
 
 ```text
-profiledock verify ARCHIVE [--json]
+profiledock verify ARCHIVE [--passphrase PASSPHRASE] [--json]
 ```
 
-Validates a backup archive without restoring it: manifest schema, totals, member paths and sizes, then every file's SHA-256 against the manifest. Nothing is written to any data root. Exits non-zero and lists failing members when a checksum fails; otherwise prints `All checksums verified.`
+Validates a backup archive without restoring it: manifest schema, totals, member paths and sizes, then every file's SHA-256 against the manifest. Encrypted archives require `--passphrase` (or `PROFILEDOCK_BACKUP_PASSPHRASE`) and are verified after decryption in memory. Nothing is written to any data root. Exits non-zero and lists failing members when a checksum fails; otherwise prints `All checksums verified.`
 
 ## `logs`
 

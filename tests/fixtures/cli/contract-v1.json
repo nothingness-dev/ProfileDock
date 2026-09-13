@@ -254,6 +254,9 @@
         ],
         "json_output": [
           "--json"
+        ],
+        "passphrase": [
+          "--passphrase"
         ]
       }
     },
@@ -268,6 +271,9 @@
         ],
         "json_output": [
           "--json"
+        ],
+        "passphrase": [
+          "--passphrase"
         ]
       }
     },
@@ -278,6 +284,9 @@
       "options": {
         "json_output": [
           "--json"
+        ],
+        "passphrase": [
+          "--passphrase"
         ]
       }
     },
