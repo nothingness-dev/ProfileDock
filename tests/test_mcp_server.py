@@ -10,6 +10,17 @@ EXPECTED_TOOLS = [
     "profile_interact",
     "profile_eval",
     "profile_close",
+    "profile_cookies_get",
+    "profile_cookies_set",
+    "profile_cookies_delete",
+    "profile_tabs",
+    "profile_open_tab",
+    "profile_close_tab",
+    "profile_screenshot",
+    "profile_pdf",
+    "profile_coherence",
+    "profile_config_get",
+    "profile_config_set",
 ]
 
 

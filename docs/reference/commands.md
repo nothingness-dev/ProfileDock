@@ -131,7 +131,7 @@ Supported settings:
 | `proxy` | `http://`, `https://`, or `socks5://` URL; `user:pass@host:port` credentials are supported for http/https only (`none` clears it). |
 | `user-agent` | Non-empty user-agent string (max 512 characters). |
 | `locale` | Locale tag such as `en` or `en-GB`. |
-| `timezone` | IANA timezone name such as `Europe/Berlin`. |
+| `timezone` | IANA timezone name such as `Europe/Berlin`, validated against the installed timezone database. Unknown names are rejected when presets are saved or loaded. |
 
 Examples:
 
@@ -190,7 +190,18 @@ Tools: `profile_list`, `profile_launch`, `profile_read_state`,
 `profile_get_snapshot` (deterministic `@eN` accessibility refs, pre-order
 numbering, 12-deep / 200-node caps), `profile_interact` (click/fill/press/
 select against a snapshot ref), `profile_eval` (deadline-wrapped like the CLI),
-`profile_close`. Snapshot refs belong to the most recent snapshot in the selected
+`profile_close`, plus the session-management surface: `profile_cookies_get`
+(values redacted unless `redact_values` is false), `profile_cookies_set`,
+`profile_cookies_delete`, `profile_tabs`, `profile_open_tab`,
+`profile_close_tab`, `profile_screenshot` (returns a base64 PNG image content
+block), `profile_pdf` (returns a base64 PDF resource block; requires headless),
+`profile_coherence` (read-only egress/identity score), and
+`profile_config_get` / `profile_config_set` (preset read; writes limited to
+`default-tabs`, `proxy`, `user-agent`, `locale`, `timezone`; proxy redacted in
+results). `profile_close_tab` requires a non-negative `index`; capture tools use
+`tab_index`. Capture results include text metadata followed by a native MCP image
+or embedded-resource block. Temporary capture files are removed after reading.
+Snapshot refs belong to the most recent snapshot in the selected
 tab's main document and retain the actual DOM element, including duplicate names.
 Navigation or removing the element invalidates its reference. Request a new
 snapshot after navigation or major page changes. Unnamed nodes have no refs.

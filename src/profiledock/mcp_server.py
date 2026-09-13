@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .cli_support import redact_proxy
 from .version import __version__
@@ -87,6 +87,160 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "required": ["profile_id"],
         },
     },
+    {
+        "name": "profile_cookies_get",
+        "description": "Export live session cookies. Values are redacted unless redact_values is false.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Full-URL filters (scheme required).",
+                },
+                "domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Domain filters; matches equals-or-endswith.",
+                },
+                "session_only": {"type": "boolean"},
+                "redact_values": {"type": "boolean", "default": True},
+            },
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_cookies_set",
+        "description": "Inject cookies into the live context without a browser restart.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "cookies": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Playwright cookie objects; each needs name, value, and url or domain.",
+                },
+            },
+            "required": ["profile_id", "cookies"],
+        },
+    },
+    {
+        "name": "profile_cookies_delete",
+        "description": "Delete matching live cookies by entries (name+domain+path) or urls.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "entries": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Cookie selectors with name and domain or url.",
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Full-URL filters (scheme required).",
+                },
+            },
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_tabs",
+        "description": "List open tabs with index, title, and URL. Does not auto-start the profile.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"profile_id": {"type": "string"}},
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_open_tab",
+        "description": "Open a new tab, optionally navigating to a URL.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "url": {"type": "string"},
+            },
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_close_tab",
+        "description": "Close a tab by its 0-based index.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "index": {"type": "integer"},
+            },
+            "required": ["profile_id", "index"],
+        },
+    },
+    {
+        "name": "profile_screenshot",
+        "description": "Capture a PNG screenshot of a tab as a base64 image content block.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "tab_index": {"type": "integer"},
+                "full_page": {"type": "boolean"},
+                "url": {"type": "string"},
+            },
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_pdf",
+        "description": "Export the tab as PDF; returns a base64 resource content block. Requires headless.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "tab_index": {"type": "integer"},
+                "url": {"type": "string"},
+            },
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_coherence",
+        "description": "Score the profile's egress/identity coherence (0-100) with per-deduction reasons.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"profile_id": {"type": "string"}},
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_config_get",
+        "description": "Read the profile's launch preset (proxy redacted).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"profile_id": {"type": "string"}},
+            "required": ["profile_id"],
+        },
+    },
+    {
+        "name": "profile_config_set",
+        "description": "Update preset values: default-tabs, proxy, user-agent, locale, or timezone.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string"},
+                "setting": {
+                    "type": "string",
+                    "enum": ["default-tabs", "proxy", "user-agent", "locale", "timezone"],
+                },
+                "value": {"type": "string"},
+            },
+            "required": ["profile_id", "setting", "value"],
+        },
+    },
 ]
 
 _TOOL_NAMES = frozenset(spec["name"] for spec in TOOL_SPECS)
@@ -117,16 +271,27 @@ def validate_tool_arguments(name: str, arguments: Any) -> dict[str, Any]:
         raise ValueError("unknown tool argument")
     if any(key not in arguments for key in schema.get("required", [])):
         raise ValueError("missing required tool argument")
-    types = {"string": str, "integer": int, "boolean": bool}
+    types = {"string": str, "integer": int, "boolean": bool, "array": list}
+    item_types = {"string": str, "object": dict, "integer": int}
     for key, value in arguments.items():
-        if type(value) is not types[properties[key]["type"]]:
+        prop = properties[key]
+        if type(value) is not types[prop["type"]]:
             raise ValueError(f"invalid type for {key}")
+        if prop["type"] == "array" and "items" in prop:
+            expected_item = item_types[prop["items"]["type"]]
+            items = cast("list[Any]", value)
+            if any(type(item) is not expected_item for item in items):
+                raise ValueError(f"invalid item type in {key}")
+        if "enum" in prop and value not in prop["enum"]:
+            raise ValueError(f"invalid value for {key}")
     if "profile_id" in arguments and not arguments["profile_id"].strip():
         raise ValueError("profile_id must not be empty")
     if "tabs" in arguments and arguments["tabs"] < 1:
         raise ValueError("tabs must be at least 1")
     if "tab_index" in arguments and arguments["tab_index"] < 0:
         raise ValueError("tab_index must not be negative")
+    if "index" in arguments and arguments["index"] < 0:
+        raise ValueError("index must not be negative")
     return dict(arguments)
 
 
@@ -169,14 +334,20 @@ def _handle_request(dispatcher: Any, request: Any) -> dict[str, Any] | None:
         try:
             result = dispatcher.call_tool(name, arguments)
             content = json.dumps(result, allow_nan=False)
+            blocks = [{"type": "text", "text": content}]
+            if name in {"profile_screenshot", "profile_pdf"}:
+                metadata = {key: value for key, value in result.items() if key != "content"}
+                blocks = [{"type": "text", "text": json.dumps(metadata, allow_nan=False)}]
+                blocks.extend(result["content"])
             failed = False
         except Exception as exc:
             content = redact_proxy(str(exc)) or "tool execution failed"
+            blocks = [{"type": "text", "text": content}]
             failed = True
         return {
             **envelope,
             "result": {
-                "content": [{"type": "text", "text": content}],
+                "content": blocks,
                 "isError": failed,
             },
         }
