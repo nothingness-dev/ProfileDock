@@ -1,79 +1,93 @@
-# Graphical UI implementation checkpoint
+﻿# Graphical UI implementation checkpoint
 
-## Current level: 1 — shell implemented; awaiting review
+## Current level: 2 — assets prepared; awaiting visual review
 
-Branch: `feat/graphical-dashboard-shell`; baseline: clean `d508029`.
-Only an isolated React/TypeScript/Vite frontend in `apps/ui`. No Python,
-CLI/TUI/MCP, storage, browser behavior, data access, cards, dialogs, or deployment changes.
+Started from clean `d4ee535` on `feat/graphical-dashboard-shell`.
+No applicable AGENTS.md found in repository or ancestor directories.
+Level 1 is preserved: isolated React/TypeScript/Vite dashboard in `apps/ui`;
+its type check/build previously passed, browser verification remained pending.
 
-Visual direction: compact horizontal navigation, midnight navy with subtle purple
-ambience, white headings, lavender secondary text, purple-to-blue “every you.”,
-fine translucent borders and a purple outlined dashboard Create profile button.
-Reference: user-supplied dashboard screenshot with a create-profile dialog over it
-(2432 × 1598 original). **Supplied filename: not exposed by the attachment interface**;
-no source image file is present in the repository. The dialog is out of scope.
+Level 2 boundaries: four reusable cover/icon pairs, typed appearance registry,
+and isolated development-only asset preview. No profile cards, picker screen,
+forms, Python/backend changes, profile data, persistence, desktop packaging,
+or deployment. No Level 3 work. Subsequent user instruction authorizes committing
+and pushing this work on the separate `feat/appearance-assets` branch.
 
-- [x] Inspect working tree, instructions, README, pyproject and Python architecture.
-- [x] Create a separate branch before edits.
-- [x] Implement tokens, navigation, heading, disabled Create profile, search, preview placeholder.
-- [x] Run focused frontend type check and production build.
-- [ ] Inspect desktop/narrow layouts and capture screenshots if browser tooling is available.
-- [x] Record final files, commands, limitations and resume instructions.
+Approved direction: midnight navy, restrained purple ambience, metallic 3D
+identities: Ember coral/copper knot and ribbons; Prism cobalt brackets/chrome
+center and angular blue glass; Orbit violet ring/sphere and planet/orbits;
+Vertex translucent lime/dark cubes and matching glass geometry.
 
-## Implementation and boundaries
+Supplied references (UI screenshots, not standalone assets), both inspected:
+- `E:/Downloads/ChatGPT Image Sep 13, 2026, 08_35_54 PM.png` — dashboard.
+- `E:/Downloads/ChatGPT Image Sep 13, 2026, 08_35_36 PM.png` — create dialog.
+These filenames supersede the unknown filename in the prior Level 1 record.
 
-`apps/ui` is independent of Python. React owns only ephemeral search text;
-typing, clearing with focus restoration, and Ctrl/Cmd+K are implemented.
-Navigation exposes the current Profiles section and visibly disabled destinations.
-Create profile is disabled with a visible, associated explanation. The placeholder
-explicitly describes a preview, not an empty real collection. English/LTR,
-responsive wrapping, keyboard focus, skip link, reduced-motion and forced-color
-rules are included, but not browser-verified.
+## Checklist and files
 
-Dependencies: React/React DOM, Phosphor line icons; development uses TypeScript,
-React type declarations and Vite. Exact versions and one npm lockfile; no router,
-backend adapter, UI framework, remote fonts, data reads, or Python modifications.
-Icons use individual imports to avoid processing the full icon catalog.
+- [x] Inspect checkpoint, working tree, existing UI and available image files.
+- [x] Generate and directly inspect four independent local cover/icon pairs.
+- [x] Verify actual dimensions, alpha and all eight local references.
+- [x] Add stable typed IDs, labels, cover/icon URLs and identity accent colors.
+- [x] Add isolated preview with 4:1 cover crops and 96px/64px icon swatches.
+- [x] Type check, production build and isolated in-memory preview build.
+- [ ] Browser review at desktop/narrow widths and screenshot capture: unavailable.
+- [ ] User visual acceptance of regenerated artwork and small-size rendering.
 
-Files added: `apps/ui/{.gitignore,README.md,design-qa.md,index.html,package.json,
-package-lock.json,tsconfig.json}`, `apps/ui/src/{main.tsx,tokens.css,styles.css,
-vite-env.d.ts}`, and this checkpoint. No existing tracked files changed.
+Added: `apps/ui/src/appearances.ts`, eight PNGs and `asset-inventory.md` under
+`apps/ui/src/assets/appearances/`, `apps/ui/asset-preview.html`, and
+`apps/ui/src/dev/asset-preview.{tsx,css}`.
+Updated: `apps/ui/README.md` and this checkpoint. Level 2 is recorded on
+`feat/appearance-assets`, based on the Level 1 commit `d4ee535`.
+Main dashboard, tokens, dependencies, npm lockfile and Python remain unchanged.
 
-## Run and validate (PowerShell)
+Architecture: IDs `ember`, `prism`, `orbit`, `vertex` are appearance presets,
+independent of profile names or Python models. Explicit Vite local imports;
+no remote URLs, fake default profiles or generation pipeline. Preview is a
+separate HTML entry with a DEV guard; production builds only `index.html`.
+The main entry does not import the registry or preview.
 
-Requires Node.js 22.12+ with npm. From the repository root:
+## Run/check (PowerShell)
+
+Requires Node 22.12+ and npm. From repository root:
 
 ```powershell
 cd apps\ui
 npm.cmd ci
 npm.cmd run dev
-# Open the address Vite prints, normally http://127.0.0.1:5173; Ctrl+C stops it.
+# Open http://127.0.0.1:5173/asset-preview.html (use Vite's printed port).
+# Main dashboard remains at /. Ctrl+C stops the server.
 npm.cmd run check
 npm.cmd run build
-# Optional local production preview:
-npm.cmd run preview
 ```
 
 Other shells: use `cd apps/ui` and `npm` instead of `npm.cmd`.
+`npm.cmd run preview` previews production, which intentionally excludes the asset page.
 
-Validation performed on Node 24.18.0 / npm 11.16.0: dependency installation,
-strict TypeScript check and Vite production build passed. Initial type check
-identified missing Vite CSS import declarations; fixed via `vite-env.d.ts`.
-Existing Python paths and contracts were checked for changes and remained intact.
-No Python tests, browser binaries, backend processes, push or deployment.
+## Actual validation and limitations (2026-09-14)
 
-Browser blocker: in-app browser selection returned unavailable; runtime browser
-discovery returned `[]`. No visual inspection, screenshots, keyboard interaction
-tests, or viewport checks performed. See `apps/ui/design-qa.md` (blocked).
-Review at 1440px, 390px and 320px, plus 200% zoom, before visual approval.
+Node 24.18.0 / npm 11.16.0; reused existing node_modules, no install needed.
+Strict TypeScript and Vite production build passed. A separate Vite API build
+with `asset-preview.html`, DEV=true and write=false passed and resolved all eight
+PNGs in memory. Checked every registry file reference; all exist. Production
+output contains only dashboard HTML/JS/CSS. `git diff --check` passed.
+No Python tests or browser installation; no backend/browser launches.
 
-Missing visual assets: original reference file/filename and standalone brand mark
-(wordmark is text only). Four matching cover/icon pairs remain entirely deferred.
+All images directly inspected. Covers: 2172 x 724, fully opaque; icons:
+1254 x 1254, actual alpha transparency. Full pixel scan and review details
+(including faint generated alpha edge pixels) are in the asset inventory.
+Images are newly generated recreations, not exact original exports.
 
-Next level (not started): prepare four matching cover/icon asset pairs
-(Ember, Prism, Orbit, Vertex). No generated assets or profile substitutes in Level 1.
+Browser selection returned `No browser is available`; discovery returned `[]`.
+No browser screenshots, preview viewport checks or small-size/crop approval.
+Level 1 browser QA also remains pending. No requested asset files are missing;
+original standalone source artwork remains unavailable. Remaining user input:
+accept the generated pairs or describe corrections after reviewing the preview.
 
-Resume here: inspect this checkpoint and `git status` on
-`feat/graphical-dashboard-shell`. Run the frontend and complete the pending visual
-review when a browser is available. Apply only Level 1 feedback until approved;
-then prepare the four asset pairs as the next separately reviewed level. STOP here.
+## Resume here
+
+Read this checkpoint, inspect `git status`, and open the development asset preview.
+Review all four pairs at card/picker sizes on navy and light backgrounds, including
+alpha fringes and the centered cover crop. Address only Level 2 visual feedback.
+Do not wire presets into profiles, build screens or begin Level 3 without a new
+explicit request. STOP at this review boundary.

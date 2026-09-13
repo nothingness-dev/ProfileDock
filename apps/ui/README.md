@@ -34,3 +34,15 @@ router, persistence, sample profiles, or desktop integration is included.
 
 See [the implementation checkpoint](../../docs/ui-implementation-progress.md)
 before continuing work.
+
+Level 2 appearance review: while `npm.cmd run dev` is running, open
+`http://127.0.0.1:5173/asset-preview.html` (use Vite's printed port if different).
+This isolated development entry shows Ember, Prism, Orbit and Vertex cover/icon
+pairs at approximate card and picker sizes. They are appearance presets, not
+default profiles. It does not change the main dashboard.
+
+`src/appearances.ts` provides typed stable IDs and local asset imports. Original
+generated PNGs live in `src/assets/appearances`; see `asset-inventory.md` there
+for provenance, dimensions and validation. The normal production build uses
+only `index.html`: it excludes the preview and currently unused appearance assets.
+Do not add `asset-preview.html` as a production build input.
