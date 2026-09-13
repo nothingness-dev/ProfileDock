@@ -4,7 +4,7 @@ This document freezes the command-line interface planned for ProfileDock 1.0. Th
 
 ## Command surface
 
-The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `tags`, `proxy-test`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `shot`, `pdf`, `eval`, `cookies`, `top`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, `config`, and `mcp`.
+The top-level commands are `create`, `list`, `show`, `rename`, `set-engine`, `tags`, `proxy-test`, `coherence`, `status`, `launch`, `tabs`, `open-tab`, `close-tab`, `read`, `shot`, `pdf`, `eval`, `cookies`, `top`, `close`, `delete`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, `config`, and `mcp`.
 
 `mcp serve` uses MCP JSON-RPC over stdio, independently of the CLI JSON envelope.
 Its lifecycle and tool results follow [MCP version 2024-11-05](https://modelcontextprotocol.io/specification/2024-11-05/server/tools).
@@ -86,7 +86,7 @@ Commands supporting `--json` emit JSON output version 1 with exactly this envelo
 }
 ```
 
-The JSON commands are `list`, `show`, `status`, `config show`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, and `cookies`. Consumers must reject unsupported `output_version` values. Golden output fixtures cover profile listing and profile detail, including effective-engine behavior.
+The JSON commands are `list`, `show`, `status`, `config show`, `doctor`, `migrate`, `backup`, `restore`, `verify`, `logs`, `tabs`, `open-tab`, `close-tab`, `read`, `eval`, `cookies`, and `coherence`. Consumers must reject unsupported `output_version` values. Golden output fixtures cover profile listing and profile detail, including effective-engine behavior.
 
 Human rendering and JSON serialization use separate paths. Tests replace the human renderer with a failing implementation while asserting byte-equivalent JSON data, preventing human-output improvements from changing the JSON contract accidentally.
 

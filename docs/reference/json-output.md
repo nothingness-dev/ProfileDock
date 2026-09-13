@@ -166,6 +166,24 @@ Each diagnostic has `id`, `status`, and `summary`, with optional `action`. Statu
 
 `command` is `migrate`. `data` contains source and destination roots plus `migrated`, `skipped`, and `failed` result arrays. Each result includes profile identity when available, status, and message. Successful and idempotently skipped operations exit 0 unless failures remain. Failure reports exit 1 and are written as JSON to stderr.
 
+## `coherence --json`
+
+`command` is `coherence`. `data` contains:
+
+- `score` — integer 0-100; starts at 100 and subtracts fixed penalties
+- `is_coherent` — boolean; false when any mismatch/unset/egress deduction applies
+- `egress_ip` — proxy exit IP, or null when unverified (socks5, unreachable, or direct egress)
+- `detected_timezone` / `configured_timezone` — egress IANA zone vs. preset value
+- `detected_country` / `configured_locale` — egress country code vs. preset locale
+- `deductions` — array of `{id, penalty, reason}` with deterministic ids (`egress_unreachable`, `timezone_mismatch`, `timezone_unset`, `locale_mismatch`, `socks5_unverified`)
+- `provider` — geolocation endpoint that served the egress report, or null when unverified
+- `remediation_command` — suggested `--fix` invocation when deductions are fixable
+- `suggested_locale` — provider-suggested locale for `--fix`
+- `fix_applied` — boolean, true when `--fix` updated the preset in this run
+- `profile` — resolved profile id
+
+Exit code is 1 when `is_coherent` is false, 0 otherwise. Network failures during provider fallback surface as `egress_unreachable` in the score, never as an error envelope.
+
 ## `backup --json`
 
 `command` is `backup`. `data` contains:

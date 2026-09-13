@@ -528,6 +528,22 @@
           "options": {}
         }
       }
+    },
+    "coherence": {
+      "arguments": [
+        "profile_id"
+      ],
+      "options": {
+        "timeout": [
+          "--timeout"
+        ],
+        "fix": [
+          "--fix"
+        ],
+        "json_output": [
+          "--json"
+        ]
+      }
     }
   },
   "exit_codes": {

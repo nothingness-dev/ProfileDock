@@ -277,6 +277,18 @@ profiledock delete PROFILE [--yes]
 
 Deletes metadata and the profile's managed browser-data directory. Running profiles must be closed. Without `--yes`/`-y`, ProfileDock confirms interactively. Declining aborts with exit code 1 and leaves data unchanged. Non-interactive mode requires `--yes`.
 
+## `coherence`
+
+```text
+profiledock coherence PROFILE [--timeout SECONDS] [--fix] [--json]
+```
+
+Audits a profile's egress/identity coherence: resolves the configured proxy exit IP through geolocation providers (ipapi.co, ipinfo.io, api.myip.com, with automatic fallback) and cross-checks the detected timezone and country against the profile's preset. Reports a deterministic 0-100 score with per-deduction reasons. Direct-egress profiles (no proxy) score 100 without network access.
+
+Deductions and penalties: `egress_unreachable` -50 (all providers failed), `timezone_mismatch` -30 (egress timezone differs from the preset), `timezone_unset` -15 (proxy configured without a timezone), `locale_mismatch` -15 (preset locale region contradicts the egress country), `socks5_unverified` -10 (socks5 proxies are accepted at launch but cannot be probed live by this checker, so the exit IP is unverified). A provider that cannot report a timezone triggers no penalty — only the preset is judged. `is_coherent` is false when any of the first four deductions apply; `socks5_unverified` alone is advisory. Exits non-zero when the profile is incoherent.
+
+With `--fix`, aligns the preset with the verified egress: writes changed timezone and provider-suggested locale values when available. Then re-scores the same egress observation without another network request. An unchanged preset reports `fix_applied: false`. Language-only locales have no region to compare. `--timeout SECONDS` must be finite and positive and bounds each provider attempt (default 15). This command contacts third-party geolocation services through the configured proxy; scoring is a preset comparison, not proof of anonymity or browser fingerprint consistency.
+
 ## `doctor`
 
 ```text
