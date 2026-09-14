@@ -5,7 +5,8 @@ import { Plus } from '@phosphor-icons/react/dist/csr/Plus';
 import { MagnifyingGlass } from '@phosphor-icons/react/dist/csr/MagnifyingGlass';
 import { X } from '@phosphor-icons/react/dist/csr/X';
 import { ProfileCard } from './ProfileCard';
-import { createPreviewProfiles, filterProfiles, runningProfiles, setPreviewStatus } from './preview-model';
+import { SessionDock } from './SessionDock';
+import { closeAllPreviewProfiles, createPreviewProfiles, filterProfiles, runningProfiles, setPreviewStatus } from './preview-model';
 import './tokens.css';
 import './styles.css';
 import './dashboard.css';
@@ -21,6 +22,7 @@ function App() {
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
+      if (document.querySelector('dialog[open]')) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         searchRef.current?.focus();
@@ -116,6 +118,10 @@ function App() {
           <p>Try a different profile name or clear your search.</p>
           <button className="secondary-button" onClick={() => { setQuery(''); searchRef.current?.focus(); }}>Clear search</button>
         </section>}
+        <footer className="dashboard-footer">
+          <p>Local UI preview · Nothing is saved</p>
+          <SessionDock running={running} onCloseAll={() => setProfiles(closeAllPreviewProfiles)} />
+        </footer>
       </main>
     </>
   );
