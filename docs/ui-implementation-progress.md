@@ -91,3 +91,25 @@ Review all four pairs at card/picker sizes on navy and light backgrounds, includ
 alpha fringes and the centered cover crop. Address only Level 2 visual feedback.
 Do not wire presets into profiles, build screens or begin Level 3 without a new
 explicit request. STOP at this review boundary.
+
+## Level 3 started — 2026-09-14
+
+The new Level 3 request supersedes the Level 2 stop boundary above; prior
+entries remain historical. Working branch: `feat/ui-profile-dashboard`.
+Verified base: `6f01c20` (Level 2 feature tip); all eight nonempty PNGs and
+`appearances.ts` exist. `12eafd2` on main has identical UI/checkpoint contents.
+No applicable AGENTS.md exists in the repository or ancestors. Worktree was clean.
+Tracker read from `E:/Downloads/profiledock-design-and-implementation-tracker.md`.
+Both attached images exist and were opened; image-2.png is the full dashboard,
+image-1.png is the future create dialog. No required assets are missing.
+
+Implement only labeled in-memory dashboard fixtures, cards, search, empty
+collection preview, running dock and confirmed close-all. Preserve shell,
+assets/dependencies and backend. No real profiles, persistence or future screens.
+
+First coherent change: typed preview model and focused behavior checks.
+Actual validation: strict TypeScript and two Node behavior tests passed.
+Browser selection reported `Browser is not available: iab`; troubleshooting
+followed and discovery returned `[]`. Visual and browser interaction QA pending.
+Resume here: implement reusable card, dashboard composition and session dock;
+then update design decisions/prompt history and final validation evidence.
