@@ -1,48 +1,52 @@
-# ProfileDock graphical shell
+# ProfileDock dashboard preview
 
-Independent Level 1 frontend preview. Requires Node.js 22.12+ and npm.
-No Python setup is needed. No profile data is read or written.
+Isolated React/TypeScript/Vite frontend through Level 3. Requires Node.js
+22.12+ and npm; no Python setup. It never reads or writes real profiles.
 
 From the repository root in PowerShell:
 
 ```powershell
 cd apps\ui
 npm.cmd ci
-npm.cmd run dev
+npm.cmd run dev -- --port 5173 --strictPort
 ```
 
-Open the local address Vite prints (normally http://127.0.0.1:5173).
-Stop with Ctrl+C. On other shells, use `npm` instead of `npm.cmd`.
+Open http://127.0.0.1:5173/. Stop with Ctrl+C. Other shells use `npm`.
 
 ```powershell
 npm.cmd run check
+node --experimental-strip-types --test tests/preview-model.test.mjs
 npm.cmd run build
 npm.cmd run preview
 ```
 
-`check` runs strict TypeScript checking; `build` creates static files in `dist`.
-The frontend uses npm and its own `package-lock.json`; Python lockfiles are unrelated.
+The dashboard is visibly labeled **UI preview**. Personal, Development,
+Research and Sandbox are illustrative fixtures, never default user profiles.
+Launch/Close change only React memory. Reload restores the fixtures. Close all
+requires confirmation; Cancel/Escape leave state unchanged. The running dock
+and total running count include profiles hidden by search.
 
-Search accepts text, has an accessible clear button and supports Ctrl+K or Cmd+K
-to focus. Filtering is deferred. Create profile, Backups, Diagnostics and Settings
-are visibly unavailable. Navigation keeps Profiles active without adding routes.
+Search filters names (case-insensitive, trimmed), supports Ctrl/Cmd+K and clear,
+and distinguishes no matches from the explicit Empty collection preview toggle.
+The toggle temporarily shows a genuinely empty array and preserves the examples'
+state when switched off. It is not a backend connection indicator.
 
-Tokens live in `src/tokens.css`; responsive layout lives in `src/styles.css`.
-`src/main.tsx` holds the small shell and ephemeral search state. Phosphor supplies
-consistent line icons. System fonts avoid a remote font dependency. No backend,
-router, persistence, sample profiles, or desktop integration is included.
+Create profile, settings, tabs, Backups and Diagnostics are unavailable. Card
+menus explain future destinations. Example tab counts disappear after status
+changes, since the preview cannot inspect or open real tabs.
 
-See [the implementation checkpoint](../../docs/ui-implementation-progress.md)
-before continuing work.
+Tokens: `src/tokens.css`; shell: `src/main.tsx` / `src/styles.css`; Level 3 layout:
+`src/dashboard.css`; reusable components: `ProfileCard.tsx`, `SessionDock.tsx`;
+immutable fixture model: `preview-model.ts`. Existing Phosphor icons and system
+fonts are reused. No new dependencies, router, persistence or backend integration.
 
-Level 2 appearance review: while `npm.cmd run dev` is running, open
-`http://127.0.0.1:5173/asset-preview.html` (use Vite's printed port if different).
-This isolated development entry shows Ember, Prism, Orbit and Vertex cover/icon
-pairs at approximate card and picker sizes. They are appearance presets, not
-default profiles. It does not change the main dashboard.
+The development-only http://127.0.0.1:5173/asset-preview.html remains available
+for Level 2 cover crops and icon swatches. `src/appearances.ts` imports eight
+original generated PNGs; see the asset inventory for provenance. The production
+build now includes those images because the dashboard uses them, but still
+excludes the separate asset-preview HTML entry.
 
-`src/appearances.ts` provides typed stable IDs and local asset imports. Original
-generated PNGs live in `src/assets/appearances`; see `asset-inventory.md` there
-for provenance, dimensions and validation. The normal production build uses
-only `index.html`: it excludes the preview and currently unused appearance assets.
-Do not add `asset-preview.html` as a production build input.
+Strict types, build and model checks passed. Browser discovery returned no
+available surfaces; visual fidelity, narrow layouts, actual focus/keyboard
+behavior and console checks remain unverified. See `design-qa.md` and the
+[checkpoint](../../docs/ui-implementation-progress.md) for evidence and limits.
