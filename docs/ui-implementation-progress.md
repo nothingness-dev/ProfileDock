@@ -1,6 +1,9 @@
-﻿# Graphical UI implementation checkpoint
+# Graphical UI implementation checkpoint
 
-## Current level: 2 — assets prepared; awaiting visual review
+Current: Level 3 implemented; types/build/model checks passed; browser and visual
+QA remain pending. See the final Level 3 entry below for current evidence and resume boundary.
+
+## Historical Level 2 checkpoint — assets prepared; awaiting visual review
 
 Started from clean `d4ee535` on `feat/graphical-dashboard-shell`.
 No applicable AGENTS.md found in repository or ancestor directories.
@@ -91,3 +94,103 @@ Review all four pairs at card/picker sizes on navy and light backgrounds, includ
 alpha fringes and the centered cover crop. Address only Level 2 visual feedback.
 Do not wire presets into profiles, build screens or begin Level 3 without a new
 explicit request. STOP at this review boundary.
+
+## Level 3 started — 2026-09-14
+
+The new Level 3 request supersedes the Level 2 stop boundary above; prior
+entries remain historical. Working branch: `feat/ui-profile-dashboard`.
+Verified base: `6f01c20` (Level 2 feature tip); all eight nonempty PNGs and
+`appearances.ts` exist. `12eafd2` on main has identical UI/checkpoint contents.
+No applicable AGENTS.md exists in the repository or ancestors. Worktree was clean.
+Tracker read from `E:/Downloads/profiledock-design-and-implementation-tracker.md`.
+Both attached images exist and were opened; image-2.png is the full dashboard,
+image-1.png is the future create dialog. No required assets are missing.
+
+Implement only labeled in-memory dashboard fixtures, cards, search, empty
+collection preview, running dock and confirmed close-all. Preserve shell,
+assets/dependencies and backend. No real profiles, persistence or future screens.
+
+First coherent change: typed preview model and focused behavior checks.
+Actual validation: strict TypeScript and two Node behavior tests passed.
+Browser selection reported `Browser is not available: iab`; troubleshooting
+followed and discovery returned `[]`. Visual and browser interaction QA pending.
+Resume here: implement reusable card, dashboard composition and session dock;
+then update design decisions/prompt history and final validation evidence.
+
+## Level 3 implementation finished — 2026-09-14
+
+This is the current implementation status; Level 2 entries above are preserved
+as history. Level 3 code is complete; visual/browser verification is pending.
+No Level 4 work has started.
+
+Branch: `feat/ui-profile-dashboard`; verified prerequisite base `6f01c20`.
+Commits completed in coherent increments:
+- `97cadd5` — feat(ui): add isolated dashboard preview model
+- `bd522ef` — feat(ui): render searchable preview profile cards
+- `c910a2e` — feat(ui): add preview session dock and close-all confirmation
+- Final documentation commit: `docs(ui): record Level 3 implementation and validation`
+  (its resulting hash is available from `git log -1` and the final delivery report;
+  a commit cannot contain its own hash).
+
+### Implemented
+
+- Typed frontend-only fixtures with distinct identity/name/appearance/engine/
+  browser/status/last-opened/tab-count fields; existing appearance registry reused.
+- Reusable cover/status/menu/identity/metadata/action cards; responsive two-column
+  grid and single-column narrow layout. Focus highlight represents actual focus.
+- Name search, trimmed/case-insensitive matching, visible/total/running counts,
+  clear-search, no-results and Ctrl/Cmd+K. Shortcut respects an open modal.
+- Explicit UI preview notice; genuine empty-array preview toggle separate from
+  search misses and any backend state. No connection or saved-data claims.
+- Launch/Close change React memory only. Dock derives from the same full
+  collection even when search hides cards. Close-all requires a native accessible
+  dialog; Cancel initial focus, Escape dismissal, return focus to trigger/dock.
+- Disabled Create/settings/tabs with accessible explanations, simple card
+  disclosures with Escape/outside dismissal. No fake successes or other screens.
+- Preserved reduced motion, existing system fonts/Phosphor icons and all assets.
+  No Python/backend/storage/network integration, dependencies or lockfile changes.
+- README, design decisions, exact prompt history and visual-QA record maintained.
+
+### Actual validation
+
+Node v24.18.0 / npm 11.16.0; existing node_modules reused, no installation.
+From `E:/GitHub/ProfileDock/apps/ui`:
+
+```powershell
+npm.cmd run check
+node --experimental-strip-types --test tests/preview-model.test.mjs
+npm.cmd run build
+npm.cmd run dev -- --port 5173 --strictPort
+```
+
+Strict TypeScript passed. Two focused Node tests passed: trimmed/case-insensitive
+filtering, no matches, empty/blank queries, invariant collection/running counts;
+immutable launch/close/close-all, cleared stale tab counts, empty close-all and
+fixture recreation/reset. These are model tests, not browser interaction tests.
+Production build passed (47 modules); all eight PNG imports resolved and are now
+included in dashboard output. Separate asset-preview HTML remains excluded.
+Vite started on http://127.0.0.1:5173/; GET / and /src/main.tsx returned HTTP 200.
+Source review applied the React checklist (derived counts, lazy state initializer,
+functional immutable updates, event cleanup, direct icon imports).
+`git diff --check` passed. Diff is confined to frontend/continuity documentation.
+No Python suite, browser installation, push, merge, rebase or deployment performed.
+
+### Pending / limitations
+
+Browser setup failed (`Browser is not available: iab`); troubleshooting followed,
+discovery `[]`. No rendered screenshot, console check, desktop/narrow comparison,
+actual keyboard/assistive-technology check, 200% zoom or crop/alpha acceptance.
+`apps/ui/design-qa.md` remains explicitly blocked for visual QA, not passed.
+Both supplied screenshots exist; no user image upload is needed. Generated Level 2
+artwork differs from exact source exports and is ~11.5 MB total; unchanged here.
+Original standalone brand mark remains unavailable; existing text wordmark retained.
+Tab counts are illustrative and disappear after a simulated status change.
+Closing all does not close real browsers; empty preview does not read real data.
+No real persistence, backend, Create/profile settings/tabs or desktop integration.
+
+### Resume here — STOP at Level 3
+
+Review the running local preview or restart with the command above. When browser
+access is available, perform the explicit checklist in `apps/ui/design-qa.md`.
+Any requested visual fixes remain Level 3 work. Next proposed level is Create
+profile UI, but do not execute it without a new explicit request.

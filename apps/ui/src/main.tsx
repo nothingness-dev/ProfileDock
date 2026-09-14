@@ -4,15 +4,25 @@ import { GearSix } from '@phosphor-icons/react/dist/csr/GearSix';
 import { Plus } from '@phosphor-icons/react/dist/csr/Plus';
 import { MagnifyingGlass } from '@phosphor-icons/react/dist/csr/MagnifyingGlass';
 import { X } from '@phosphor-icons/react/dist/csr/X';
+import { ProfileCard } from './ProfileCard';
+import { SessionDock } from './SessionDock';
+import { closeAllPreviewProfiles, createPreviewProfiles, filterProfiles, runningProfiles, setPreviewStatus } from './preview-model';
 import './tokens.css';
 import './styles.css';
+import './dashboard.css';
 
 function App() {
   const [query, setQuery] = useState('');
+  const [profiles, setProfiles] = useState(createPreviewProfiles);
+  const [emptyPreview, setEmptyPreview] = useState(false);
+  const collection = emptyPreview ? [] : profiles;
+  const visibleProfiles = filterProfiles(collection, query);
+  const running = runningProfiles(collection);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
+      if (document.querySelector('dialog[open]')) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         searchRef.current?.focus();
@@ -66,7 +76,7 @@ function App() {
                 placeholder="Find your space..."
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                aria-describedby="search-note"
+                aria-describedby="profile-count"
                 aria-keyshortcuts="Control+k Meta+k"
                 autoComplete="off"
                 spellCheck={false}
@@ -81,15 +91,37 @@ function App() {
               )}
               <kbd aria-hidden="true">Ctrl / ⌘ K</kbd>
             </div>
-            <p id="search-note" className="helper">Search preview · Filtering arrives with profile cards.</p>
+          </div>
+          <div className="preview-toolbar">
+            <p id="preview-note"><strong>UI preview</strong> · Illustrative profiles. Actions change memory only; reload resets them.</p>
+            <label className="empty-preview-toggle"><input type="checkbox" checked={emptyPreview} onChange={(event) => {
+              setEmptyPreview(event.target.checked);
+              setQuery('');
+            }} /> Empty collection preview</label>
+          </div>
+          <div className="collection-summary">
+            <p className="helper">Create profile, settings and tabs are unavailable.</p>
+            <p id="profile-count" role="status">{visibleProfiles.length} of {collection.length} profiles <span aria-hidden="true"> / </span> {running.length} running</p>
           </div>
         </section>
 
-        <section className="preview-placeholder" aria-labelledby="preview-title">
-          <span className="preview-label">Level 1 preview</span>
-          <h2 id="preview-title">Your spaces will take shape here.</h2>
-          <p>Profile cards are coming in the next level.<br />This preview does not display your profile collection.</p>
+        <section className="profile-grid" aria-label="Preview profiles" aria-describedby="preview-note">
+          {visibleProfiles.map((profile) => <ProfileCard key={profile.id} profile={profile} onStatusChange={(id, status) => {
+            setProfiles((current) => setPreviewStatus(current, id, status));
+          }} />)}
         </section>
+        {collection.length === 0 ? <section className="preview-placeholder" aria-labelledby="empty-title">
+          <h2 id="empty-title">No profiles in this example collection.</h2>
+          <p>This is an intentionally empty UI preview, not your saved collection.<br />Turn off Empty collection preview to return to the examples.</p>
+        </section> : visibleProfiles.length === 0 && <section className="preview-placeholder" aria-labelledby="no-results-title">
+          <h2 id="no-results-title">No profiles match your search.</h2>
+          <p>Try a different profile name or clear your search.</p>
+          <button className="secondary-button" onClick={() => { setQuery(''); searchRef.current?.focus(); }}>Clear search</button>
+        </section>}
+        <footer className="dashboard-footer">
+          <p>Local UI preview · Nothing is saved</p>
+          <SessionDock running={running} onCloseAll={() => setProfiles(closeAllPreviewProfiles)} />
+        </footer>
       </main>
     </>
   );
